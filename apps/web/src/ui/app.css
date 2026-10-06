@@ -1,0 +1,163 @@
+@layer tokens, base, layout, components;
+
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+    --efs-color-canvas: #ffffff;
+    --efs-color-surface: #f4f5f7;
+    --efs-color-text: #16181d;
+    --efs-color-muted: #4b5160;
+    --efs-color-border: #c9ced8;
+    --efs-color-accent: #1f4fd1;
+    --efs-color-focus: #1f4fd1;
+    --efs-font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+    --efs-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --efs-space-1: 0.25rem;
+    --efs-space-2: 0.5rem;
+    --efs-space-3: 1rem;
+    --efs-space-4: 1.5rem;
+    --efs-radius: 0.5rem;
+    --efs-target-min: 2.75rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --efs-color-canvas: #111318;
+      --efs-color-surface: #1b1e25;
+      --efs-color-text: #eceef2;
+      --efs-color-muted: #aeb4c2;
+      --efs-color-border: #3a404d;
+      --efs-color-accent: #8fb0ff;
+      --efs-color-focus: #8fb0ff;
+    }
+  }
+}
+
+@layer base {
+  html {
+    background: var(--efs-color-canvas);
+    color: var(--efs-color-text);
+    font-family: var(--efs-font-body);
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  code {
+    font-family: var(--efs-font-mono);
+    overflow-wrap: anywhere;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--efs-color-focus);
+    outline-offset: 2px;
+  }
+}
+
+@layer layout {
+  efs-viewer-frame {
+    display: block;
+    container: efs-frame / inline-size;
+    min-block-size: 100dvh;
+    padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+    box-sizing: border-box;
+  }
+
+  [data-efs-unsupported] efs-viewer-frame {
+    display: none;
+  }
+
+  .efs-layout {
+    display: grid;
+    gap: var(--efs-space-4);
+    padding: var(--efs-space-3);
+    max-inline-size: 80rem;
+    margin-inline: auto;
+  }
+
+  @container efs-frame (min-width: 60rem) {
+    .efs-layout {
+      grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+      align-items: start;
+    }
+  }
+}
+
+@layer components {
+  .efs-skip {
+    position: absolute;
+    inset-inline-start: var(--efs-space-2);
+    inset-block-start: var(--efs-space-2);
+    padding: var(--efs-space-2) var(--efs-space-3);
+    background: var(--efs-color-canvas);
+    color: var(--efs-color-accent);
+    border-radius: var(--efs-radius);
+    transform: translateY(-200%);
+
+    &:focus-visible {
+      transform: none;
+    }
+  }
+
+  .efs-bar {
+    display: flex;
+    align-items: center;
+    min-block-size: var(--efs-target-min);
+    padding-inline: var(--efs-space-3);
+    border-block-end: 1px solid var(--efs-color-border);
+  }
+
+  .efs-wordmark {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+
+  #efs-main:focus {
+    outline: none;
+  }
+
+  #efs-main:focus-visible {
+    outline: 3px solid var(--efs-color-focus);
+  }
+
+  .efs-diagnostics {
+    background: var(--efs-color-surface);
+    border: 1px solid var(--efs-color-border);
+    border-radius: var(--efs-radius);
+    padding-inline: var(--efs-space-3);
+
+    /* Keep display: list-item so the native disclosure marker stays visible. */
+    & > summary {
+      min-block-size: var(--efs-target-min);
+      padding-block: 0.625rem;
+      box-sizing: border-box;
+      cursor: pointer;
+    }
+
+    & dt {
+      font-weight: 600;
+      margin-block-start: var(--efs-space-2);
+    }
+
+    & dd {
+      margin-inline-start: 0;
+      color: var(--efs-color-muted);
+    }
+  }
+
+  .efs-unsupported {
+    padding: var(--efs-space-3);
+    max-inline-size: 40rem;
+  }
+
+  @media (forced-colors: active) {
+    .efs-diagnostics {
+      border-color: CanvasText;
+    }
+  }
+}

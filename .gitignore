@@ -1,0 +1,8 @@
+node_modules/
+apps/web/dist/
+apps/web/dist-evidence/
+test-results/
+playwright-report/
+.efs-dev/
+*.log
+.DS_Store

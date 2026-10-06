@@ -1,0 +1,18 @@
+{
+  "frame.skipLink": "Skip to main content",
+  "frame.title": "EFS web client",
+  "frame.intro": "This build is the client foundation. It cannot open EFS links yet.",
+  "frame.route.none": "No link was requested.",
+  "frame.route.label": "Requested link (not yet supported):",
+  "frame.route.truncated": "The link was shortened for display.",
+  "diag.summary": "Diagnostics",
+  "diag.release": "Release manifest",
+  "diag.release.loading": "Loading…",
+  "diag.release.unavailable": "The release manifest could not be read.",
+  "diag.release.digestLabel": "SHA-256 of release.json as served:",
+  "diag.release.caveat": "A page reporting its own digest does not prove it is genuine. Compare it with a digest you obtained independently.",
+  "diag.profile": "Browser profile",
+  "diag.profile.value": ".input {$count :number}\n.match $count\none {{Guest Reader supported ({$count} feature checked)}}\n* {{Guest Reader supported ({$count} features checked)}}",
+  "diag.language": "Language",
+  "diag.commit": "Source commit"
+}

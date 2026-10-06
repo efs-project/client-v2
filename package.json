@@ -1,0 +1,43 @@
+{
+  "name": "client-v2",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@12.6.0",
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.21.0",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.6.0",
+      "onFail": "download"
+    }
+  },
+  "scripts": {
+    "bootstrap": "playwright install chromium firefox webkit",
+    "check": "biome ci . && tsc -p apps/web && tsc -p tools && node tools/build/check-messages.ts && vitest run",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p apps/web && tsc -p tools",
+    "test": "vitest run",
+    "messages": "node tools/build/check-messages.ts --write",
+    "build": "node tools/build/check-runtime.ts && node tools/build/check-messages.ts && vite build apps/web && node tools/build/postbuild.ts",
+    "build:repro": "node tools/build/repro.ts",
+    "test:e2e": "playwright test",
+    "preview:static": "node tools/serve/static-serve.ts --dir apps/web/dist"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@biomejs/biome": "2.5.14",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.6",
+    "acorn": "8.15.0",
+    "messageformat": "4.0.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.2"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "@efs-client/tools",
+  "private": true,
+  "type": "module",
+  "license": "MIT"
+}

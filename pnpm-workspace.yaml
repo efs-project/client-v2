@@ -1,0 +1,10 @@
+packages:
+  - apps/web
+  - tools
+
+# Supply-chain policy (pnpm 11+ settings live here, not in .npmrc).
+# No dependency may run install scripts unless listed here with a reviewed reason.
+allowBuilds: {}
+strictDepBuilds: true
+blockExoticSubdeps: true
+minimumReleaseAge: 1440
