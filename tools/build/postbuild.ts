@@ -1,11 +1,12 @@
 // Runs after `vite build`. Every check fails the build (plan §4.4).
-import { mkdirSync, readdirSync, readFileSync, renameSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { checkBootProbe } from './boot-probe.ts';
 import { checkGraph, crossCheckSourceMaps } from './check-graph.ts';
 import { writeLicenses } from './licenses.ts';
 import { DIST, EVIDENCE } from './paths.ts';
 import { writeReleaseManifest } from './release-manifest.ts';
 import { scanLeaks } from './scan-leaks.ts';
+import { moveSourceMaps } from './source-maps.ts';
 
 function fail(step: string, errors: string[]): void {
   if (errors.length === 0) return;
@@ -17,11 +18,7 @@ fail('source-map cross-check', crossCheckSourceMaps());
 fail('classic boot probe', checkBootProbe(readFileSync(`${DIST}boot-probe.js`, 'utf8')));
 
 // Source maps are release evidence, not deployed files.
-mkdirSync(`${EVIDENCE}sourcemaps/assets`, { recursive: true });
-for (const file of readdirSync(`${DIST}assets`)) {
-  if (file.endsWith('.map'))
-    renameSync(`${DIST}assets/${file}`, `${EVIDENCE}sourcemaps/assets/${file}`);
-}
+moveSourceMaps(DIST, EVIDENCE);
 
 const graph = checkGraph();
 fail('check-graph', graph.errors);
