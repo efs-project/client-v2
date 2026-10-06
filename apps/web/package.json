@@ -1,0 +1,10 @@
+{
+  "name": "@efs-client/web",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "messageformat": "4.0.0",
+    "signal-polyfill": "0.2.2"
+  }
+}

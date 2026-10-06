@@ -1,0 +1,32 @@
+{
+  "schema": "efs-web-guidance-lock/0-experimental",
+  "note": "Guidance is contributor evidence, never runtime input. Nothing here is bundled.",
+  "sources": [
+    {
+      "id": "google-modern-web-guidance",
+      "repository": "https://github.com/GoogleChrome/modern-web-guidance",
+      "commit": "460e5536b8e61034d83ff4af24bb0bf1112d2cb0",
+      "gitTree": "7f5eb58ac4e6085649f8072f5876901986420689",
+      "package": "modern-web-guidance@0.0.184",
+      "license": "Apache-2.0 (code); guides are CC-BY-4.0 per the repository",
+      "use": "Consult the guides under skills/modern-web-guidance/guides/ at this commit. The package defaults to Baseline Widely Available; EFS profile decisions override it."
+    },
+    {
+      "id": "paul-irish-modern-css",
+      "repository": "https://github.com/paulirish/modern-css",
+      "commit": "b91fbe2",
+      "license": "no redistribution license detected: link only, do not vendor",
+      "use": "Reference only."
+    },
+    {
+      "id": "web-features",
+      "package": "web-features@3.40.0",
+      "license": "Apache-2.0",
+      "use": "Baseline/support data used to derive the browser floor in feature-policy.md."
+    }
+  ],
+  "webAwesome": {
+    "status": "not installed in C0",
+    "rule": "When @awesome.me/webawesome is added (C3), load both release-matched skills from the installed package: dist/skills/webawesome and dist/skills/webawesome-design. Never a floating copy."
+  }
+}

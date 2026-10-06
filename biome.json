@@ -1,0 +1,137 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**", "!pnpm-lock.yaml", "!**/*.json.d.ts"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noImportCycles": "error",
+        "noDocumentCookie": "error"
+      },
+      "security": {
+        "noGlobalEval": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/**", "!apps/web/src/**/*.test.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "error"
+          },
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "lit": "Lit is lazy-slice only (plan \u00a74.3); not allowed on the guest path in C0.",
+                  "@lit-labs/signals": "Lit bridge is lazy-slice only (plan \u00a74.3).",
+                  "@awesome.me/webawesome": "Web Awesome is imported only by ui/wa/ (C3).",
+                  "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "@efs-client/tools": "Node tooling must never enter the browser bundle.",
+                  "vitest": "Test tooling must never enter the browser bundle.",
+                  "@playwright/test": "Test tooling must never enter the browser bundle.",
+                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm)."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "@efs/sdk/node",
+                      "@efs/sdk/node/**",
+                      "@efs/sdk/testing",
+                      "@efs/sdk/testing/**"
+                    ],
+                    "message": "Node/test-only SDK surfaces are banned in the browser app."
+                  },
+                  {
+                    "group": ["**/tools/**", "**/tests/**"],
+                    "message": "apps/web/src must not import tools or tests."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/state/signals.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "lit": "Lit is lazy-slice only (plan \u00a74.3); not allowed on the guest path in C0.",
+                  "@lit-labs/signals": "Lit bridge is lazy-slice only (plan \u00a74.3).",
+                  "@awesome.me/webawesome": "Web Awesome is imported only by ui/wa/ (C3).",
+                  "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "@efs-client/tools": "Node tooling must never enter the browser bundle.",
+                  "vitest": "Test tooling must never enter the browser bundle.",
+                  "@playwright/test": "Test tooling must never enter the browser bundle."
+                },
+                "patterns": [
+                  {
+                    "group": [
+                      "@efs/sdk/node",
+                      "@efs/sdk/node/**",
+                      "@efs/sdk/testing",
+                      "@efs/sdk/testing/**"
+                    ],
+                    "message": "Node/test-only SDK surfaces are banned in the browser app."
+                  },
+                  {
+                    "group": ["**/tools/**", "**/tests/**"],
+                    "message": "apps/web/src must not import tools or tests."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/public/boot-probe.js"],
+      "javascript": {
+        "formatter": { "trailingCommas": "none" }
+      },
+      "linter": {
+        "rules": {
+          "style": {
+            "useTemplate": "off"
+          },
+          "complexity": {
+            "useArrowFunction": "off",
+            "useOptionalChain": "off"
+          },
+          "correctness": {
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    }
+  ]
+}
