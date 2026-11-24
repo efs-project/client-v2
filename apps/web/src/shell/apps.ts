@@ -3,10 +3,12 @@
 // shell disposes. This is the seam that later grows into independently released modules; it is
 // deliberately not a plugin framework or service locator.
 
+import type { RealmRef } from '../boot/route.ts';
 import type { OwnerScope } from '../platform/scope.ts';
 import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import type { NetworkState } from './network-state.ts';
+import type { ReaderState } from './reader-state.ts';
 
 /** One pane in a layout: which view, and optionally its share of the width (0–1). */
 export interface PaneSpec {
@@ -26,13 +28,25 @@ export interface ViewDescriptor {
   create(scope: OwnerScope): HTMLElement;
 }
 
+/** Where the app is: its own UI route, or a realm link it is the handler for. */
+export type AppLocation =
+  | { readonly kind: 'app'; readonly rest: string }
+  /** `link` is the SDK's (object, revision, later path); parse it only with the SDK's parseLink. */
+  | { readonly kind: 'realm'; readonly realm: RealmRef; readonly link: string };
+
 /** What the shell gives an app. Nothing ambient: no globals, no wallet, no storage handle. */
 export interface AppHost {
   readonly translator: Translator;
   readonly network: ReadonlySignal<NetworkState>;
-  /** The app's own part of the route (after `#/<app>/`). */
-  readonly route: ReadonlySignal<string>;
+  /** The tab's SDK session. Read through it only when `verifiedEfs()` returns an instance. */
+  readonly reader: ReadonlySignal<ReaderState>;
+  /** Tries the session again (after an UNKNOWN pin or a failed open). */
+  retryReader(): void;
+  readonly location: ReadonlySignal<AppLocation>;
+  /** Goes to an app route `#/<app>/<rest>`. */
   navigate(rest: string, options?: { readonly replace?: boolean }): void;
+  /** Goes to a link (from the SDK's link()) in the current realm, or the default realm. */
+  openLink(link: string, options?: { readonly replace?: boolean }): void;
 }
 
 export interface AppMount {

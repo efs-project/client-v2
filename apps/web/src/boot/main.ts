@@ -13,7 +13,9 @@ import { DEFAULT_SETTINGS } from '../platform/settings/model.ts';
 import { openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
 import { createOsState } from '../shell/os-state.ts';
+import { createReaderSession } from '../shell/reader-state.ts';
 import type { EfsShell } from '../shell/shell.ts';
+import { computed } from '../state/signals.ts';
 import { AVAILABLE_LOCALES, loadTranslator, PSEUDO_LOCALES, SOURCE_LOCALE } from '../ui/i18n.ts';
 import { registerIconLibraries, watchIconSprite } from '../ui/wa/define.ts';
 import { parseRoute } from './route.ts';
@@ -93,8 +95,14 @@ async function boot(): Promise<void> {
     scope.dispose();
     return;
   }
+  // Opens the SDK (a lazy chunk) only when a usable network is configured.
+  const reader = createReaderSession(os.network, document.baseURI, scope, {
+    publisherLocations: computed(() => os.settings.get().content.publisherLocations),
+  });
+
   const shell = document.createElement('efs-shell') as EfsShell;
   shell.os = os;
+  shell.reader = reader;
   shell.translator = translator;
   shell.apps = APPS;
   document.getElementById('efs-boot')?.replaceWith(shell);

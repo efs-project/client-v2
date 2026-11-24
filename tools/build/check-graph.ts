@@ -8,6 +8,11 @@ import type { Provenance } from './provenance.ts';
 // Lit, Signals and Web Awesome render the shell, so they are startup code (slice A, owner ruling
 // 2026-11-24: Web Awesome is the one component library). Ethereum libraries never are.
 const FORBIDDEN_PACKAGES = [/^viem$/, /^ethers$/, /^ox$/, /^abitype$/];
+/**
+ * The SDK may appear in startup only as its link and route grammar (@efs/sdk/links: pure string
+ * code). Its core (client, chain and byte I/O, viem/ox internals) loads lazily with the reader.
+ */
+const STARTUP_SDK_MODULES = /\/dist\/(links\/index|names\/links|core\/errors)\.js$/;
 // First-party paths that must only ever load after an explicit action (plan §1.2).
 const FORBIDDEN_PATHS = [
   /\/apps\/web\/src\/features\/[^/]+\/write\//,
@@ -71,10 +76,28 @@ export function checkGraph(): GraphReport {
       if (pkg && FORBIDDEN_PACKAGES.some((re) => re.test(pkg))) {
         errors.push(`startup chunk ${file} contains forbidden package ${pkg}`);
       }
+      if (pkg === '@efs/sdk' && !STARTUP_SDK_MODULES.test(id)) {
+        errors.push(`startup chunk ${file} contains SDK core module ${id}`);
+      }
       if (FORBIDDEN_PATHS.some((re) => re.test(id)))
         errors.push(`startup chunk ${file} contains ${id}`);
       if (/^\0?node:/.test(id) || (!pkg && id.startsWith('/') && !id.startsWith(WEB))) {
         errors.push(`startup chunk ${file} contains out-of-app module ${id}`);
+      }
+    }
+  }
+
+  // An app's entry chunk may statically import only startup chunks. Measured in WebKit: once a
+  // lazy chunk with a preloaded dependency has failed, WebKit keeps the failure across reloads,
+  // so the shell's "Try again" (a reload) could never recover that app.
+  for (const chunk of provenance.chunks) {
+    const isAppEntry = chunk.modules.some((id) =>
+      /\/apps\/web\/src\/apps\/[^/]+\/entry\.ts$/.test(id),
+    );
+    if (!isAppEntry) continue;
+    for (const dep of chunk.imports) {
+      if (!startup.has(dep)) {
+        errors.push(`app entry ${chunk.fileName} statically imports non-startup chunk ${dep}`);
       }
     }
   }

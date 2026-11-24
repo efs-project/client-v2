@@ -4,11 +4,13 @@ The EFS v2 web client: a static, IPFS-hostable SPA that grows into a modular Web
 
 ## Status
 
-**C0 (foundation) + slice A (OS shell).** The repo builds, statically hosts, localizes and tests the OS shell: `<wa-page>` layout, the File Browser as its first app (placeholder panes), settings (appearance, per-network RPC and gateway lists, export/import), themes, CSP and Trusted Types. It does not yet read EFS, connect wallets or run a dev chain; those slices need a separate go-ahead. Design: `docs/design/shell.md`. The plan and slice definitions live in the EFS planning vault: `Reviews/2026-09-26-client-v2-initialization-plan/`.
+**C0 (foundation) + slice A (OS shell) + slice B (verified reads).** The repo builds, statically hosts, localizes and tests the OS shell: `<wa-page>` layout, the File Browser as its first app, settings (appearance, per-network RPC and gateway lists, export/import), themes, CSP and Trusted Types. Through the EFS SDK it pins the deployment and previews files opened by object and revision links (`#/r/<realm>/…`). It does not yet list folders, write, connect wallets or run a dev chain. Design: `docs/design/shell.md`, `docs/design/reads.md`. The plan and slice definitions live in the EFS planning vault: `Reviews/2026-09-26-client-v2-initialization-plan/`.
 
 ## Setup and commands
 
 Requires Node 24 (`.node-version`) and pnpm 12.6.0 (`packageManager`). Corepack 0.34 can't launch pnpm 12, so install it directly: `npm i -g pnpm@12.6.0`.
+
+The EFS SDK has no public release yet, so `vendor/` holds its packed tarball, pinned by integrity in the lockfile. `vendor/README.md` says where it came from and how to bump it.
 
 | Command | What it does |
 |---|---|
@@ -39,7 +41,7 @@ Evidence goes to `apps/web/dist-evidence/`.
 1. **Guest boot is wallet-free.** It reads only the settings record and the operator's `efs.config.json`, writes nothing to storage unless the user saves a setting, and contacts the network only through the selected RPC and gateways (today: nothing beyond its own static files). Don't import wallet or write code from anything `boot/main.ts` reaches. *(Changed in slice A from "storage-free and network-free apart from its own static files"; see `docs/design/shell.md`.)*
 2. **No Kernel singleton, no ambient authority.** Create things in an entry or composition step and pass them explicitly. Module evaluation must do no I/O; `tools/checks/source-rules.test.ts` enforces this.
 3. **Custom elements are registered only in `define.ts`** (`efs-*` names), imported only by entry modules (`boot/main.ts`, `apps/*/entry.ts`). Web Awesome's `wa-*` elements are registered by importing their modules in `ui/wa/define.ts`.
-4. **Protocol semantics belong to the EFS SDK.** Never decode records, compute IDs, walk pages or treat a wallet acknowledgement as success here. `viem` and `ethers` are banned in `apps/web`.
+4. **Protocol semantics belong to the EFS SDK.** Never decode records, compute IDs, walk pages, build or parse links, or treat a wallet acknowledgement as success here. `viem` and `ethers` are banned in `apps/web`. Only `session/reader.ts` creates an SDK instance, and the SDK core stays out of the startup set (reads load it lazily).
 5. **Signals come only through `src/state/signals.ts`.** Side effects run in `effect(scope, …)` owned by an `OwnerScope`.
 6. **Every visible string comes from `src/ui/messages/en.json`** (MF2, narrow contract). Data values render in `translate="no"` elements. Use logical CSS (safe-area insets are the one physical exception). Run `pnpm messages` after editing. MF2 wraps arguments in bidi isolates, so tests match names containing arguments by pattern, not exactly.
 7. **Accessibility is a requirement.** Use semantic HTML before ARIA, keep focus visible, target at least 24×24 px, and allow no horizontal scroll at 320 px. axe is a smoke test, not conformance.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
-import { booted, openSettings, serveConfig } from './support.ts';
+import { booted, openSettings, rpcDown, serveConfig, serveDeployment } from './support.ts';
 
 const indicator = (page: Page) => page.locator('efs-network-indicator');
 const rpcList = (page: Page) => page.locator('efs-endpoint-list').first();
@@ -55,16 +55,46 @@ test('appearance is saved, applied before first paint on reload, and follows the
   await expect(page.locator('html')).toHaveClass(/\bwa-light\b/);
 });
 
-test('RPC endpoints: add, validate, reorder, disable; the SDK-facing choice follows', async ({
+test('RPC endpoints: add, validate, reorder, disable; the SDK uses exactly that order', async ({
   page,
 }) => {
   await serveConfig(page);
+  await serveDeployment(page);
+  const rpc = await rpcDown(page);
+  const firstAfter = async (mark: number) => {
+    await expect.poll(() => rpc.length).toBeGreaterThan(mark);
+    return rpc[mark]?.origin;
+  };
+  /** The session has pinned (here: UNKNOWN) and no request is still in flight. */
+  const settled = async () => {
+    await expect(page.locator('efs-network-indicator wa-button')).toHaveAttribute(
+      'data-status',
+      'PINNED',
+    );
+    let last = -1;
+    await expect
+      .poll(
+        () => {
+          const same = rpc.length === last;
+          last = rpc.length;
+          return same;
+        },
+        { intervals: [250] },
+      )
+      .toBe(true);
+  };
   await page.goto('./');
   await booted(page);
+  // The SDK tries the operator's endpoint; nobody answers, so the header says so.
+  expect(await firstAfter(0)).toBe('https://rpc.example.net');
   await expect(indicator(page)).toContainText('Testnet');
-  await expect(indicator(page)).toContainText('Example RPC');
+  await expect(indicator(page)).toContainText('unreachable');
 
   await openSettings(page);
+  await expect(page.locator('[data-section="network"]')).toContainText(
+    "Couldn't check the EFS deployment",
+  );
+  await expect(page.locator('[data-section="network"]')).toContainText('RPC_UNAVAILABLE');
   await addEndpoint(page, 'http://rpc.example.org/');
   await expect(rpcList(page).getByRole('alert')).toContainText(
     'Plain http:// is only allowed for a node on this computer',
@@ -74,22 +104,28 @@ test('RPC endpoints: add, validate, reorder, disable; the SDK-facing choice foll
 
   await addEndpoint(page, 'http://127.0.0.1:8545', 'My node');
   await expect(rpcList(page).locator('li')).toHaveCount(2);
+  await settled();
+  let mark = rpc.length;
   await rpcList(page)
     .getByRole('button', { name: /Move\W+My node\W+up/ })
     .click();
-  await expect(indicator(page)).toContainText('My node');
+  // A new SDK instance, and its first request goes to the user's first endpoint.
+  expect(await firstAfter(mark)).toBe('http://127.0.0.1:8545');
 
   // The choice survives a reload.
+  await settled();
+  mark = rpc.length;
   await page.reload();
   await booted(page);
-  await expect(indicator(page)).toContainText('My node');
+  expect(await firstAfter(mark)).toBe('http://127.0.0.1:8545');
 
-  // With every endpoint off, the File Browser says so and links to the fix.
+  // With every endpoint off, the SDK is closed, and the File Browser says why and links to the fix.
   await openSettings(page);
   for (const name of ['My node', 'Example RPC']) {
     await rpcList(page).locator('wa-switch', { hasText: name }).click();
   }
   await expect(indicator(page)).toContainText('no endpoint');
+  mark = rpc.length;
   await page.keyboard.press('Escape');
   const main = page.getByRole('main');
   await expect(
@@ -97,6 +133,7 @@ test('RPC endpoints: add, validate, reorder, disable; the SDK-facing choice foll
   ).toBeVisible();
   await main.getByRole('button', { name: 'Open network settings' }).first().click();
   await expect(page.locator('[data-section="network"] h3')).toBeFocused();
+  expect(rpc.length).toBe(mark);
 });
 
 test('a change in one tab reaches the other; a stale save is refused, not merged', async ({
