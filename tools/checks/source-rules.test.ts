@@ -1,12 +1,29 @@
 // Module-purity and import-direction rules for apps/web/src (plan §1.4). Biome covers
 // package bans in the editor; this test covers what Biome can't express.
 import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { WEB } from '../build/paths.ts';
 
 const SRC = `${WEB}src/`;
-const ENTRIES = ['boot/main.ts', 'features/files/write/entry.ts'];
+/** Entry modules: the only importers of registration (define.ts) modules. */
+const isEntry = (path: string) =>
+  path === 'boot/main.ts' ||
+  /^apps\/[^/]+\/entry\.ts$/.test(path) ||
+  /^features\/[^/]+\/write\/entry\.ts$/.test(path);
+/**
+ * Not evaluated here: boot/main.ts boots on evaluation, and ui/wa/define.ts defines Web
+ * Awesome's own wa-* elements. Both are checked in the browser (tests/e2e/boot.spec.ts lists
+ * every registered element).
+ */
+const NOT_EVALUATED = new Set(['boot/main.ts', 'ui/wa/define.ts']);
+/**
+ * Third-party runtime packages, loaded before the traps go in: they are allowed to probe the
+ * environment when they load (Lit reads `document`); the rules below are about our code.
+ */
+const THIRD_PARTY = ['lit', '@lit-labs/signals', 'signal-polyfill', 'messageformat'];
 
 function sources(dir = SRC): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -37,7 +54,7 @@ describe('import rules', () => {
         const target = resolve(dirname(file), spec);
         expect(target.startsWith(SRC), `${spec} escapes apps/web/src`).toBe(true);
         if (isRegistration(target)) {
-          expect(ENTRIES, `${rel(file)} imports a registration module`).toContain(rel(file));
+          expect(isEntry(rel(file)), `${rel(file)} imports a registration module`).toBe(true);
         }
       }
     });
@@ -54,6 +71,10 @@ const TRAPPED = [
   'document',
   'XMLHttpRequest',
   'WebSocket',
+  'BroadcastChannel',
+  'matchMedia',
+  'location',
+  'history',
 ];
 const saved = new Map<string, PropertyDescriptor | undefined>();
 const violations: string[] = [];
@@ -110,7 +131,12 @@ afterEach(() => {
 });
 
 describe('module evaluation does no I/O', () => {
-  for (const file of sources().filter((f) => !ENTRIES.includes(rel(f)))) {
+  beforeAll(async () => {
+    // Resolved from the app's own manifest, so these are the instances its modules will get.
+    const fromApp = createRequire(`${WEB}package.json`);
+    for (const pkg of THIRD_PARTY) await import(pathToFileURL(fromApp.resolve(pkg)).href);
+  });
+  for (const file of sources().filter((f) => !NOT_EVALUATED.has(rel(f)))) {
     it(rel(file), async () => {
       violations.length = 0;
       defined.length = 0;

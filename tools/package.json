@@ -2,5 +2,9 @@
   "name": "@efs-client/tools",
   "private": true,
   "type": "module",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@awesome.me/webawesome": "3.15.0",
+    "@fortawesome/fontawesome-free": "7.3.1"
+  }
 }

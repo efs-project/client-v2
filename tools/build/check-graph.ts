@@ -5,25 +5,20 @@ import { brotliCompressSync } from 'node:zlib';
 import { DIST, EVIDENCE, packageOf, WEB } from './paths.ts';
 import type { Provenance } from './provenance.ts';
 
-const FORBIDDEN_PACKAGES = [
-  /^lit$/,
-  /^lit-html$/,
-  /^lit-element$/,
-  /^@lit\//,
-  /^@lit-labs\//,
-  /^@awesome\.me\//,
-  /^viem$/,
-  /^ethers$/,
-  /^ox$/,
-  /^abitype$/,
-];
+// Lit, Signals and Web Awesome render the shell, so they are startup code (slice A, owner ruling
+// 2026-11-24: Web Awesome is the one component library). Ethereum libraries never are.
+const FORBIDDEN_PACKAGES = [/^viem$/, /^ethers$/, /^ox$/, /^abitype$/];
 // First-party paths that must only ever load after an explicit action (plan §1.2).
 const FORBIDDEN_PATHS = [
   /\/apps\/web\/src\/features\/[^/]+\/write\//,
   /\/apps\/web\/src\/shell\/action-review\//,
   /\/apps\/web\/src\/platform\/(storage|wallet)\//,
 ];
-const STARTUP_BUDGET_BYTES = 250 * 1024; // provisional, mvp-and-acceptance; recorded, not gated
+// Brotli bytes for everything the first paint needs: HTML, startup scripts and styles, and the icon
+// sprite the shell renders immediately. Gated since slice A (provisional value from the plan, §4.4).
+const STARTUP_BUDGET_BYTES = 250 * 1024;
+/** Same-origin files the first render fetches that are not referenced from index.html. */
+const FIRST_RENDER_ASSETS = ['icons/efs-icons.svg'];
 
 export interface GraphReport {
   startupFiles: string[];
@@ -97,19 +92,28 @@ export function checkGraph(): GraphReport {
       errors.push(`non-literal import() in ${chunk.fileName}`);
   }
 
-  const startupFiles = ['index.html', ...refs.scripts, ...refs.styles, ...refs.preloads]
+  const startupFiles = [
+    'index.html',
+    ...refs.scripts,
+    ...refs.styles,
+    ...refs.preloads,
+    ...startup,
+    ...FIRST_RENDER_ASSETS,
+  ]
     .filter((f, i, all) => all.indexOf(f) === i)
     .sort();
-  const startupBrotliBytes = startupFiles.reduce(
-    (sum, f) => sum + brotliCompressSync(readFileSync(`${DIST}${f}`)).length,
-    0,
+  const perFile = Object.fromEntries(
+    startupFiles.map((f) => [f, brotliCompressSync(readFileSync(`${DIST}${f}`)).length]),
   );
+  const startupBrotliBytes = Object.values(perFile).reduce((sum, n) => sum + n, 0);
   writeFileSync(
     `${EVIDENCE}startup.json`,
-    `${JSON.stringify({ startupFiles, startupBrotliBytes, budgetBytes: STARTUP_BUDGET_BYTES }, null, 2)}\n`,
+    `${JSON.stringify({ startupFiles: perFile, startupBrotliBytes, budgetBytes: STARTUP_BUDGET_BYTES }, null, 2)}\n`,
   );
   if (startupBrotliBytes > STARTUP_BUDGET_BYTES) {
-    console.warn(`warning: startup set ${startupBrotliBytes} B exceeds provisional budget`);
+    errors.push(
+      `startup set is ${startupBrotliBytes} B (brotli), over the ${STARTUP_BUDGET_BYTES} B budget`,
+    );
   }
   return { startupFiles, startupBrotliBytes, errors };
 }

@@ -1,6 +1,6 @@
 import { MessageFormat } from 'messageformat';
 import { type Direction, directionOf } from '../platform/locale.ts';
-import en from './messages/en.json';
+import en from './messages/en.json' with { type: 'json' };
 
 export type MessageId = keyof typeof en;
 export type Catalog = Readonly<Record<MessageId, string>>;

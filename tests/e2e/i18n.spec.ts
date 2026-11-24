@@ -1,7 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
-import { booted, openDiagnostics } from './support.ts';
+import { booted, openAbout } from './support.ts';
 
-/** Visible text outside data values (translate="no") and the static no-JS fallback. */
 /**
  * WebKit maps pseudo-locale tags to real ones (en-XA -> en-US, ar-XB -> ar), so there the
  * test advertises the tag through navigator.languages, as a browser configured for it would.
@@ -14,12 +13,13 @@ async function requestLocale(page: Page, browserName: string, tag: string): Prom
   }, tag);
 }
 
+/** Visible light-DOM text in the shell, outside data values (translate="no"). */
 function visibleTexts(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
-    const frame = document.querySelector('efs-viewer-frame');
-    if (!frame) return out;
-    const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT);
+    const shell = document.querySelector('efs-shell');
+    if (!shell) return out;
+    const walker = document.createTreeWalker(shell, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const parent = node.parentElement;
       if (!parent || parent.closest('[translate="no"]')) continue;
@@ -44,10 +44,10 @@ test.describe('en-XA pseudo-locale', () => {
     await requestLocale(page, browserName, 'en-XA');
     await page.goto('./');
     await booted(page);
-    await openDiagnostics(page);
+    await openAbout(page);
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
     const texts = await visibleTexts(page);
-    expect(texts.length).toBeGreaterThan(5);
+    expect(texts.length).toBeGreaterThan(15);
     expect(texts.filter((t) => !t.includes('⟦'))).toEqual([]);
   });
 });
@@ -59,13 +59,14 @@ test.describe('ar-XB pseudo-locale', () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto('./');
     await booted(page);
-    await openDiagnostics(page);
     await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+    const main = await page.getByRole('main').boundingBox();
+    const nav = await page.getByRole('navigation', { name: /./ }).first().boundingBox();
+    if (!main || !nav) throw new Error('layout boxes missing');
+    // Navigation sits on the inline-start side, which is the right in RTL.
+    expect(nav.x).toBeGreaterThanOrEqual(main.x + main.width - 1);
+    await openAbout(page);
     const texts = await visibleTexts(page);
     expect(texts.filter((t) => !t.includes('‮'))).toEqual([]);
-    const main = await page.locator('main').boundingBox();
-    const aside = await page.locator('aside').boundingBox();
-    if (!main || !aside) throw new Error('layout boxes missing');
-    expect(aside.x + aside.width).toBeLessThanOrEqual(main.x + 1);
   });
 });

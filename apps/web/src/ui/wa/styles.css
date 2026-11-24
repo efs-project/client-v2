@@ -1,0 +1,6 @@
+/* Web Awesome's stylesheets (theme tokens + palette, native element styles, layout utilities),
+   then the EFS theme layer. Imported only through ui/wa/define.ts. */
+@import "@awesome.me/webawesome/dist/styles/themes/default.css";
+@import "@awesome.me/webawesome/dist/styles/native.css";
+@import "@awesome.me/webawesome/dist/styles/utilities.css";
+@import "./efs-themes.css";

@@ -10,12 +10,23 @@
     <script type="module" src="./src/boot/main.ts"></script>
   </head>
   <body>
+    <!-- Native boot frame: painted before any module or component loads; replaced by the shell. -->
+    <div id="efs-boot" class="efs-boot" role="status" aria-live="polite">
+      <span class="efs-boot-mark" translate="no">EFS</span>
+      <span class="efs-boot-text">Loading…</span>
+    </div>
+    <!-- Static fallback: needs no JavaScript module, component or stylesheet to be readable. -->
     <div id="efs-unsupported" class="efs-unsupported" lang="en" dir="ltr" hidden>
       <h1>EFS</h1>
-      <p>
+      <p class="efs-unsupported-browser">
         This browser can't run the EFS web client. It needs a recent version of Chrome, Edge,
         Firefox or Safari.
       </p>
+      <p class="efs-unsupported-load">
+        Part of the EFS web client didn't load. Your connection, a browser extension or the site
+        hosting it may have blocked it.
+      </p>
+      <p><a class="efs-reload" href="./">Reload</a></p>
     </div>
     <noscript><p>The EFS web client needs JavaScript.</p></noscript>
   </body>

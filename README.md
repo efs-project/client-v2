@@ -2,7 +2,9 @@
 
 The web client for the [Ethereum File System](https://github.com/efs-project) v2: a static, IPFS-hostable app that opens EFS links without a wallet or backend, and grows into a modular, user-owned Web OS.
 
-**Status: foundation (C0).** This builds and tests an empty, accessible, localized frame. It can't read or write EFS yet.
+**Status: OS shell (slice A).** The shell runs with its first app, the File Browser (placeholder panes), plus settings for appearance and RPC/gateway endpoints, cypher and paper themes that follow the system's light/dark setting, and mobile layout. It can't read or write EFS yet.
+
+To point a deployment at a network, replace `efs.config.json` beside `index.html` (format `efs-config/1`, see `apps/web/src/platform/settings/model.ts`). Users can then reorder, disable or add their own RPC endpoints and gateways in Settings.
 
 ## Quick start
 

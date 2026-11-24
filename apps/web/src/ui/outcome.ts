@@ -1,0 +1,89 @@
+// How qualified results look to a person. The SDK's status unions are open (new members may
+// arrive), so every lookup has an explicit "unrecognized" fallback that is never rendered as
+// success, as empty or as absent: silent absence is the bug class this file exists to prevent.
+
+import type { MessageId } from './i18n.ts';
+
+export type Tone = 'success' | 'neutral' | 'warning' | 'danger';
+
+export interface OutcomeView {
+  readonly tone: Tone;
+  readonly message: MessageId;
+  /** Shown beside the message for an Inspector; the raw code is never translated. */
+  readonly code: string;
+  /** Whether a retry button makes sense, and of which kind. */
+  readonly retry?: 'transient' | 'after-reconcile' | 'after-replan';
+}
+
+type Table = Readonly<Record<string, Omit<OutcomeView, 'code'>>>;
+
+const UNRECOGNIZED: Omit<OutcomeView, 'code'> = {
+  tone: 'warning',
+  message: 'outcome.unrecognized',
+};
+
+/** Read results: a point lookup or a resolve. */
+const READ: Table = {
+  PRESENT: { tone: 'success', message: 'outcome.read.present' },
+  ABSENT_PROVEN: { tone: 'neutral', message: 'outcome.read.absentProven' },
+  MASKED: { tone: 'neutral', message: 'outcome.read.masked' },
+  CONFLICT: { tone: 'warning', message: 'outcome.read.conflict' },
+  UNKNOWN: { tone: 'warning', message: 'outcome.read.unknown', retry: 'transient' },
+  INVALID: { tone: 'danger', message: 'outcome.read.invalid' },
+  BASIS_STALE: { tone: 'warning', message: 'outcome.read.basisStale', retry: 'transient' },
+  UNSUPPORTED: { tone: 'neutral', message: 'outcome.read.unsupported' },
+  LIMIT_EXCEEDED: { tone: 'warning', message: 'outcome.read.limitExceeded' },
+};
+
+/** Listing coverage: how much of a collection the page proves. */
+const COVERAGE: Table = {
+  COMPLETE: { tone: 'success', message: 'outcome.coverage.complete' },
+  PARTIAL: { tone: 'neutral', message: 'outcome.coverage.partial' },
+  UNKNOWN: { tone: 'warning', message: 'outcome.coverage.unknown', retry: 'transient' },
+};
+
+/** Byte reads: whether the bytes shown are the committed bytes. */
+const BYTES: Table = {
+  VERIFIED: { tone: 'success', message: 'outcome.bytes.verified' },
+  UNVERIFIED_RANGE: { tone: 'warning', message: 'outcome.bytes.unverifiedRange' },
+  MISMATCH: { tone: 'danger', message: 'outcome.bytes.mismatch' },
+  UNAVAILABLE: { tone: 'warning', message: 'outcome.bytes.unavailable', retry: 'transient' },
+  UNSUPPORTED_LOCATOR: { tone: 'neutral', message: 'outcome.bytes.unsupportedLocator' },
+  POLICY_BLOCKED: { tone: 'neutral', message: 'outcome.bytes.policyBlocked' },
+  UNKNOWN: { tone: 'warning', message: 'outcome.bytes.unknown', retry: 'transient' },
+};
+
+/** Write submission and reconciliation. Only COMMITTED is ever shown as done. */
+const WRITE: Table = {
+  SUBMITTED: { tone: 'neutral', message: 'outcome.write.submitted' },
+  NOT_SENT: { tone: 'neutral', message: 'outcome.write.notSent' },
+  AMBIGUOUS: { tone: 'warning', message: 'outcome.write.ambiguous', retry: 'after-reconcile' },
+  STALE: { tone: 'warning', message: 'outcome.write.stale', retry: 'after-replan' },
+  BUSY: { tone: 'neutral', message: 'outcome.write.busy' },
+  COMMITTED: { tone: 'success', message: 'outcome.write.committed' },
+  NOT_COMMITTED_PROVEN: { tone: 'neutral', message: 'outcome.write.notCommitted' },
+  UNKNOWN: { tone: 'warning', message: 'outcome.write.unknown', retry: 'after-reconcile' },
+};
+
+/** Deployment pin: is this the contract set the configuration says it is? */
+const PIN: Table = {
+  VERIFIED: { tone: 'success', message: 'outcome.pin.verified' },
+  MISMATCH: { tone: 'danger', message: 'outcome.pin.mismatch' },
+  UNKNOWN: { tone: 'warning', message: 'outcome.pin.unknown', retry: 'transient' },
+};
+
+const TABLES = { read: READ, coverage: COVERAGE, bytes: BYTES, write: WRITE, pin: PIN } as const;
+export type OutcomeKind = keyof typeof TABLES;
+
+export function describeOutcome(kind: OutcomeKind, code: string): OutcomeView {
+  const known = Object.hasOwn(TABLES[kind], code) ? TABLES[kind][code] : undefined;
+  return { ...(known ?? UNRECOGNIZED), code };
+}
+
+/** Every message id the tables can produce, so the catalog check can prove none is missing. */
+export function outcomeMessageIds(): MessageId[] {
+  const ids = new Set<MessageId>([UNRECOGNIZED.message]);
+  for (const table of Object.values(TABLES))
+    for (const view of Object.values(table)) ids.add(view.message);
+  return [...ids];
+}
