@@ -1,0 +1,70 @@
+/* EFS themes: the project's one layer of --wa-* overrides (Web Awesome design guidance).
+   Selected by .efs-theme-<id> on <html> (set by platform/appearance.ts and the boot probe).
+   Brand hue comes from Web Awesome's own .wa-brand-<hue> remapping; only surfaces, text, type
+   and shape are overridden here. Text/surface pairs target WCAG 2.2 AA (≥ 4.5:1 body text). */
+
+@layer wa-theme-overrides {
+  /* ---------- cypher (default): terminal-born, sharp, monospace accents ---------- */
+  .efs-theme-cypher,
+  .efs-theme-cypher .wa-light,
+  .efs-theme-cypher .wa-dark {
+    --wa-font-family-heading:
+      ui-monospace, "SFMono-Regular", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+    --wa-font-family-code:
+      ui-monospace, "SFMono-Regular", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+    --wa-font-weight-heading: 600;
+    --wa-border-radius-scale: 0.25;
+    --wa-panel-border-radius: var(--wa-border-radius-s);
+    --wa-focus-ring-width: 0.1875rem;
+  }
+
+  /* Light: ink on warm paper. */
+  .efs-theme-cypher.wa-light,
+  .efs-theme-cypher .wa-light,
+  .efs-theme-cypher.wa-dark .wa-invert {
+    --wa-color-surface-default: #f7f6f0;
+    --wa-color-surface-raised: #ffffff;
+    --wa-color-surface-lowered: #ecebe3;
+    --wa-color-surface-border: #cfd3c8;
+    --wa-color-text-normal: #141a15;
+    --wa-color-text-quiet: #47524a;
+    --wa-color-text-link: #0b6b37;
+  }
+
+  /* Dark: phosphor on near-black. */
+  .efs-theme-cypher.wa-dark,
+  .efs-theme-cypher .wa-dark,
+  .efs-theme-cypher.wa-light .wa-invert {
+    --wa-color-surface-default: #0a0e0b;
+    --wa-color-surface-raised: #111712;
+    --wa-color-surface-lowered: #060907;
+    --wa-color-surface-border: #26332a;
+    --wa-color-text-normal: #d6e4d9;
+    --wa-color-text-quiet: #8ea597;
+    --wa-color-text-link: #5fe39a;
+  }
+
+  /* ---------- paper: a quiet reading theme ---------- */
+  .efs-theme-paper,
+  .efs-theme-paper .wa-light,
+  .efs-theme-paper .wa-dark {
+    --wa-font-family-longform: ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --wa-border-radius-scale: 0.75;
+  }
+
+  .efs-theme-paper.wa-dark,
+  .efs-theme-paper .wa-dark {
+    --wa-color-surface-default: #16171b;
+    --wa-color-surface-raised: #1d1f24;
+    --wa-color-surface-lowered: #101114;
+    --wa-color-surface-border: #30333a;
+  }
+}
+
+/* Forced colors: let the user's system colors win; keep focus and borders visible. */
+@media (forced-colors: active) {
+  :root {
+    --wa-color-surface-border: CanvasText;
+    --wa-color-focus: Highlight;
+  }
+}

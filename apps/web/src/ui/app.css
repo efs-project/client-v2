@@ -1,163 +1,245 @@
-@layer tokens, base, layout, components;
+/* App styles on top of Web Awesome (see ui/wa/styles.css). Unlayered, so they apply after
+   Web Awesome's layers; they use --wa-* tokens only, never literal colors. */
 
-@layer tokens {
-  :root {
-    color-scheme: light dark;
-    --efs-color-canvas: #ffffff;
-    --efs-color-surface: #f4f5f7;
-    --efs-color-text: #16181d;
-    --efs-color-muted: #4b5160;
-    --efs-color-border: #c9ced8;
-    --efs-color-accent: #1f4fd1;
-    --efs-color-focus: #1f4fd1;
-    --efs-font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
-    --efs-font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    --efs-space-1: 0.25rem;
-    --efs-space-2: 0.5rem;
-    --efs-space-3: 1rem;
-    --efs-space-4: 1.5rem;
-    --efs-radius: 0.5rem;
-    --efs-target-min: 2.75rem;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --efs-color-canvas: #111318;
-      --efs-color-surface: #1b1e25;
-      --efs-color-text: #eceef2;
-      --efs-color-muted: #aeb4c2;
-      --efs-color-border: #3a404d;
-      --efs-color-accent: #8fb0ff;
-      --efs-color-focus: #8fb0ff;
-    }
-  }
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-@layer base {
-  html {
-    background: var(--efs-color-canvas);
-    color: var(--efs-color-text);
-    font-family: var(--efs-font-body);
-    line-height: 1.5;
-    -webkit-text-size-adjust: 100%;
-    text-size-adjust: 100%;
-  }
-
-  body {
-    margin: 0;
-  }
-
-  code {
-    font-family: var(--efs-font-mono);
-    overflow-wrap: anywhere;
-  }
-
-  :focus-visible {
-    outline: 3px solid var(--efs-color-focus);
-    outline-offset: 2px;
-  }
+body {
+  background: var(--wa-color-surface-default, Canvas);
+  color: var(--wa-color-text-normal, CanvasText);
 }
 
-@layer layout {
-  efs-viewer-frame {
-    display: block;
-    container: efs-frame / inline-size;
-    min-block-size: 100dvh;
-    padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
-    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
-    box-sizing: border-box;
-  }
-
-  [data-efs-unsupported] efs-viewer-frame {
-    display: none;
-  }
-
-  .efs-layout {
-    display: grid;
-    gap: var(--efs-space-4);
-    padding: var(--efs-space-3);
-    max-inline-size: 80rem;
-    margin-inline: auto;
-  }
-
-  @container efs-frame (min-width: 60rem) {
-    .efs-layout {
-      grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
-      align-items: start;
-    }
-  }
+/* ---------- native boot frame and static fallback (must work without Web Awesome) ---------- */
+.efs-boot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  font-family: system-ui, sans-serif;
 }
 
-@layer components {
-  .efs-skip {
+.efs-boot-mark {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.efs-unsupported {
+  max-inline-size: 40rem;
+  padding: 1rem;
+  font-family: system-ui, sans-serif;
+}
+
+efs-shell {
+  display: block;
+}
+
+[data-efs-unsupported] efs-shell,
+[data-efs-unsupported] .efs-boot {
+  display: none;
+}
+
+/* ---------- shell ---------- */
+.efs-page {
+  --menu-width: 18rem;
+}
+
+.efs-page[view="mobile"] {
+  --menu-width: auto;
+}
+
+/* Phones with a notch or home indicator (viewport-fit=cover): keep content in the safe area.
+   Safe-area insets are physical by definition, so these are the one physical-side exception. */
+.efs-page {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.efs-header {
+  container: efs-header / inline-size;
+  padding-block: max(var(--wa-space-xs), env(safe-area-inset-top, 0px)) var(--wa-space-xs);
+  padding-inline: var(--wa-space-m);
+  border-block-end: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  background: var(--wa-color-surface-default);
+}
+
+.efs-wordmark {
+  font-family: var(--wa-font-family-code);
+  font-weight: var(--wa-font-weight-bold);
+  letter-spacing: 0.08em;
+  color: var(--wa-color-text-normal);
+  text-decoration: none;
+}
+
+/* The page's one h1: the active app's name, set as quiet header text. */
+.efs-app-title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--wa-color-text-quiet);
+}
+
+.efs-subheader {
+  padding-block: var(--wa-space-2xs);
+  padding-inline: var(--wa-space-m);
+  border-block-end: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  background: var(--wa-color-surface-lowered);
+}
+
+.efs-navigation {
+  padding: var(--wa-space-s);
+}
+
+/* The shell's main region is full-bleed; panes own their gutters. */
+main.efs-main {
+  padding: 0;
+  container-type: inline-size;
+  min-block-size: calc(100dvh - var(--header-height, 0px) - var(--subheader-height, 0px));
+}
+
+.efs-center {
+  align-items: center;
+  justify-content: center;
+  padding: var(--wa-space-2xl);
+}
+
+.efs-callout {
+  margin: var(--wa-space-l);
+}
+
+.efs-network-indicator::part(label) {
+  max-inline-size: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* On the narrowest phones the network indicator keeps only its icon; the text stays as the
+   button's accessible name. */
+@container efs-header (max-width: 22rem) {
+  .efs-network-text {
     position: absolute;
-    inset-inline-start: var(--efs-space-2);
-    inset-block-start: var(--efs-space-2);
-    padding: var(--efs-space-2) var(--efs-space-3);
-    background: var(--efs-color-canvas);
-    color: var(--efs-color-accent);
-    border-radius: var(--efs-radius);
-    transform: translateY(-200%);
-
-    &:focus-visible {
-      transform: none;
-    }
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
+}
 
-  .efs-bar {
-    display: flex;
-    align-items: center;
-    min-block-size: var(--efs-target-min);
-    padding-inline: var(--efs-space-3);
-    border-block-end: 1px solid var(--efs-color-border);
-  }
+/* ---------- panes ---------- */
+efs-pane-host {
+  display: block;
+  block-size: 100%;
+  min-inline-size: 0;
+}
 
-  .efs-wordmark {
-    font-weight: 700;
-    letter-spacing: 0.08em;
-  }
+/* Constrained to the pane width so Web Awesome scrolls the tab strip instead of the page. */
+.efs-pane-tabs {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
 
-  #efs-main:focus {
-    outline: none;
-  }
+/* Web Awesome 3.15 sizes the tab strip's scroll buttons to 1.5em but keeps the inner button's
+   default padding, so the end button spilled ~19px past the page edge at 320px. */
+.efs-pane-tabs::part(scroll-button__base) {
+  min-inline-size: 0;
+  inline-size: 100%;
+  padding-inline: 0;
+}
 
-  #efs-main:focus-visible {
-    outline: 3px solid var(--efs-color-focus);
-  }
+.efs-split,
+.efs-split-slot {
+  block-size: 100%;
+}
 
-  .efs-diagnostics {
-    background: var(--efs-color-surface);
-    border: 1px solid var(--efs-color-border);
-    border-radius: var(--efs-radius);
-    padding-inline: var(--efs-space-3);
+.efs-pane {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 100%;
+  border-inline-end: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
 
-    /* Keep display: list-item so the native disclosure marker stays visible. */
-    & > summary {
-      min-block-size: var(--efs-target-min);
-      padding-block: 0.625rem;
-      box-sizing: border-box;
-      cursor: pointer;
-    }
+.efs-pane-title {
+  margin: 0;
+  padding-block: var(--wa-space-xs);
+  padding-inline: var(--wa-space-m);
+  font-size: var(--wa-font-size-s);
+  font-weight: var(--wa-font-weight-semibold);
+  color: var(--wa-color-text-quiet);
+  border-block-end: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
 
-    & dt {
-      font-weight: 600;
-      margin-block-start: var(--efs-space-2);
-    }
+.efs-pane-body {
+  flex: 1;
+  padding: var(--wa-space-m);
+  overflow: auto;
+}
 
-    & dd {
-      margin-inline-start: 0;
-      color: var(--efs-color-muted);
-    }
-  }
+/* ---------- shared bits ---------- */
+.efs-quiet {
+  color: var(--wa-color-text-quiet);
+}
 
-  .efs-unsupported {
-    padding: var(--efs-space-3);
-    max-inline-size: 40rem;
-  }
+.efs-field-error {
+  color: var(--wa-color-danger-on-quiet);
+  margin: 0;
+}
 
-  @media (forced-colors: active) {
-    .efs-diagnostics {
-      border-color: CanvasText;
-    }
-  }
+.efs-endpoints {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.efs-endpoint-text {
+  min-inline-size: 0;
+}
+
+.efs-endpoint-url {
+  overflow-wrap: anywhere;
+  font-size: var(--wa-font-size-xs);
+  color: var(--wa-color-text-quiet);
+}
+
+.efs-endpoint-heading {
+  margin: 0;
+}
+
+code {
+  overflow-wrap: anywhere;
+}
+
+/* Icon fallback: when the icon sprite can't load, icon-only controls show their label as text. */
+.efs-icon-text {
+  display: none;
+}
+
+[data-efs-icons="missing"] .efs-icon-text {
+  display: inline;
+}
+
+[data-efs-icons="missing"] wa-icon:has(+ .efs-icon-text) {
+  display: none;
+}
+
+.efs-callout-action {
+  align-self: flex-start;
+}
+
+/* Web Awesome's native styles (@layer wa-native) give form controls an explicit display, which
+   beats the browser's own [hidden] rule (e.g. the settings import's file input). This unlayered
+   rule beats every layered one; don't give a hidden element a display in this file. */
+[hidden] {
+  display: none;
+}
+
+/* Web Awesome's default drawer size (25rem) is wider than the smallest phones. */
+.efs-settings {
+  --size: min(26rem, 100vw);
 }

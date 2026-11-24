@@ -8,3 +8,8 @@ allowBuilds: {}
 strictDepBuilds: true
 blockExoticSubdeps: true
 minimumReleaseAge: 1440
+
+# Exactly one TC39 Signals implementation per realm. @lit-labs/signals and our own
+# state adapter must share it, or Lit's watchers and ours see different graphs.
+overrides:
+  signal-polyfill: 0.2.3

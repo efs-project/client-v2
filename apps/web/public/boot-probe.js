@@ -71,14 +71,54 @@
   }
   root.setAttribute('data-efs-probe-count', String(checks.length));
 
+  // Pre-paint color scheme, mirroring src/platform/appearance.ts, so a dark system (or a saved
+  // dark choice) never flashes light while modules load. IndexedDB settings stay the truth.
+  (function () {
+    var mode = 'system';
+    var theme = 'cypher';
+    var dark = false;
+    var saved;
+    try {
+      saved = JSON.parse(window.localStorage.getItem('efs.appearance') || 'null');
+      if (saved && (saved.mode === 'light' || saved.mode === 'dark')) mode = saved.mode;
+      if (saved && (saved.theme === 'cypher' || saved.theme === 'paper')) theme = saved.theme;
+    } catch (e) {}
+    try {
+      dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch (e) {}
+    var scheme = mode === 'system' ? (dark ? 'dark' : 'light') : mode;
+    var brand = theme === 'paper' ? 'indigo' : 'green';
+    root.className +=
+      ' wa-theme-default wa-palette-default wa-brand-' +
+      brand +
+      ' efs-theme-' +
+      theme +
+      ' wa-' +
+      scheme;
+    root.style.colorScheme = scheme;
+  })();
+
   function reveal(reason) {
     if (root.hasAttribute('data-efs-unsupported')) return;
     root.setAttribute('data-efs-unsupported', reason);
     var show = function () {
       var el = document.getElementById('efs-unsupported');
+      var browserIssue = reason.indexOf('missing:') === 0;
+      var remove = ['efs-shell', '#efs-boot'];
+      var hide, link, node, r;
       if (el) el.hidden = false;
-      var frame = document.querySelector('efs-viewer-frame');
-      if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+      // Show only the message that applies; works even if the stylesheet itself failed.
+      hide = document.querySelector(
+        browserIssue ? '.efs-unsupported-load' : '.efs-unsupported-browser'
+      );
+      if (hide) hide.hidden = true;
+      // Reload this document; a link that differs only by fragment would not reload.
+      link = document.querySelector('.efs-reload');
+      if (link) link.setAttribute('href', String(location.href).split('#')[0]);
+      for (r = 0; r < remove.length; r++) {
+        node = document.querySelector(remove[r]);
+        if (node && node.parentNode) node.parentNode.removeChild(node);
+      }
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
     else show();

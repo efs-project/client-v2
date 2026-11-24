@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!pnpm-lock.yaml", "!**/*.json.d.ts"]
+    "includes": [
+      "**",
+      "!pnpm-lock.yaml",
+      "!**/*.json.d.ts",
+      "!apps/web/src/ui/wa/icon-ids.ts",
+      "!apps/web/public/icons"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
@@ -43,17 +49,20 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "lit": "Lit is lazy-slice only (plan \u00a74.3); not allowed on the guest path in C0.",
-                  "@lit-labs/signals": "Lit bridge is lazy-slice only (plan \u00a74.3).",
-                  "@awesome.me/webawesome": "Web Awesome is imported only by ui/wa/ (C3).",
+                  "@lit-labs/signals": "Use EfsElement from src/ui/element.ts (the only importer of the experimental Lit Signals bridge).",
+                  "@awesome.me/webawesome": "Web Awesome modules are imported only by src/ui/wa/ (registration and theme setup).",
+                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm).",
                   "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
                   "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
                   "@efs-client/tools": "Node tooling must never enter the browser bundle.",
                   "vitest": "Test tooling must never enter the browser bundle.",
-                  "@playwright/test": "Test tooling must never enter the browser bundle.",
-                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm)."
+                  "@playwright/test": "Test tooling must never enter the browser bundle."
                 },
                 "patterns": [
+                  {
+                    "group": ["@awesome.me/webawesome/**"],
+                    "message": "Web Awesome modules are imported only by src/ui/wa/."
+                  },
                   {
                     "group": [
                       "@efs/sdk/node",
@@ -66,6 +75,63 @@
                   {
                     "group": ["**/tools/**", "**/tests/**"],
                     "message": "apps/web/src must not import tools or tests."
+                  },
+                  {
+                    "group": ["lit/directives/unsafe-*", "lit-html/directives/unsafe-*"],
+                    "message": "unsafe HTML/SVG/MathML directives defeat Trusted Types (Lit's policy is pass-through). Render through templates."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/web/src/platform/**",
+        "apps/web/src/state/**",
+        "!apps/web/src/**/*.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "lit": "Platform and state code must not depend on the UI library.",
+                  "lit-html": "Platform and state code must not depend on the UI library.",
+                  "@lit-labs/signals": "Platform and state code must not depend on the UI library.",
+                  "@awesome.me/webawesome": "Platform and state code must not depend on the UI library.",
+                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm).",
+                  "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "@efs-client/tools": "Node tooling must never enter the browser bundle.",
+                  "vitest": "Test tooling must never enter the browser bundle.",
+                  "@playwright/test": "Test tooling must never enter the browser bundle."
+                },
+                "patterns": [
+                  {
+                    "group": ["lit/**", "lit-html/**", "@awesome.me/webawesome/**"],
+                    "message": "Platform and state code must not depend on the UI library."
+                  },
+                  {
+                    "group": [
+                      "@efs/sdk/node",
+                      "@efs/sdk/node/**",
+                      "@efs/sdk/testing",
+                      "@efs/sdk/testing/**"
+                    ],
+                    "message": "Node/test-only SDK surfaces are banned in the browser app."
+                  },
+                  {
+                    "group": ["**/tools/**", "**/tests/**"],
+                    "message": "apps/web/src must not import tools or tests."
+                  },
+                  {
+                    "group": ["lit/directives/unsafe-*", "lit-html/directives/unsafe-*"],
+                    "message": "unsafe HTML/SVG/MathML directives defeat Trusted Types (Lit's policy is pass-through). Render through templates."
                   }
                 ]
               }
@@ -83,9 +149,124 @@
               "level": "error",
               "options": {
                 "paths": {
-                  "lit": "Lit is lazy-slice only (plan \u00a74.3); not allowed on the guest path in C0.",
-                  "@lit-labs/signals": "Lit bridge is lazy-slice only (plan \u00a74.3).",
-                  "@awesome.me/webawesome": "Web Awesome is imported only by ui/wa/ (C3).",
+                  "lit": "Platform and state code must not depend on the UI library.",
+                  "lit-html": "Platform and state code must not depend on the UI library.",
+                  "@lit-labs/signals": "Platform and state code must not depend on the UI library.",
+                  "@awesome.me/webawesome": "Platform and state code must not depend on the UI library.",
+                  "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "@efs-client/tools": "Node tooling must never enter the browser bundle.",
+                  "vitest": "Test tooling must never enter the browser bundle.",
+                  "@playwright/test": "Test tooling must never enter the browser bundle."
+                },
+                "patterns": [
+                  {
+                    "group": ["lit/**", "lit-html/**", "@awesome.me/webawesome/**"],
+                    "message": "Platform and state code must not depend on the UI library."
+                  },
+                  {
+                    "group": [
+                      "@efs/sdk/node",
+                      "@efs/sdk/node/**",
+                      "@efs/sdk/testing",
+                      "@efs/sdk/testing/**"
+                    ],
+                    "message": "Node/test-only SDK surfaces are banned in the browser app."
+                  },
+                  {
+                    "group": ["**/tools/**", "**/tests/**"],
+                    "message": "apps/web/src must not import tools or tests."
+                  },
+                  {
+                    "group": ["lit/directives/unsafe-*", "lit-html/directives/unsafe-*"],
+                    "message": "unsafe HTML/SVG/MathML directives defeat Trusted Types (Lit's policy is pass-through). Render through templates."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/public/boot-probe.js"],
+      "javascript": {
+        "formatter": {
+          "trailingCommas": "none"
+        }
+      },
+      "linter": {
+        "rules": {
+          "style": {
+            "useTemplate": "off"
+          },
+          "complexity": {
+            "useArrowFunction": "off",
+            "useOptionalChain": "off"
+          },
+          "correctness": {
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/ui/element.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@awesome.me/webawesome": "Web Awesome modules are imported only by src/ui/wa/ (registration and theme setup).",
+                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm).",
+                  "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
+                  "@efs-client/tools": "Node tooling must never enter the browser bundle.",
+                  "vitest": "Test tooling must never enter the browser bundle.",
+                  "@playwright/test": "Test tooling must never enter the browser bundle."
+                },
+                "patterns": [
+                  {
+                    "group": ["@awesome.me/webawesome/**"],
+                    "message": "Web Awesome modules are imported only by src/ui/wa/."
+                  },
+                  {
+                    "group": [
+                      "@efs/sdk/node",
+                      "@efs/sdk/node/**",
+                      "@efs/sdk/testing",
+                      "@efs/sdk/testing/**"
+                    ],
+                    "message": "Node/test-only SDK surfaces are banned in the browser app."
+                  },
+                  {
+                    "group": ["**/tools/**", "**/tests/**"],
+                    "message": "apps/web/src must not import tools or tests."
+                  },
+                  {
+                    "group": ["lit/directives/unsafe-*", "lit-html/directives/unsafe-*"],
+                    "message": "unsafe HTML/SVG/MathML directives defeat Trusted Types (Lit's policy is pass-through). Render through templates."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/ui/wa/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@lit-labs/signals": "Use EfsElement from src/ui/element.ts (the only importer of the experimental Lit Signals bridge).",
+                  "signal-polyfill": "Import Signals only through src/state/signals.ts (one implementation per realm).",
                   "viem": "Protocol and chain code belong to the SDK (plan \u00a73).",
                   "ethers": "Protocol and chain code belong to the SDK (plan \u00a73).",
                   "@efs-client/tools": "Node tooling must never enter the browser bundle.",
@@ -105,30 +286,14 @@
                   {
                     "group": ["**/tools/**", "**/tests/**"],
                     "message": "apps/web/src must not import tools or tests."
+                  },
+                  {
+                    "group": ["lit/directives/unsafe-*", "lit-html/directives/unsafe-*"],
+                    "message": "unsafe HTML/SVG/MathML directives defeat Trusted Types (Lit's policy is pass-through). Render through templates."
                   }
                 ]
               }
             }
-          }
-        }
-      }
-    },
-    {
-      "includes": ["apps/web/public/boot-probe.js"],
-      "javascript": {
-        "formatter": { "trailingCommas": "none" }
-      },
-      "linter": {
-        "rules": {
-          "style": {
-            "useTemplate": "off"
-          },
-          "complexity": {
-            "useArrowFunction": "off",
-            "useOptionalChain": "off"
-          },
-          "correctness": {
-            "noUnusedVariables": "off"
           }
         }
       }
