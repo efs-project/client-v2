@@ -151,6 +151,9 @@ export const settingsButton = (page: Page) => page.locator('wa-button.efs-settin
 export async function openSettings(page: Page): Promise<void> {
   await settingsButton(page).click();
   await expect(page.locator('wa-drawer.efs-settings')).toHaveAttribute('open', '');
+  // The drawer moves focus to its first section once it has finished opening. Acting (or
+  // measuring contrast) earlier races its show animation.
+  await expect(page.locator('[data-section="appearance"] h3')).toBeFocused();
 }
 
 export async function openAbout(page: Page): Promise<void> {

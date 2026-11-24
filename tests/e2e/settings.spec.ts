@@ -7,7 +7,9 @@ const rpcList = (page: Page) => page.locator('efs-endpoint-list').first();
 
 async function addEndpoint(page: Page, url: string, label = ''): Promise<void> {
   const list = rpcList(page);
-  await list.locator('wa-input[name="url"] input').fill(url);
+  const urlInput = list.locator('wa-input[name="url"] input');
+  await urlInput.fill(url);
+  await expect(urlInput).toHaveValue(url);
   await list.locator('wa-input[name="label"] input').fill(label);
   await list.getByRole('button', { name: 'Add' }).click();
 }
