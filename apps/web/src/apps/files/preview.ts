@@ -4,6 +4,7 @@
 import type { Efs, Lens } from '@efs/sdk';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { draftKey } from '../../shell/drafts.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
@@ -84,6 +85,8 @@ export class EfsFilesPreview extends EfsElement {
   #notInView = state<string | undefined>(undefined);
   /** The person's own text, brought back by the banner's "Review changes". */
   #draftText = state<string | undefined>(undefined);
+  /** The editor is open because the person came back to an unsaved edit of this file. */
+  #resumed = false;
   /**
    * The URL of the VERIFIED bytes being shown as media: blob: (revoked when the read is
    * replaced), or data: for SVG.
@@ -108,8 +111,12 @@ export class EfsFilesPreview extends EfsElement {
       const key = link.status === 'target' ? link.canonical : undefined;
       if (efs === this.#loaded?.efs && key === this.#loaded?.key) return;
       this.#loaded = efs && key ? { efs, key } : undefined;
-      // Another file (or session): close the editor and drop this file's view choices.
-      this.#editing.set(false);
+      // Another file (or session): drop this file's view choices. The editor stays open only if
+      // the person left an unsaved edit of the new file here earlier: it comes back as they left it.
+      const draft = this.#draftKey();
+      const resumed = draft !== undefined && this.host.saving.drafts.get(draft) !== undefined;
+      this.#editing.set(resumed);
+      this.#resumed = resumed;
       this.#draftText.set(undefined);
       this.#mine.set(undefined);
       this.#notInView.set(undefined);
@@ -135,6 +142,7 @@ export class EfsFilesPreview extends EfsElement {
         if (!taken) return;
         this.#notInView.set(undefined);
         this.#draftText.set(taken.text);
+        this.#resumed = false;
         this.#editing.set(true);
         this.#reload();
       });
@@ -276,6 +284,7 @@ export class EfsFilesPreview extends EfsElement {
     const author =
       shown && 'open' in shown && shown.open.status === 'PRESENT' ? shown.open.file.author : null;
     this.#editing.set(false);
+    this.#resumed = false;
     this.#draftText.set(undefined);
     const p = detail.progress;
     // Whatever state the save is in, this view won't show it: say so now, with "Show my version".
@@ -338,6 +347,15 @@ export class EfsFilesPreview extends EfsElement {
   #canonical(): string {
     const link = this.target.get();
     return link.status === 'target' ? link.canonical : '';
+  }
+
+  /** The key of this file's unsaved edit: its canonical route in the realm in view. */
+  #draftKey(): string | undefined {
+    const location = this.host.location.get();
+    const link = this.target.get();
+    return location.kind === 'realm' && link.status === 'target'
+      ? draftKey(location.realm, link.canonical)
+      : undefined;
   }
 
   #currentLens(): Lens | undefined {
@@ -456,6 +474,8 @@ export class EfsFilesPreview extends EfsElement {
                     .link=${this.#canonical()}
                     .original=${content?.kind === 'text' ? content.text : ''}
                     .draft=${this.#draftText.get()}
+                    .draftKey=${this.#draftKey() ?? ''}
+                    .resumed=${this.#resumed}
                     .lens=${this.#currentLens()}
                     @efs-edit-done=${this.#onEditDone}
                   ></efs-file-editor>`
@@ -476,6 +496,7 @@ export class EfsFilesPreview extends EfsElement {
                             class="efs-edit-start"
                             @click=${() => {
                               this.#notInView.set(undefined);
+                              this.#resumed = false;
                               this.#editing.set(true);
                             }}
                             ><span slot="start">${appIcon('pen-to-square')}</span>${t('files.edit.start')}</wa-button

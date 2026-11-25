@@ -12,6 +12,7 @@ import { state } from '../state/signals.ts';
 import { EfsElement, html, nothing } from '../ui/element.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
+import type { DraftStore } from './drafts.ts';
 import type { NetworkState } from './network-state.ts';
 import {
   isFault,
@@ -50,6 +51,8 @@ export function describeSave(
 
 type RowNotice =
   | { readonly kind: 'confirm-abandon' }
+  /** "Review changes" would replace a different unsaved edit of the same file. */
+  | { readonly kind: 'confirm-replace' }
   | { readonly kind: 'other-account' }
   | { readonly kind: 'message'; readonly id: MessageId };
 
@@ -63,11 +66,14 @@ const PRIMARY: Partial<Record<SaveAction, MessageId>> = {
 export class EfsSavesBanner extends EfsElement {
   static override properties = {
     saves: { attribute: false },
+    drafts: { attribute: false },
     writer: { attribute: false },
     network: { attribute: false },
     translator: { attribute: false },
   };
   declare saves: SavesSession;
+  /** Unsaved edits: "Review changes" never replaces one without asking. */
+  declare drafts: DraftStore;
   declare writer: WriterSession;
   /** The network in view, to name a chain the wallet must switch back to. */
   declare network: NetworkState;
@@ -142,15 +148,25 @@ export class EfsSavesBanner extends EfsElement {
     );
   }
 
-  /** "Review changes": stop the old save, then bring the person's edit back on the current file. */
-  async #reopen(p: SequenceProgress): Promise<void> {
+  /**
+   * "Review changes": stop the old save, then bring the person's edit back on the current file.
+   * If they have since started a different unsaved edit of that file, ask first (`replace`):
+   * bringing this one back replaces it.
+   */
+  async #reopen(p: SequenceProgress, replace = false): Promise<void> {
     const draft = this.saves.draftOf(p.sequenceId);
     if (!draft) {
       this.#notice(p.sequenceId, { kind: 'message', id: 'saves.draftNotKept' });
       return;
     }
+    const unsaved = this.drafts.get(draft.route);
+    if (!replace && unsaved && unsaved.text !== draft.text) {
+      this.#notice(p.sequenceId, { kind: 'confirm-replace' });
+      return;
+    }
     const stopped = await this.#act(p, (writer, id) => writer.abandon(id));
     if (stopped?.state !== 'ABANDONED') return;
+    this.drafts.drop(draft.route);
     this.saves.reopen(draft);
     if (location.hash !== draft.route) location.hash = draft.route;
   }
@@ -245,13 +261,34 @@ export class EfsSavesBanner extends EfsElement {
                 >
               </div>
             </div>`
-          : notice?.kind === 'other-account'
-            ? html`<p role="alert">
+          : notice?.kind === 'confirm-replace'
+            ? html`<div class="wa-stack wa-gap-xs efs-save-confirm">
+                <p>${t('saves.replaceConfirm')}</p>
+                <div class="wa-cluster wa-gap-xs">
+                  <wa-button
+                    size="s"
+                    variant="danger"
+                    class="efs-save-replace"
+                    ?loading=${this.#busy.get() === p.sequenceId}
+                    @click=${() => void this.#reopen(p, true)}
+                    >${t('saves.replaceYes')}</wa-button
+                  >
+                  <wa-button
+                    size="s"
+                    appearance="outlined"
+                    class="efs-save-keep-unsaved"
+                    @click=${() => this.#notice(p.sequenceId, undefined)}
+                    >${t('saves.replaceNo')}</wa-button
+                  >
+                </div>
+              </div>`
+            : notice?.kind === 'other-account'
+              ? html`<p role="alert">
                 ${t('saves.otherAccount', { account: shortAccount(p.account) })}
               </p>`
-            : notice?.kind === 'message'
-              ? html`<p role="alert">${t(notice.id)}</p>`
-              : nothing
+              : notice?.kind === 'message'
+                ? html`<p role="alert">${t(notice.id)}</p>`
+                : nothing
       }
     </wa-callout>`;
   }

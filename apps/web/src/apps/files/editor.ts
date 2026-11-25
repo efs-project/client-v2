@@ -20,6 +20,7 @@ import type { Efs, Hex, Lens } from '@efs/sdk';
 import type { EfsWriter, SequenceOpts, SequenceProgress } from '@efs/sdk/actions';
 import type { EditPlanResult, OpenedFile, RevisionRef } from '@efs/sdk/files';
 import type { AppHost } from '../../shell/apps.ts';
+import type { KeptDraft } from '../../shell/drafts.ts';
 import { type SaveHold, saveHold } from '../../shell/save-hold.ts';
 import {
   type SaveOutcome,
@@ -101,6 +102,8 @@ export class EfsFileEditor extends EfsElement {
     link: { attribute: false },
     original: { attribute: false },
     draft: { attribute: false },
+    draftKey: { attribute: false },
+    resumed: { attribute: false },
     lens: { attribute: false },
   };
   declare host: AppHost;
@@ -110,13 +113,24 @@ export class EfsFileEditor extends EfsElement {
   /** The file's canonical link (to come back to it from the banner). */
   declare link: string;
   declare original: string;
-  /** The person's own text, brought back by "Review changes"; undefined starts from `original`. */
+  /**
+   * The person's own text, brought back by "Review changes"; undefined starts from the unsaved
+   * edit kept for this file, else from `original`.
+   */
   declare draft: string | undefined;
+  /** This file's key among unsaved edits (its canonical route; shell/drafts.ts). */
+  declare draftKey: string;
+  /** Opened because the person came back to this file's unsaved edit (said so, at the top). */
+  declare resumed: boolean;
   /** The view's Lens; undefined is the SDK's default. */
   declare lens: Lens | undefined;
 
   #text = state('');
   #phase = state<Phase>({ phase: 'editing' });
+  /** The unsaved edit this editor reopened, if it did (said once, at the top). */
+  #restored: KeptDraft | undefined;
+  /** Cancel with changes: "Discard your edit?" is open. */
+  #confirmingDiscard = state(false);
   /** A re-read this editor needs: running, failed (or timed out), or the journal is off here. */
   #holding = state<'no' | 'checking' | 'failed' | 'no-journal'>('no');
   #base: RevisionRef | undefined;
@@ -128,9 +142,15 @@ export class EfsFileEditor extends EfsElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.#text.set(this.draft ?? this.original);
-    this.#base = { kind: 'revision', recordId: this.file.revision };
+    // "Review changes" brings a save's edit back on the version shown now (the banner asked
+    // before replacing a different unsaved edit). Otherwise an unsaved edit kept for this file
+    // comes back with its own base, so a file that changed meanwhile still says so at Review.
+    const kept = this.draft === undefined ? this.host.saving.drafts.get(this.draftKey) : undefined;
+    this.#restored = kept;
+    this.#text.set(this.draft ?? kept?.text ?? this.original);
+    this.#base = kept?.base ?? this.#fileBase();
     this.#controller = new AbortController();
+    this.#keep();
   }
 
   override disconnectedCallback(): void {
@@ -142,8 +162,49 @@ export class EfsFileEditor extends EfsElement {
     this.querySelector<HTMLTextAreaElement>('textarea')?.focus();
   }
 
+  /**
+   * Keeps the edit (text and base) for this file while it differs from what's shown, so leaving
+   * the file and coming back finds it here. Leaving keeps it; only closing the editor drops it.
+   */
+  #keep(): void {
+    const text = this.#text.get();
+    const drafts = this.host.saving.drafts;
+    if (text === this.original) drafts.drop(this.draftKey);
+    else drafts.keep(this.draftKey, { text, base: this.#base ?? this.#fileBase() });
+  }
+
+  #fileBase(): RevisionRef {
+    return { kind: 'revision', recordId: this.file.revision };
+  }
+
+  /**
+   * Closes the editor. Every way here ends the edit: saved (the banner keeps its text for
+   * "Review changes"), discarded after asking, or never changed.
+   */
   #done(detail: EditDoneDetail): void {
+    this.host.saving.drafts.drop(this.draftKey);
     this.dispatchEvent(new CustomEvent(EDIT_DONE_EVENT, { bubbles: true, composed: true, detail }));
+  }
+
+  /**
+   * About a reopened unsaved edit: that the file changed since it was started (always worth
+   * saying: Review will ask before saving over it), else that it's back (only when the person
+   * came back to it, not when a refresh rebuilt the editor under them).
+   */
+  #keptNotice(t: Translator['t']) {
+    const kept = this.#restored;
+    if (!kept) return nothing;
+    const moved = kept.base.recordId.toLowerCase() !== this.file.revision.toLowerCase();
+    if (!moved && !this.resumed) return nothing;
+    return html`<p class="efs-quiet efs-edit-kept">
+      ${t(moved ? 'files.edit.keptChanged' : 'files.edit.kept')}
+    </p>`;
+  }
+
+  /** Cancel: closes straight away when nothing changed; otherwise asks before discarding. */
+  #cancel(): void {
+    if (this.#text.get() === this.original) this.#done({});
+    else this.#confirmingDiscard.set(true);
   }
 
   /**
@@ -202,6 +263,7 @@ export class EfsFileEditor extends EfsElement {
       return;
     }
     this.#base = base;
+    this.#keep();
     const signal = this.#controller.signal;
     try {
       const writer = await this.host.saving.writer();
@@ -337,7 +399,7 @@ export class EfsFileEditor extends EfsElement {
     // The wallet answered: from here the banner owns this save (Saved · confirming → Saved,
     // Partially saved → Continue, a race → changed), with the edit kept for "Review changes".
     this.host.saving.track(progress, {
-      route: location.hash,
+      route: this.draftKey,
       link: this.link,
       text: this.#text.get(),
     });
@@ -616,7 +678,7 @@ export class EfsFileEditor extends EfsElement {
       ${
         this.draft !== undefined
           ? html`<p class="efs-quiet efs-edit-reopened">${t('files.edit.reopened')}</p>`
-          : nothing
+          : this.#keptNotice(t)
       }
       <label class="wa-stack wa-gap-2xs">
         <span>${t('files.edit.label')}</span>
@@ -627,7 +689,10 @@ export class EfsFileEditor extends EfsElement {
           rows="12"
           .value=${this.#text.get()}
           ?readonly=${busy}
-          @input=${(event: Event) => this.#text.set((event.target as HTMLTextAreaElement).value)}
+          @input=${(event: Event) => {
+            this.#text.set((event.target as HTMLTextAreaElement).value);
+            this.#keep();
+          }}
         ></textarea>
       </label>
       ${this.#walletNotice(t)}
@@ -649,10 +714,15 @@ export class EfsFileEditor extends EfsElement {
           class="efs-edit-review-button"
           ?loading=${s.phase === 'planning'}
           ?disabled=${!ready || blocked || !changed || busy}
-          @click=${() => void this.#plan(this.#base ?? { kind: 'revision', recordId: this.file.revision })}
+          @click=${() => void this.#plan(this.#base ?? this.#fileBase())}
           >${t('files.edit.review')}</wa-button
         >
-        <wa-button size="s" appearance="outlined" ?disabled=${busy} @click=${() => this.#done({})}
+        <wa-button
+          size="s"
+          appearance="outlined"
+          class="efs-edit-cancel"
+          ?disabled=${busy}
+          @click=${() => this.#cancel()}
           >${t('files.edit.cancel')}</wa-button
         >
         ${changed ? nothing : html`<span class="efs-quiet">${t('files.edit.unchanged')}</span>`}
@@ -664,6 +734,53 @@ export class EfsFileEditor extends EfsElement {
             ? this.#unconfirmedDialog(s, t)
             : nothing
       }
+      ${this.#discardDialog(t)}
     </div>`;
+  }
+
+  /**
+   * "Discard your edit?": the only way an unsaved edit is thrown away. Keep editing is the
+   * default (focused first), and closing the dialog any other way keeps the edit too. Always in
+   * the page, opened and closed by `open`, so closing animates and focus goes back to the text.
+   */
+  #discardDialog(t: Translator['t']) {
+    return html`<wa-dialog
+      class="efs-edit-discard"
+      label=${t('files.edit.discardTitle')}
+      ?open=${this.#confirmingDiscard.get()}
+      @wa-hide=${(event: Event) => {
+        if (event.target === event.currentTarget) this.#confirmingDiscard.set(false);
+      }}
+      @wa-after-hide=${(event: Event) => {
+        // Kept: back to the text, where the person was. The dialog returns focus to Cancel in a
+        // timeout queued just before this event, so this one is queued after it.
+        if (event.target !== event.currentTarget) return;
+        setTimeout(() => {
+          if (this.isConnected) {
+            this.querySelector<HTMLTextAreaElement>('textarea.efs-edit-text')?.focus();
+          }
+        });
+      }}
+    >
+      <p>${t('files.edit.discardBody')}</p>
+      <wa-button
+        slot="footer"
+        appearance="outlined"
+        class="efs-edit-keep"
+        autofocus
+        @click=${() => this.#confirmingDiscard.set(false)}
+        >${t('files.edit.keepEditing')}</wa-button
+      >
+      <wa-button
+        slot="footer"
+        variant="danger"
+        class="efs-edit-discard-yes"
+        @click=${() => {
+          this.#confirmingDiscard.set(false);
+          this.#done({});
+        }}
+        >${t('files.edit.discard')}</wa-button
+      >
+    </wa-dialog>`;
   }
 }
