@@ -148,7 +148,7 @@
   "files.preview.failed": "‮The preview couldn't load.‬",
   "files.preview.tooLarge": "‮This file is ‬{$size :number}‮ bytes. Files up to 1 MiB load automatically.‬",
   "files.preview.load": "‮Load it‬",
-  "files.preview.binary": "‮This file isn't text, so it can't be shown here.‬",
+  "files.preview.binary": "‮This version can't preview this kind of file. Save a copy to open it.‬",
   "files.preview.save": "‮Save a copy‬",
   "files.preview.truncated": "‮Only the beginning is shown. Save a copy to get all of it.‬",
   "files.preview.attempts": "‮Sources tried‬",
@@ -290,5 +290,8 @@
   "shared.saveOff": "‮Saving is off on this copy: it's served from a shared IPFS gateway, where other sites share its storage.‬",
   "shared.openIsolated": "‮Open the isolated copy to save‬",
   "shared.noIsolated": "‮To save, open this app from its own address (for example a subdomain gateway) instead.‬",
-  "settings.data.sharedGateway": "‮This copy is served from a shared IPFS gateway, where other sites share its storage, so settings last only until this tab closes.‬"
+  "settings.data.sharedGateway": "‮This copy is served from a shared IPFS gateway, where other sites share its storage, so settings last only until this tab closes.‬",
+  "files.preview.imageAlt": "‮Image in this file‬",
+  "files.preview.mediaTooLarge": "‮This file is too large to preview here (‬{$size :number}‮ bytes). Save a copy to open it.‬",
+  "files.preview.mediaFailed": "‮This browser couldn't show or play this file. Save a copy to open it.‬"
 }

@@ -13,6 +13,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { type EditDoneDetail, shortId } from './editor.ts';
+import { MEDIA_MAX_BYTES } from './media.ts';
 import { readerNotice } from './notice.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
@@ -21,6 +22,30 @@ import type { LinkState } from './target.ts';
  * The SDK's byte reads load only when there is a verified session to read through, so opening
  * the File Browser on a site with no usable network never downloads the SDK.
  */
+/** A file extension for "Save a copy", from what the bytes are. */
+const EXTENSIONS: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/avif': 'avif',
+  'image/svg+xml': 'svg',
+  'audio/wav': 'wav',
+  'audio/flac': 'flac',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'video/mp4': 'mp4',
+};
+const extensionOf = (content: Content | undefined): string =>
+  content?.kind === 'text'
+    ? 'txt'
+    : content?.kind === 'media'
+      ? (EXTENSIONS[content.media.mime] ?? 'bin')
+      : 'bin';
+
 /** "files.example.org" from "https://files.example.org": what the person recognizes. */
 const hostOf = (origin: string): string => {
   try {
@@ -59,6 +84,10 @@ export class EfsFilesPreview extends EfsElement {
   #notInView = state<string | undefined>(undefined);
   /** The person's own text, brought back by the banner's "Review changes". */
   #draftText = state<string | undefined>(undefined);
+  /** A blob: URL of the VERIFIED bytes being shown as media; revoked when the read is replaced. */
+  #mediaUrl = state<string | undefined>(undefined);
+  /** The browser couldn't decode the media it was given (unsupported codec or a broken file). */
+  #mediaFailed = state(false);
   /** Saves handed off from this pane, and those already refreshed for (once each). */
   #handedOff = new Set<string>();
   #refreshed = new Set<string>();
@@ -138,7 +167,12 @@ export class EfsFilesPreview extends EfsElement {
       .then((reads) => {
         if (!reads || run.signal.aborted) return undefined;
         const lens = this.#viewLens(efs, link);
-        return runPreview(reads, efs, link.target, run.signal, (s) => this.#state.set(s), {
+        const show = (s: PreviewState) => {
+          this.#mediaUrl.set(this.#mediaUrlFor(s, run));
+          this.#mediaFailed.set(false);
+          this.#state.set(s);
+        };
+        return runPreview(reads, efs, link.target, run.signal, show, {
           force,
           ...(lens ? { lens } : {}),
           ...(allowOrigins ? { allowOrigins } : {}),
@@ -149,6 +183,49 @@ export class EfsFilesPreview extends EfsElement {
         console.error(error);
         this.#state.set({ phase: 'failed' });
       });
+  }
+
+  /**
+   * A blob: URL for VERIFIED media within its size cap, owned by `run` (revoked when the read is
+   * replaced or the pane goes away). Never for unverified bytes: there are none in `content`.
+   */
+  #mediaUrlFor(s: PreviewState, run: OwnerScope): string | undefined {
+    if (s.phase !== 'read' || s.content?.kind !== 'media' || !s.bytes.bytes) return undefined;
+    if (s.bytes.grade !== 'VERIFIED') return undefined;
+    const { media } = s.content;
+    if (s.bytes.bytes.length > MEDIA_MAX_BYTES[media.kind]) return undefined;
+    const url = URL.createObjectURL(new Blob([s.bytes.bytes as BlobPart], { type: media.mime }));
+    run.defer(() => URL.revokeObjectURL(url));
+    return url;
+  }
+
+  #mediaView(content: Extract<Content, { kind: 'media' }>, size: number, t: Translator['t']) {
+    const url = this.#mediaUrl.get();
+    const failed = () => this.#mediaFailed.set(true);
+    if (this.#mediaFailed.get()) return html`<p>${t('files.preview.mediaFailed')}</p>`;
+    if (!url) return html`<p>${t('files.preview.mediaTooLarge', { size })}</p>`;
+    switch (content.media.kind) {
+      case 'image':
+        // <img> even for SVG: no script runs and nothing external loads there.
+        return html`<img
+          class="efs-preview-media"
+          src=${url}
+          alt=${t('files.preview.imageAlt')}
+          decoding="async"
+          @error=${failed}
+        />`;
+      case 'audio':
+        return html`<audio class="efs-preview-media" controls preload="metadata" src=${url} @error=${failed}></audio>`;
+      case 'video':
+        return html`<video
+          class="efs-preview-media"
+          controls
+          playsinline
+          preload="metadata"
+          src=${url}
+          @error=${failed}
+        ></video>`;
+    }
   }
 
   /** The Lens this pane reads under: the link's (else the default), or that with "mine first". */
@@ -213,7 +290,7 @@ export class EfsFilesPreview extends EfsElement {
   }
 
   #save(bytes: Uint8Array, sha256: string, content: Content | undefined): void {
-    const name = `efs-${sha256.slice(2, 14)}.${content?.kind === 'text' ? 'txt' : 'bin'}`;
+    const name = `efs-${sha256.slice(2, 14)}.${extensionOf(content)}`;
     const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
     const link = document.createElement('a');
     link.href = url;
@@ -378,7 +455,9 @@ export class EfsFilesPreview extends EfsElement {
                     content?.kind === 'text'
                       ? html`<pre class="efs-preview-text" translate="no">${content.text}</pre>
                           ${content.truncated ? html`<p class="efs-quiet">${t('files.preview.truncated')}</p>` : nothing}`
-                      : html`<p>${t('files.preview.binary')}</p>`
+                      : content?.kind === 'media'
+                        ? this.#mediaView(content, verified.length, t)
+                        : html`<p>${t('files.preview.binary')}</p>`
                   }
                   <div class="wa-cluster wa-gap-xs">
                     ${

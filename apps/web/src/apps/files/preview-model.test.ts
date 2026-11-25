@@ -159,6 +159,18 @@ describe('runPreview Lens', () => {
 });
 
 describe('classifyContent', () => {
+  it('media comes first: images by signature, and SVG (text) only as an image', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    expect(classifyContent(png)).toEqual({
+      kind: 'media',
+      media: { kind: 'image', mime: 'image/png' },
+    });
+    expect(classifyContent(utf8('<svg xmlns="http://www.w3.org/2000/svg"></svg>'))).toEqual({
+      kind: 'media',
+      media: { kind: 'image', mime: 'image/svg+xml' },
+    });
+  });
+
   const utf8 = (s: string) => new TextEncoder().encode(s);
   it('decodes UTF-8 text, including non-ASCII', () => {
     expect(classifyContent(utf8('héllo ✓'))).toEqual({

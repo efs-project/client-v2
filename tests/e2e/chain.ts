@@ -76,8 +76,8 @@ export interface TestChain {
   breakJournalAfterSend(page: Page): Promise<void>;
   /** All modes: let `page` write to IndexedDB again. */
   restoreJournal(page: Page): Promise<void>;
-  /** Live and record: edit the seeded readme from Node as anvil account `index`. */
-  readonly editAs: ((index: number, text: string) => Promise<void>) | undefined;
+  /** Live and record: replace the seeded readme's contents from Node as anvil account `index`. */
+  readonly editAs: ((index: number, content: string | Uint8Array) => Promise<void>) | undefined;
   /** Transactions the wallet actually broadcast (sent, not refused). */
   readonly broadcasts: readonly string[];
   /**
@@ -212,7 +212,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     if (!readme) throw new Error('the fixture seed has no readme.txt');
     deployment = `${JSON.stringify(chain.deployment, null, 2)}\n`;
     ids = { file: readme.subjectId, account };
-    editAs = async (index, text) => {
+    editAs = async (index, contentIn) => {
       const [{ createEfs }, { createWriter, memoryJournal }, { openFile, planEditFile }] =
         await Promise.all([
           import('@efs/sdk'),
@@ -232,7 +232,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       const plan = await planEditFile(efs, writer, {
         file,
         base: { kind: 'revision', recordId: opened.file.revision },
-        content: new TextEncoder().encode(text),
+        content: typeof contentIn === 'string' ? new TextEncoder().encode(contentIn) : contentIn,
       });
       if (plan.status !== 'PLANNED') throw new Error(`editAs: ${plan.status}`);
       const done = await writer.runSequence(plan.parts);

@@ -15,6 +15,7 @@ import type {
   ReadOpts,
   RevisionRef,
 } from '@efs/sdk/files';
+import { type MediaKind, sniffMedia } from './media.ts';
 
 export type PreviewTarget = FileRef | RevisionRef;
 
@@ -25,6 +26,8 @@ export const PREVIEW_MAX_CHARS = 200_000;
 
 export type Content =
   | { readonly kind: 'text'; readonly text: string; readonly truncated: boolean }
+  /** An image, audio or video the bytes' own signature names (see media.ts). */
+  | { readonly kind: 'media'; readonly media: MediaKind }
   | { readonly kind: 'binary' };
 
 type Present = Extract<OpenResult, { status: 'PRESENT' }>;
@@ -52,6 +55,9 @@ export interface PreviewReads {
 
 /** Text if the bytes are valid UTF-8 without NUL; otherwise binary. Never guesses an encoding. */
 export function classifyContent(bytes: Uint8Array): Content {
+  // Media first: SVG is text too, and is shown only as an image.
+  const media = sniffMedia(bytes);
+  if (media) return { kind: 'media', media };
   if (bytes.includes(0)) return { kind: 'binary' };
   let text: string;
   try {

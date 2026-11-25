@@ -180,7 +180,7 @@ The meta policy (`apps/web/vite.config.ts`), checked directive by directive in e
 default-src 'self'; script-src 'self';
 style-src 'self' 'sha256-<wa-page mobile styles>' 'report-sample';
 style-src-attr 'unsafe-hashes' 'sha256-<"display: block; height: 0;">' 'report-sample';
-img-src 'self' data:; font-src 'self';
+img-src 'self' data: blob:; media-src blob:; font-src 'self';
 connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* http://*.localhost:*
             ws://localhost:* ws://127.0.0.1:* ws://*.localhost:*;
 worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none';
@@ -192,6 +192,7 @@ require-trusted-types-for 'script'; trusted-types lit-html
 - **The two style hashes** cover the only inline styles Web Awesome renders from markup: `<wa-page>`'s mobile-breakpoint `<style>` (depends on the Web Awesome version and `mobile-breakpoint="920"`) and one `style` attribute on its empty measuring div. `'unsafe-hashes'` admits only an attribute whose entire text matches that hash; every other inline style stays blocked. Without it, every page load logged a CSP error. e2e recomputes both hashes from the live page and fails with the new value when either drifts (a Web Awesome bump will do this).
 - Styles set through CSSOM (`el.style.x = …`, Lit's `styleMap`) are not inline styles under CSP and are unaffected.
 - `img-src data:` is for Web Awesome's `native.css` form-control glyphs.
+- `img-src blob:` and `media-src blob:` (slice G) are for showing a file's VERIFIED bytes as an image, audio or video in the Preview. The client creates those `blob:` URLs only after verification, from bytes it holds, and revokes them when the read is replaced. Nothing else is fetched through them.
 - Unusable Web Awesome helpers under this policy: `wa-markdown` and `wa-include` (they assign HTML strings), and the string forms of toast helpers. Markdown rendering will need our own Trusted-Types-safe renderer.
 - The SDK confirmed (2026-11-24) its browser entry points use no WebAssembly, eval, workers or DOM sinks, so it needs nothing beyond `connect-src`.
 
