@@ -39,7 +39,8 @@ saves session <── journal (non-creating check) <── every verified sessio
     - **A reorder is never silent.** When connecting changes what a file shows, the Preview says so: "Showing your version · also: <author>'s".
     - **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.** Otherwise "the view never switches by itself" still holds.
     - **The review's "this view shows <author>'s version first" is computed from the lens at review time.** With "you" first, it appears only when the person put someone else first, or opened a link that carries its own lens.
-    - **Test, when built:** start an edit on the owner's version as a guest, then connect a wallet that has its own version of the file. The editor stays on the owner's text and base, and Review finds BASE_CHANGED against the person's own version, never saving over either one unasked.
+    - **Test, when built:** start an edit on the owner's version as a guest, then connect a wallet that has its own version of the file. The editor stays on the owner's text, and Review plans from the owner's revision as its base. It never saves over the person's own version, or the owner's, unasked.
+    - **Open, for when it's built:** if the SDK answers that plan with BASE_CHANGED because the view now shows the person's own version first, "This file has changed since you started it" would be wrong: nothing changed, the view reordered. That case needs its own copy, such as "You connected, and this view now shows your own version first. Save over it, or keep editing the version you started from?". It's to be worded with the SDK's answer.
 - **Review copy.**
   - Who sees the edit: "Your edit appears to anyone whose lens includes you."
   - How many approvals: one, or one per part (one if the wallet sends batches).
