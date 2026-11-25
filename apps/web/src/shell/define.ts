@@ -5,6 +5,7 @@ import { EfsNetworkIndicator } from './network-indicator.ts';
 import { EfsPaneHost } from './pane-host.ts';
 import { EfsSettingsPanel } from './settings-panel.ts';
 import { EfsShell } from './shell.ts';
+import { EfsWallet } from './wallet-ui.ts';
 
 export function registerShellElements(): void {
   customElements.define('efs-shell', EfsShell);
@@ -13,4 +14,5 @@ export function registerShellElements(): void {
   customElements.define('efs-settings-panel', EfsSettingsPanel);
   customElements.define('efs-endpoint-list', EfsEndpointList);
   customElements.define('efs-outcome', EfsOutcome);
+  customElements.define('efs-wallet', EfsWallet);
 }

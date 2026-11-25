@@ -213,3 +213,68 @@ export async function openAbout(page: Page): Promise<void> {
   await openSettings(page);
   await page.locator('.efs-digest').waitFor();
 }
+
+export interface FakeWallet {
+  readonly name: string;
+  readonly rdns: string;
+  readonly account: string;
+  readonly chainId: number;
+  /** Refuse eth_requestAccounts (EIP-1193 4001). */
+  readonly refuse?: boolean;
+}
+
+/**
+ * Installs fake EIP-6963 wallets that answer like a real one and record every call
+ * (`walletCalls(page)`), so tests can prove nothing touches a wallet before Connect.
+ */
+export async function installWallets(page: Page, wallets: readonly FakeWallet[]): Promise<void> {
+  await page.addInitScript((list) => {
+    const calls: string[] = [];
+    Object.defineProperty(window, '__efsWalletCalls', { value: calls });
+    const providers = list.map((w) => {
+      let chainId = w.chainId;
+      const listeners = new Map<string, Set<(v: unknown) => void>>();
+      const emit = (event: string, value: unknown) => {
+        for (const fn of listeners.get(event) ?? []) fn(value);
+      };
+      const provider = {
+        async request({ method, params }: { method: string; params?: unknown }) {
+          calls.push(`${w.rdns}:${method}`);
+          if (method === 'eth_requestAccounts') {
+            if (w.refuse) throw Object.assign(new Error('User rejected'), { code: 4001 });
+            return [w.account];
+          }
+          if (method === 'eth_accounts') return [w.account];
+          if (method === 'eth_chainId') return `0x${chainId.toString(16)}`;
+          if (method === 'wallet_switchEthereumChain') {
+            const wanted = Number.parseInt((params as [{ chainId: string }])[0].chainId, 16);
+            chainId = wanted;
+            setTimeout(() => emit('chainChanged', `0x${wanted.toString(16)}`), 0);
+            return null;
+          }
+          throw Object.assign(new Error(`unsupported ${method}`), { code: 4200 });
+        },
+        on(event: string, fn: (v: unknown) => void) {
+          if (!listeners.has(event)) listeners.set(event, new Set());
+          listeners.get(event)?.add(fn);
+        },
+        removeListener(event: string, fn: (v: unknown) => void) {
+          listeners.get(event)?.delete(fn);
+        },
+      };
+      return {
+        info: { uuid: crypto.randomUUID(), name: w.name, icon: '', rdns: w.rdns },
+        provider,
+      };
+    });
+    window.addEventListener('eip6963:requestProvider', () => {
+      calls.push('eip6963:requestProvider');
+      for (const detail of providers) {
+        window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail }));
+      }
+    });
+  }, wallets);
+}
+
+export const walletCalls = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __efsWalletCalls: string[] }).__efsWalletCalls);

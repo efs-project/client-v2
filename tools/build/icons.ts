@@ -33,6 +33,7 @@ export const APP_ICONS = [
   'trash',
   'triangle-exclamation',
   'upload',
+  'wallet',
 ] as const;
 
 const OUT = `${WEB}public/icons/efs-icons.svg`;

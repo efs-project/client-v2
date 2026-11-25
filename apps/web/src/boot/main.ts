@@ -15,6 +15,7 @@ import { registerShellElements } from '../shell/define.ts';
 import { createOsState } from '../shell/os-state.ts';
 import { createReaderSession } from '../shell/reader-state.ts';
 import type { EfsShell } from '../shell/shell.ts';
+import { createWalletSession } from '../shell/wallet-state.ts';
 import { computed } from '../state/signals.ts';
 import { AVAILABLE_LOCALES, loadTranslator, PSEUDO_LOCALES, SOURCE_LOCALE } from '../ui/i18n.ts';
 import { registerIconLibraries, watchIconSprite } from '../ui/wa/define.ts';
@@ -103,6 +104,8 @@ async function boot(): Promise<void> {
   const shell = document.createElement('efs-shell') as EfsShell;
   shell.os = os;
   shell.reader = reader;
+  // Touches no wallet until the person clicks Connect.
+  shell.wallet = createWalletSession(scope);
   shell.translator = translator;
   shell.apps = APPS;
   document.getElementById('efs-boot')?.replaceWith(shell);

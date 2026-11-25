@@ -162,6 +162,7 @@ test('only the expected custom elements are registered', async ({ page }) => {
     'efs-pane-host',
     'efs-settings-panel',
     'efs-shell',
+    'efs-wallet',
   ]);
   // Web Awesome elements come only from src/ui/wa/define.ts; nothing else defines elements.
   expect(names.filter((n) => !n.startsWith('efs-') && !n.startsWith('wa-'))).toEqual([]);

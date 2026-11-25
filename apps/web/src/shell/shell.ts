@@ -27,6 +27,7 @@ import { OPEN_SETTINGS_EVENT } from './network-indicator.ts';
 import type { OsState } from './os-state.ts';
 import type { ReaderSession } from './reader-state.ts';
 import type { EfsSettingsPanel } from './settings-panel.ts';
+import type { WalletSession } from './wallet-state.ts';
 
 type AppSlot =
   | { readonly status: 'loading'; readonly app: AppDescriptor }
@@ -39,11 +40,13 @@ export class EfsShell extends EfsElement {
   static override properties = {
     os: { attribute: false },
     reader: { attribute: false },
+    wallet: { attribute: false },
     translator: { attribute: false },
     apps: { attribute: false },
   };
   declare os: OsState;
   declare reader: ReaderSession;
+  declare wallet: WalletSession;
   declare translator: Translator;
   declare apps: readonly AppDescriptor[];
 
@@ -255,6 +258,11 @@ export class EfsShell extends EfsElement {
             ${title ? html`<h1 class="efs-app-title">${t(title)}</h1>` : nothing}
           </div>
           <div class="wa-cluster wa-gap-2xs">
+            <efs-wallet
+              .wallet=${this.wallet}
+              .network=${this.os.network.get()}
+              .translator=${this.translator}
+            ></efs-wallet>
             <efs-network-indicator
               .network=${this.os.network.get()}
               .reader=${this.reader.state.get()}
