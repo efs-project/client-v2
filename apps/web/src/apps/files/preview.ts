@@ -18,6 +18,7 @@ import { type EditDoneDetail, shortId } from './editor.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
+import type { ObjectKind, ObjectKindState } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
 
@@ -58,6 +59,14 @@ const hostOf = (origin: string): string => {
   }
 };
 
+/** Two Lenses read the same: both the default, or the same principals in the same order. */
+const sameLens = (a: Lens | undefined, b: Lens | undefined): boolean =>
+  a === b ||
+  (a !== undefined &&
+    b !== undefined &&
+    a.principals.length === b.principals.length &&
+    a.principals.every((p, i) => p.toLowerCase() === b.principals[i]?.toLowerCase()));
+
 const loadReads = async (): Promise<PreviewReads> => {
   const { openFile, readBytes } = await import('@efs/sdk/files');
   return { openFile, readBytes };
@@ -71,8 +80,11 @@ export class EfsFilesPreview extends EfsElement {
     host: { attribute: false },
     target: { attribute: false },
     nav: { attribute: false },
+    object: { attribute: false },
   };
   declare host: AppHost;
+  /** What the route's object link names: a file is read here only once openObject says so. */
+  declare object: ObjectKindState | undefined;
   /** Where the person browsed in this tab: a file opened from a listing reads in its Lens. */
   declare nav: FolderNav | undefined;
   /** What the route's link asks for. */
@@ -101,6 +113,8 @@ export class EfsFilesPreview extends EfsElement {
   #mediaFailed = state(false);
   /** Saves handed off from this pane, and those already refreshed for (once each). */
   #handedOff = new Set<string>();
+  /** Open results from the object-kind resolver already shown once (never reused after). */
+  #usedOpens = new WeakSet<object>();
   #refreshed = new Set<string>();
 
   protected override createRenderRoot() {
@@ -113,7 +127,9 @@ export class EfsFilesPreview extends EfsElement {
     effect(scope, () => {
       const efs = verifiedEfs(this.host.reader.get());
       const link = this.target.get();
-      const key = link.status === 'target' ? link.canonical : undefined;
+      // An object link is read as a file only once openObject says it is one.
+      const kind = this.object?.kind.get().status;
+      const key = link.status === 'target' ? `${link.canonical}|${kind ?? ''}` : undefined;
       if (efs === this.#loaded?.efs && key === this.#loaded?.key) return;
       this.#loaded = efs && key ? { efs, key } : undefined;
       // Another file (or session): drop this file's view choices. The editor stays open only if
@@ -166,6 +182,10 @@ export class EfsFilesPreview extends EfsElement {
       this.#state.set(undefined);
       return;
     }
+    if (link.target.kind === 'file' && this.object && this.object.kind.get().status !== 'file') {
+      this.#state.set(undefined);
+      return;
+    }
     const run = this.#scope.child();
     this.#run = run;
     // Opening from now on, not when the first read answers: until then the pane would still
@@ -183,6 +203,17 @@ export class EfsFilesPreview extends EfsElement {
       .then((reads) => {
         if (!reads || run.signal.aborted) return undefined;
         const lens = this.#viewLens(efs, link);
+        // The resolver's openFile, reused once and only in the same Lens: a reload (after a save,
+        // "Show my version", Try again) always opens the file afresh.
+        const kind = this.object?.kind.get();
+        const opened =
+          kind?.status === 'file' &&
+          !this.#usedOpens.has(kind.open) &&
+          sameLens(kind.lens, lens) &&
+          link.target.kind === 'file'
+            ? kind.open
+            : undefined;
+        if (opened) this.#usedOpens.add(opened);
         const show = (s: PreviewState) => {
           this.#mediaUrl.set(this.#mediaUrlFor(s, run));
           this.#mediaFailed.set(false);
@@ -190,6 +221,7 @@ export class EfsFilesPreview extends EfsElement {
         };
         return runPreview(reads, efs, link.target, run.signal, show, {
           force,
+          ...(opened ? { opened } : {}),
           ...(lens ? { lens } : {}),
           ...(allowOrigins ? { allowOrigins } : {}),
         });
@@ -365,13 +397,19 @@ export class EfsFilesPreview extends EfsElement {
    * way to discard it, so the leave prompt never stays with no way to clear it. If a later read
    * gets the text, the editor reopens on the edit as usual.
    */
-  #unreachableDraft(s: PaneState | undefined, t: Translator['t']) {
+  /**
+   * `elsewhere`: the link settled as something other than a readable file (a folder, nothing,
+   * UNKNOWN), so the kept edit can't be shown either.
+   */
+  #unreachableDraft(s: PaneState | undefined, t: Translator['t'], elsewhere = false) {
     const drafts = this.host.saving.drafts;
     const key = this.#draftKey();
     // Read the count so this re-renders when the edit is dropped.
     if (drafts.count.get() === 0 || key === undefined || !drafts.get(key)) return nothing;
-    if (!s || s.phase === 'opening' || s.phase === 'reading') return nothing;
+    if (!elsewhere && (!s || s.phase === 'opening' || s.phase === 'reading')) return nothing;
     const editable =
+      !elsewhere &&
+      s !== undefined &&
       s.phase === 'read' &&
       s.bytes.grade === 'VERIFIED' &&
       s.bytes.bytes !== undefined &&
@@ -459,6 +497,28 @@ export class EfsFilesPreview extends EfsElement {
       </p>`;
     }
     return nothing;
+  }
+
+  /** An object link that isn't (yet) known to be a file: never read as one. */
+  #object(named: ObjectKind, t: Translator['t']) {
+    switch (named.status) {
+      case 'folder':
+        return html`<p class="efs-quiet efs-preview-folder">${t('files.preview.isFolder')}</p>`;
+      case 'absent':
+      case 'invalid':
+      case 'unknown':
+        return html`<efs-outcome
+          .kind=${'read'}
+          .code=${named.status === 'absent' ? 'ABSENT_PROVEN' : named.status === 'invalid' ? 'INVALID' : 'UNKNOWN'}
+          .translator=${this.host.translator}
+          retryable
+          @efs-retry=${() => this.object?.retry()}
+        ></efs-outcome>`;
+      default:
+        return html`<p class="wa-cluster wa-gap-xs" role="status">
+          <wa-spinner></wa-spinner>${t('files.preview.opening')}
+        </p>`;
+    }
   }
 
   #body(s: PaneState, t: Translator['t']) {
@@ -627,8 +687,11 @@ export class EfsFilesPreview extends EfsElement {
     const t = this.host.translator.t.bind(this.host.translator);
     const link = this.target.get();
     if (link.status === 'none') return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
-    if (link.status === 'path')
-      return html`<p class="efs-quiet">${t('files.preview.pathLink')}</p>`;
+    if (link.status === 'path') {
+      return html`<p class="efs-quiet efs-preview-soon">
+        ${t(link.kind === 'topic' ? 'files.preview.topicSoon' : 'files.preview.homeSoon')}
+      </p>`;
+    }
     if (link.status === 'invalid') {
       return html`<wa-callout variant="warning">
         <span slot="icon">${appIcon('triangle-exclamation')}</span>
@@ -640,7 +703,13 @@ export class EfsFilesPreview extends EfsElement {
     }
     const notice = readerNotice(this, this.host, t);
     if (notice) return notice;
+    const named = link.target.kind === 'file' ? this.object?.kind.get() : undefined;
     const s = this.#state.get();
+    if (named && named.status !== 'file' && named.status !== 'none') {
+      return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
+        ${this.#unreachableDraft(s, t, named.status !== 'pending')} ${this.#object(named, t)}
+      </div>`;
+    }
     return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
       ${this.#unreachableDraft(s, t)}
       ${s ? this.#body(s, t) : html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${t('files.preview.opening')}</p>`}

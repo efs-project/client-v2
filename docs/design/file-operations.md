@@ -1,6 +1,6 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** partly built on branch `feat/folder-ops` (2026-11-25), on sdk-v2 74a4d5e.
+**Status:** partly built (on main since 2026-11-25; folder links through `openObject` on sdk-v2 c8ed37a).
 - **Built:**
   - listing from the realm root, with whose-labels, the kind filter and honest coverage;
   - in-tab navigation and the breadcrumb;
@@ -82,7 +82,7 @@ Draft flows and copy for the integration owner's (PM's) review. Revised for the 
 
 - **Links** (decision-sheet default, 2026-11-25).
   - **Folder paths live under an address:** `#/r/<realm>/0x…/photos/2026`. A bare path is a topic, never a folder.
-  - **The realm's shared root folder gets no link of its own.** So until addresses are places (contracts C8), a folder opens by its permanent object link (`~efs/o/<id>`), like a file.
+  - **The realm's shared root folder gets no link of its own.** Until addresses are places (contracts C8), a folder opens by its permanent object link (`~efs/o/<directory>`; since sdk-v2 c8ed37a a folder's id is its record, so `openObject` tells it from a file and the link survives a reload).
   - **Object links stay the default for sharing** (PM, 2026-11-25).
     - Until addresses are places, no folder path link is shared at all.
     - Once they are, a folder path link can be shared, labelled as a lookup that a rename can break: "This link finds whatever is called this here, and can break if it's renamed."

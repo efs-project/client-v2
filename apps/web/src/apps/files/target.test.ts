@@ -36,9 +36,13 @@ describe('linkState', () => {
     expect(state.canonical).toContain(SUBJECT);
   });
 
-  it('reports invalid links and path links instead of guessing', () => {
+  it('reports invalid links, and address and topic links, instead of guessing', () => {
     expect(at('~efs/o/0x1234')).toMatchObject({ status: 'invalid' });
     expect(at('~efs/o/0x1?lens=alice.eth')).toMatchObject({ status: 'invalid' });
-    expect(at('photos/cat.jpg')).toEqual({ status: 'path' });
+    // A bare path is a topic; a first segment of 0x + 40 hex is an address (home).
+    expect(at('cars/tesla')).toEqual({ status: 'path', kind: 'topic' });
+    expect(at(`0x${'ab'.repeat(20)}/photos/cat.jpg`)).toEqual({ status: 'path', kind: 'home' });
+    // Anything else starting with ~ is the system's, and refused.
+    expect(at('~other/x')).toMatchObject({ status: 'invalid' });
   });
 });

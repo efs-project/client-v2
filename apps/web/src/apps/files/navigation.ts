@@ -1,9 +1,8 @@
 // Where the person is in the folder tree, in this tab's memory only.
 //
-// Folder navigation stays out of the URL until the SDK can tell a folder from a file by its link
-// alone (openObject, after the contracts fix a subject's kind at birth). A folder's object link
-// opened fresh would otherwise be read as a file and show "Confirmed not present". So the URL stays
-// at the realm root while the person browses; files still open by their permanent link.
+// The URL says which folder is shown (its object link, routed through openObject); this keeps the
+// trail of folders the person came through, for the breadcrumb. A folder opened by its link with
+// no trail (a reload, a shared link) starts a new trail with just itself.
 
 import type { Lens } from '@efs/sdk';
 import type { FolderRef } from '@efs/sdk/files';
@@ -29,6 +28,8 @@ export interface FolderNav {
   open(step: NavStep): void;
   /** Back to the root (0), or to the folder at `depth` (1 is the first opened). */
   back(depth: number): void;
+  /** A folder opened by its link (a reload, a shared link): it becomes the only folder opened. */
+  resetTo(step: NavStep): void;
   /**
    * Remembers the Lens a file row was shown in, before the file opens. The Preview reads that
    * file in it, so a file listed as "yours" isn't "not present" there. Tab memory only: links
@@ -58,6 +59,10 @@ export function createFolderNav(): FolderNav {
     open(step) {
       browsing.set(true);
       path.set([...path.get(), step]);
+    },
+    resetTo(step) {
+      browsing.set(true);
+      path.set([step]);
     },
     back(depth) {
       const now = path.get();

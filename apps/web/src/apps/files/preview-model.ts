@@ -94,6 +94,11 @@ export interface PreviewOptions {
    * come from a previous result's `blockedOrigins`. Never remembered.
    */
   readonly allowOrigins?: readonly string[];
+  /**
+   * The file already opened under the same Lens (by the object-kind resolver's openFile): used in
+   * place of a second openFile for the same read.
+   */
+  readonly opened?: OpenResult;
 }
 
 /**
@@ -106,10 +111,10 @@ export async function runPreview(
   target: PreviewTarget,
   signal: AbortSignal,
   emit: (state: PreviewState) => void,
-  { force = false, lens, allowOrigins }: PreviewOptions = {},
+  { force = false, lens, allowOrigins, opened }: PreviewOptions = {},
 ): Promise<void> {
   emit({ phase: 'opening' });
-  const open = await reads.openFile(efs, target, lens ? { signal, lens } : { signal });
+  const open = opened ?? (await reads.openFile(efs, target, lens ? { signal, lens } : { signal }));
   if (signal.aborted) return;
   if (open.status !== 'PRESENT') {
     emit({ phase: 'not-present', open });
