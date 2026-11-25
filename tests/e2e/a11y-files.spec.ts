@@ -59,12 +59,48 @@ async function activate(page: Page, target: ReturnType<Page['locator']>): Promis
   await page.keyboard.press('Enter');
 }
 
+/**
+ * Holds back the chunk that brings the name check (the SDK's own module, fetched when a naming
+ * dialog first opens), so the keys below land before it arrives: the race a fast typist meets.
+ */
+async function slowNameCheck(page: Page): Promise<void> {
+  await page.route(/\/dist-[\w-]+\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+}
+
+/**
+ * Counts the folder dialog's plans from here on: each one shows its "Preparing…" status (a new
+ * spinner in the dialog), so two plans would show it twice.
+ */
+async function countPlannings(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __plannings: number };
+    w.__plannings = 0;
+    const d = document.querySelector('wa-dialog.efs-folder-save');
+    if (!d) throw new Error('no folder dialog');
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (
+            n instanceof Element &&
+            n.matches('p[role="status"]') &&
+            n.querySelector('wa-spinner')
+          )
+            w.__plannings++;
+        }
+      }
+    }).observe(d, { childList: true, subtree: true });
+  });
+}
+
 /** Focus is somewhere meaningful, never dropped on the page. */
 async function focusKept(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true);
 }
 
-test('New folder by keyboard: the name takes focus, refusals are announced, Enter reviews, axe clean throughout', async ({
+test('New folder by keyboard: the name takes focus; Enter twice before the name check arrives plans once; axe clean throughout', async ({
   page,
 }) => {
   const chain = await testChain(
@@ -74,17 +110,19 @@ test('New folder by keyboard: the name takes focus, refusals are announced, Ente
   try {
     await start(page, chain);
     expect(await axe(page), 'listing').toEqual([]);
+    await slowNameCheck(page);
     await activate(page, entries(page).locator('wa-button.efs-new-folder'));
     await expect(dialog(page).locator('wa-input.efs-folder-name')).toBeFocused();
-    expect(await axe(page), 'naming').toEqual([]);
-    await page.keyboard.type('projects ');
-    await expect(dialog(page).locator('[role="alert"]')).toContainText(
-      "A name can't start or end with a space.",
-    );
-    expect(await axe(page), 'name refused').toEqual([]);
-    await page.keyboard.press('Backspace');
+    // Typed and Enter twice before the name check has even arrived (held back above): the
+    // Enter waits for it, and plans once, never twice.
+    await countPlannings(page);
+    await page.keyboard.type('projects');
+    await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await expect(dialog(page)).toContainText(/Creates the folder\W+projects\W+in\W+Root/);
+    expect(
+      await page.evaluate(() => (window as unknown as { __plannings: number }).__plannings),
+    ).toBe(1);
     expect(await axe(page), 'review').toEqual([]);
     chain.step('Keyboard: New folder, type, Enter: reviewed');
     await activate(page, send(page));
@@ -100,7 +138,7 @@ test('New folder by keyboard: the name takes focus, refusals are announced, Ente
   }
 });
 
-test('Rename by keyboard: the name is selected for editing, Enter reviews, Send by keyboard', async ({
+test('Rename by keyboard: the name is selected for editing, a refused name is announced, Enter reviews, Send by keyboard', async ({
   page,
 }) => {
   const chain = await testChain('client-a11y-rename', 'draft.txt by anvil #6 at the root.');
@@ -112,7 +150,15 @@ test('Rename by keyboard: the name is selected for editing, Enter reviews, Send 
     await expect(name).toBeFocused();
     await expect(name.locator('input')).toHaveValue('draft.txt');
     await page.keyboard.press('ControlOrMeta+a');
-    await page.keyboard.type('final.txt');
+    await page.keyboard.type('final.txt ');
+    // A refused name is announced (an alert), and Enter does nothing with it.
+    await expect(dialog(page).locator('[role="alert"]')).toContainText(
+      "A name can't start or end with a space.",
+    );
+    expect(await axe(page), 'name refused').toEqual([]);
+    await page.keyboard.press('Enter');
+    await expect(dialog(page).locator('wa-input.efs-folder-name')).toBeFocused();
+    await page.keyboard.press('Backspace');
     await page.keyboard.press('Enter');
     await expect(dialog(page)).toContainText(/Rename\W+draft\.txt\W+to\W+final\.txt/);
     expect(await axe(page), 'rename review').toEqual([]);
@@ -238,7 +284,7 @@ test('Upload by keyboard: Enter on Upload opens the file chooser; the name takes
   }
 });
 
-test('New text file by keyboard: Enter writes it, focus lands in the text, Review and Send by keyboard', async ({
+test('New text file by keyboard: Enter twice before the name check arrives writes it once; focus lands in the text; Review and Send by keyboard', async ({
   page,
 }) => {
   const chain = await testChain(
@@ -247,12 +293,24 @@ test('New text file by keyboard: Enter writes it, focus lands in the text, Revie
   );
   try {
     await start(page, chain);
+    await slowNameCheck(page);
     await activate(page, entries(page).locator('wa-button.efs-new-file'));
     await expect(dialog(page).locator('wa-input.efs-folder-name')).toBeFocused();
     await page.keyboard.type('hello.txt');
+    // Enter twice, quickly: the editor is started once, never twice.
+    await page.evaluate(() => {
+      const w = window as unknown as { __composes: number };
+      w.__composes = 0;
+      document.addEventListener('efs-compose', () => w.__composes++, true);
+    });
+    await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     const editor = preview(page).locator('efs-file-editor');
     await expect(editor.locator('textarea.efs-edit-text')).toBeFocused();
+    expect(
+      await page.evaluate(() => (window as unknown as { __composes: number }).__composes),
+    ).toBe(1);
+    await expect(preview(page).locator('efs-file-editor')).toHaveCount(1);
     await page.keyboard.type('Hello by keyboard.\n');
     expect(await axe(page), 'new file editor').toEqual([]);
     await activate(page, editor.locator('wa-button.efs-edit-review-button'));
