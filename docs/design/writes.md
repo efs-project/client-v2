@@ -33,18 +33,19 @@ saves session <── journal (non-creating check) <── every verified sessio
 - **Plan in the view's Lens.** The edit is planned in the link's Lens, else the default. The base check and `review.visibleInLens` are therefore about what the person is looking at.
   - When the view won't show the edit (`visibleInLens` false: the Lens leaves the author out, or puts another author first), the review says so before Send: "Your edit will be saved, but this view shows <author>'s version first."
   - After such a save, "Show my version" switches this file's view to `mineFirst(account)` for this tab. The view never switches by itself, apart from the identity changes below.
-  - **Decided, not yet built: "you" first when connected** (PM, 2026-11-25, from James's *"me, vitalik, public"* example; `tags.md`, Whose entries).
-    - The view's lens becomes: the connected account, then the place's owner, then the link's or default lens, then public.
+  - **"You" first when connected (D10; built)** (PM, 2026-11-25, from James's *"me, vitalik, public"* example; `tags.md`, Whose entries).
+    - The view's lens becomes: the connected account, then the place's owner, then the link's or default lens, then public. A link that carries its own lens keeps it: the view is the sharer's (`object-kind.ts` `readLens`, used by both the object read and the Preview, so the opened file is still reused in the same lens). An identity change reads the file again under the new order.
     - **An unsaved edit keeps its base** when connecting or disconnecting reorders the view (slice H's rule). Review plans from the kept base, never from the newly shown version, so BASE_CHANGED asks before anything is saved over.
-    - **A reorder is never silent.** When connecting changes what a file shows, the Preview says so: "Showing your version · also: <author>'s".
+    - **A reorder is never silent.** When connecting changes what a file shows, the Preview says so: "Showing your version · also: <author>'s". An unsaved edit reopened under the new order says "This view now shows your own version first, so saving will ask before replacing it", never "changed".
     - **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.** Otherwise "the view never switches by itself" still holds.
     - **The review's "this view shows <author>'s version first" is computed from the lens at review time.** With "you" first, it appears only when the person put someone else first, or opened a link that carries its own lens.
     - **Test, when built:** start an edit on the owner's version as a guest, then connect a wallet that has its own version of the file. The editor stays on the owner's text, and Review plans from the owner's revision as its base. It never saves over the person's own version, or the owner's, unasked.
     - **A reorder isn't a change.** The SDK's base check is "the file's HEAD under the lens must still be `base`". With "you" first, that plan answers BASE_CHANGED with `head` set to the person's own version (SDK, via the PM, 2026-11-25).
-      - The editor tells this apart from a real change: it's a reorder when `head` is the connected account's own revision, and nothing new was saved since the edit began.
+      - The editor tells this apart from a real change: it's a reorder when `headAuthor` is the connected account and `headAdmission` is no later than the admissions of the basis the edit began from. That count is kept with the edit's base in the unsaved draft, so coming back later still tells the two apart.
       - A reorder gets its own copy, never "This file has changed since you started it": "You connected, and this view now shows your own version first. Save over it, or keep editing the version you started from?" (draft, PM-accepted).
-      - Saving over keeps the person's older version in history.
-      - **Needs from the SDK:** `RevisionRef` is `{ kind, recordId, file? }`, with no author, so the editor can't yet tell whose revision `head` is. The PM is asking the SDK dev for it.
+      - Saving over keeps the person's older version in history. "Keep editing the version I started from" changes nothing and sends nothing; the next Review asks again.
+      - **The person's own version saved elsewhere after the edit began** (another tab) is a change, not a reorder: "Your own version of this file changed since you opened it (another tab or device saved it)", with the change's choices (save over it, or discard and show it). Under a sharer's lens, where the view's head is still the other author's, the plan goes through and the editor says so first ("Review and save anyway").
+      - The SDK gives BASE_CHANGED `headAuthor` and `headAdmission` (sdk-v2, compare with `Basis.admissions`).
 - **Review copy.**
   - Who sees the edit: "Your edit appears to anyone whose lens includes you."
   - How many approvals: one, or one per part (one if the wallet sends batches).
