@@ -11,7 +11,8 @@
       "!pnpm-lock.yaml",
       "!**/*.json.d.ts",
       "!apps/web/src/ui/wa/icon-ids.ts",
-      "!apps/web/public/icons"
+      "!apps/web/public/icons",
+      "!tests/e2e/transcripts"
     ]
   },
   "formatter": {

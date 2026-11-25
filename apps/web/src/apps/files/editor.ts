@@ -22,7 +22,6 @@ import type { EditPlanResult, OpenedFile, RevisionRef } from '@efs/sdk/files';
 import type { AppHost } from '../../shell/apps.ts';
 import { type SaveHold, saveHold } from '../../shell/save-hold.ts';
 import {
-  isFault,
   type SaveOutcome,
   saveMessage,
   saveOutcome,

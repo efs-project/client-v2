@@ -6,9 +6,18 @@
 // EFS_CHAIN=live runs it against a fresh @efs/fixture chain, and EFS_CHAIN=record re-records
 // the transcripts (see tests/e2e/chain.ts).
 
-import { link } from '@efs/sdk';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
+import {
+  editAndReview,
+  objectLink,
+  openFile,
+  preview,
+  SEEDED,
+  save,
+  sendRequests,
+  start,
+} from './edit-support.ts';
 import {
   booted,
   replayRpc,
@@ -25,54 +34,7 @@ test.skip(
   'the live chain runs in Chromium only',
 );
 
-const SEEDED = 'Meeting at 10:00.\n';
-const objectLink = (subject: string) => link({ kind: 'object', subject: subject as `0x${string}` });
-const sends = (chain: TestChain) => chain.walletCalls.filter((m) => m === 'eth_sendTransaction');
-
-const preview = (page: Page) => page.locator('efs-files-preview');
-const save = (page: Page, outcome: string) =>
-  page.locator(`efs-saves-banner .efs-save[data-outcome="${outcome}"]`);
-
-async function openFile(page: Page, chain: TestChain): Promise<void> {
-  await page.goto(`./#/r/testnet/${objectLink(chain.ids.file as string)}`);
-  await booted(page);
-}
-
-async function start(page: Page, chain: TestChain): Promise<void> {
-  await chain.attach(page);
-  await serveConfig(page);
-  await serveDeployment(page, chain.deployment);
-  await openFile(page, chain);
-  await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
-}
-
-/** Edit → connect (one click, one wallet) → Review. Returns the open review dialog. */
-async function editAndReview(page: Page, chain: TestChain, text: string): Promise<Locator> {
-  await preview(page).locator('wa-button.efs-edit-start').click();
-  await page.locator('textarea.efs-edit-text').fill(text);
-  chain.step('Edit; type the new text');
-  // Typing needed no wallet; saving does. Connecting is one click with one wallet installed.
-  await page.locator('wa-button.efs-edit-connect').click();
-  const wallet = page.locator('wa-dialog.efs-wallet-dialog');
-  await expect(wallet).toContainText(/Your wallet is on .*Testnet/);
-  await page.keyboard.press('Escape');
-  await expect(wallet).not.toHaveAttribute('open');
-  chain.step('Connect (eth_requestAccounts, eth_chainId)');
-  const reviewButton = page.locator('wa-button.efs-edit-review-button');
-  await expect(reviewButton).not.toHaveAttribute('disabled');
-  await reviewButton.click();
-  chain.step('Review and save: createWriter, planEditFile in the default Lens');
-  const review = page.locator('wa-dialog.efs-edit-review');
-  await expect(review).toHaveAttribute('open', '');
-  await expect(review).toContainText('Your edit appears to anyone whose lens includes you.');
-  await expect(review).toContainText('One approval in your wallet.');
-  // The default Lens shows the fixture author's version first: said before Send, not after.
-  await expect(review.locator('.efs-review-not-visible')).toContainText(
-    /Your edit will be saved, but this view shows .*version first/,
-  );
-  await expect(review).toContainText("You're editing another author's version.");
-  return review;
-}
+const sends = (chain: TestChain) => sendRequests(chain);
 
 test('edit, review, one approval: Saved · confirming, and Show my version reads it back', async ({
   page,
@@ -122,9 +84,12 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
     );
     await expect.poll(() => sends(chain).length).toBe(1);
     await expect(review).toContainText('Approve in your wallet, then wait for the network');
-    // The SDK's first ledger check after the lost answer is done; leave before its next one.
-    await chain.quiet(400);
+    // Freeze the page's clock: the SDK's next ledger check waits on a timer, so it can't start.
+    // Its first check (already under way) then finishes on its own answers: leave after that.
+    await page.clock.pauseAt(new Date(Date.now() + 10));
+    await chain.idle();
     await page.goto('about:blank');
+    await page.clock.resume();
     chain.step('Leave the page while the transaction is pending; the chain mines it');
     await chain.control?.mine(1);
     await chain.control?.automine(true);
