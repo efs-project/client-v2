@@ -118,6 +118,20 @@ The client ↔ SDK routing contract (PM ledger, 2026-11-24; naming review §6):
 - **Appearance has a localStorage mirror** that the classic boot probe reads, so the first paint uses the right scheme. IndexedDB remains the truth.
 - **Export and import** are plain JSON files. The export warns that RPC URLs can contain API keys. Settings are per origin: a different IPFS CID or host starts empty, so export/import is how settings move between them.
 
+## Hosting profiles
+
+Browser storage belongs to an origin, and how a copy is hosted decides what its origin is (decisions: `offline-brief.md`, PM 2026-11-25).
+
+| Hosting | Origin | What the app does |
+|---|---|---|
+| Static host or custom domain, at the root or under a path prefix | its own | everything; settings and the save journal persist per origin |
+| IPFS CID subdomain (`<cid>.ipfs.gateway`) | its own, new for every release | everything; state starts empty at each release |
+| IPFS path gateway (`gateway/ipfs/<cid>/…`, `gateway/ipns/<name>/…`) | **shared** with every site that gateway serves | **read-only**: settings last for the tab (no IndexedDB, no appearance mirror), no save journal, no wallet; Connect and Edit explain why and link to the isolated copy |
+
+- **Detection is the address alone** (`platform/hosting.ts`), before any storage is opened.
+- **The isolated copy** is the operator's `delivery.isolatedCopy` in `efs.config.json`. Otherwise it is derived: the subdomain-gateway form of the same CID (CIDv1 base32 only) or IPNS name, never on an IP-address host. With neither, the notice says to open the app from its own address.
+- **Install metadata:** `manifest.webmanifest` (fixed `id` `/`; `start_url` and `scope` `./`) is linked only when `delivery.stableOrigin` names this origin. The offline/Service Worker profile will run only there (pending James's choice of origin).
+
 ## Network configuration
 
 - An effective network is the operator's definition overlaid with the user's replacement RPC and gateway lists, enabled entries only, in the user's order.

@@ -2,12 +2,14 @@
 // (Connect, a wallet choice, Switch network); nothing prompts by itself. "Disconnect" forgets the
 // connection in this tab: EIP-1193 has no disconnect, so the wallet keeps its own grant.
 
+import type { Hosting } from '../platform/hosting.ts';
 import type { WalletOption } from '../platform/wallet/discovery.ts';
 import { state } from '../state/signals.ts';
 import { EfsElement, html, nothing } from '../ui/element.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
 import type { NetworkState } from './network-state.ts';
+import { sharedGatewayNotice } from './shared-gateway.ts';
 import { type SwitchOutcome, shortAccount, type WalletSession } from './wallet-state.ts';
 
 const SWITCH_MESSAGE: Readonly<Record<Exclude<SwitchOutcome, 'SWITCHED'>, MessageId>> = {
@@ -21,10 +23,13 @@ export class EfsWallet extends EfsElement {
   static override properties = {
     wallet: { attribute: false },
     network: { attribute: false },
+    hosting: { attribute: false },
     translator: { attribute: false },
   };
   declare wallet: WalletSession;
   declare network: NetworkState;
+  /** On a shared IPFS path gateway, Connect only explains why saving is off here. */
+  declare hosting: Hosting | undefined;
   declare translator: Translator;
 
   #switchNotice = state<MessageId | undefined>(undefined);
@@ -45,6 +50,8 @@ export class EfsWallet extends EfsElement {
   #connect = () => {
     this.#switchNotice.set(undefined);
     this.#open();
+    // A shared gateway origin never touches a wallet: the dialog says why, and where to go.
+    if (this.hosting?.shared) return;
     void this.wallet.connect();
   };
 
@@ -103,6 +110,7 @@ export class EfsWallet extends EfsElement {
   }
 
   #body(t: Translator['t']) {
+    if (this.hosting?.shared) return sharedGatewayNotice(this.hosting, t);
     const s = this.wallet.state.get();
     const retry = html`<wa-button size="s" @click=${this.#connect}
       ><span slot="start">${appIcon('rotate-right')}</span>${t('outcome.retry')}</wa-button

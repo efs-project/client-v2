@@ -5,6 +5,7 @@
 
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { RealmRef } from '../boot/route.ts';
+import type { Hosting } from '../platform/hosting.ts';
 import type { OwnerScope } from '../platform/scope.ts';
 import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
@@ -68,6 +69,8 @@ export interface SavingHost {
   readonly reopening: ReadonlySignal<Draft | undefined>;
   /** Takes the pending reopen when its file (`link`) is the one on screen. */
   takeReopen(link: string): Draft | undefined;
+  /** How this copy is hosted: on a shared IPFS path gateway, saving is off (and says why). */
+  readonly hosting: Hosting;
 }
 
 /** What the shell gives an app. Nothing ambient: no globals, no wallet object, no storage handle. */

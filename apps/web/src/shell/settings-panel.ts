@@ -400,11 +400,13 @@ export class EfsSettingsPanel extends EfsElement {
       <h3 tabindex="-1">${t('settings.data.heading')}</h3>
       <p>
         ${t(
-          info.readOnly
-            ? 'settings.data.readOnly'
-            : info.persistent
-              ? 'settings.data.persistent'
-              : 'settings.data.notPersistent',
+          info.sharedGateway
+            ? 'settings.data.sharedGateway'
+            : info.readOnly
+              ? 'settings.data.readOnly'
+              : info.persistent
+                ? 'settings.data.persistent'
+                : 'settings.data.notPersistent',
         )}
       </p>
       <p class="efs-quiet">${t('settings.data.perSite')}</p>

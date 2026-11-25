@@ -15,6 +15,8 @@ export interface SettingsInfo {
   readonly persistent: boolean;
   /** True when stored settings come from a newer client version; this one won't overwrite them. */
   readonly readOnly: boolean;
+  /** True on a shared IPFS path gateway: other sites share this origin, so nothing is stored. */
+  readonly sharedGateway?: boolean;
   readonly issues: readonly string[];
 }
 
@@ -85,7 +87,8 @@ export function createOsState(input: OsStateInput, scope: OwnerScope): OsState {
       const result = await input.store.save(change(settings.get()));
       if (result.status === 'SAVED') {
         settings.set(result.settings);
-        mirrorAppearance(result.settings.appearance);
+        // Not on a shared gateway origin: other sites there share localStorage.
+        if (!settingsInfo.get().sharedGateway) mirrorAppearance(result.settings.appearance);
       } else if (result.status === 'CONFLICT') {
         await reload();
       }

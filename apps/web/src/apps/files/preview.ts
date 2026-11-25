@@ -6,6 +6,7 @@ import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
+import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -350,7 +351,7 @@ export class EfsFilesPreview extends EfsElement {
                   }
                   <div class="wa-cluster wa-gap-xs">
                     ${
-                      this.#editable(content)
+                      this.#editable(content) && !this.host.saving.hosting.shared
                         ? html`<wa-button
                             size="s"
                             variant="brand"
@@ -368,7 +369,12 @@ export class EfsFilesPreview extends EfsElement {
                       @click=${() => this.#save(verified, open.file.sha256, content)}
                       ><span slot="start">${appIcon('download')}</span>${t('files.preview.save')}</wa-button
                     >
-                  </div>`
+                  </div>
+                  ${
+                    this.#editable(content) && this.host.saving.hosting.shared
+                      ? sharedGatewayNotice(this.host.saving.hosting, t)
+                      : nothing
+                  }`
               : bytes.blockedOrigins && bytes.blockedOrigins.length > 0
                 ? html`<div class="wa-stack wa-gap-xs efs-publisher-hosts">
                     ${bytes.blockedOrigins.map(

@@ -6,10 +6,11 @@
 // EFS_CHAIN=live runs it against a fresh @efs/fixture chain, and EFS_CHAIN=record re-records
 // the transcripts (see tests/e2e/chain.ts).
 
-import { expect, test } from '@playwright/test';
+import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import {
   editAndReview,
+  expect,
   objectLink,
   openFile,
   preview,
@@ -35,6 +36,24 @@ test.skip(
 );
 
 const sends = (chain: TestChain) => sendRequests(chain);
+
+/**
+ * Pauses the page's clock a few milliseconds ahead of its own time. pauseAt can't go backwards,
+ * and the page's clock runs on its own, so the target comes from the page, with a larger lead if
+ * the page has moved past it meanwhile. The lead stays far below the SDK's 1 s ledger poll, so
+ * the jump never fires it.
+ */
+async function pauseClock(page: Page): Promise<void> {
+  for (let lead = 25; ; lead *= 2) {
+    const now = await page.evaluate(() => Date.now());
+    try {
+      await page.clock.pauseAt(now + lead);
+      return;
+    } catch (error) {
+      if (lead >= 400 || !/past/i.test(String(error))) throw error;
+    }
+  }
+}
 
 test('edit, review, one approval: Saved · confirming, and Show my version reads it back', async ({
   page,
@@ -86,7 +105,7 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
     await expect(review).toContainText('Approve in your wallet, then wait for the network');
     // Freeze the page's clock: the SDK's next ledger check waits on a timer, so it can't start.
     // Its first check (already under way) then finishes on its own answers: leave after that.
-    await page.clock.pauseAt(new Date(Date.now() + 10));
+    await pauseClock(page);
     await chain.idle();
     await page.goto('about:blank');
     await page.clock.resume();

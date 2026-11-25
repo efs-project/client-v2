@@ -6,11 +6,12 @@
 import '../ui/app.css';
 import { APPS } from '../apps/registry.ts';
 import { followSystemScheme, readMirroredAppearance } from '../platform/appearance.ts';
+import { hostingOf } from '../platform/hosting.ts';
 import { negotiateLocale } from '../platform/locale.ts';
 import { createScope } from '../platform/scope.ts';
 import { loadOperatorConfig } from '../platform/settings/config.ts';
 import { DEFAULT_SETTINGS } from '../platform/settings/model.ts';
-import { openSettingsStore } from '../platform/settings/store.ts';
+import { memorySettingsStore, openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
 import { createOsState } from '../shell/os-state.ts';
 import { createReaderSession } from '../shell/reader-state.ts';
@@ -50,11 +51,25 @@ async function boot(): Promise<void> {
     PSEUDO_LOCALES,
     SOURCE_LOCALE,
   );
+  // A shared IPFS path gateway shares this origin with unrelated sites: nothing is stored there
+  // (settings last for the tab), and saving is off. Decided from the address alone, before any
+  // storage is opened.
+  const sharedGateway = hostingOf(location).shared;
   const [translator, store, config] = await Promise.all([
     loadTranslator(locale),
-    openSettingsStore(),
+    sharedGateway ? Promise.resolve(memorySettingsStore()) : openSettingsStore(),
     loadOperatorConfig(document.baseURI, scope.signal),
   ]);
+  const delivery = config.status === 'OK' ? config.config.delivery : undefined;
+  const hosting = hostingOf(location, delivery?.isolatedCopy);
+  // Install metadata only on the operator's stable origin: an install anywhere else would be
+  // tied to the wrong origin for good (docs/design/offline-brief.md §7).
+  if (!hosting.shared && delivery?.stableOrigin === location.origin) {
+    const manifest = document.createElement('link');
+    manifest.rel = 'manifest';
+    manifest.href = 'manifest.webmanifest';
+    document.head.append(manifest);
+  }
   const snapshot = await store.load().catch(() => undefined);
   const read = snapshot?.read;
   const settings =
@@ -76,6 +91,7 @@ async function boot(): Promise<void> {
         persistent: snapshot?.persistent ?? false,
         readOnly: read?.status === 'NEWER',
         issues: read?.status === 'OK' ? read.issues : read?.status === 'INVALID' ? read.issues : [],
+        sharedGateway: hosting.shared,
       },
       config,
       route: parseRoute(new URL(location.href)),
@@ -111,8 +127,11 @@ async function boot(): Promise<void> {
   shell.wallet = wallet;
   // Write code loads only when the person saves, or (wallet-free) when this browser has a save
   // to settle from an earlier visit.
-  shell.writer = createWriterSession(reader.state, wallet.state, os.network);
-  shell.saves = createSavesSession(reader.state, scope);
+  shell.writer = createWriterSession(reader.state, wallet.state, os.network, {
+    sharedGateway: hosting.shared,
+  });
+  shell.saves = createSavesSession(reader.state, scope, { enabled: !hosting.shared });
+  shell.hosting = hosting;
   shell.translator = translator;
   shell.apps = APPS;
   document.getElementById('efs-boot')?.replaceWith(shell);

@@ -9,6 +9,7 @@ import {
   parseRoute,
   type RealmRef,
 } from '../boot/route.ts';
+import type { Hosting } from '../platform/hosting.ts';
 import { createScope, type OwnerScope } from '../platform/scope.ts';
 import { defaultNetwork, EMPTY_CONFIG } from '../platform/settings/model.ts';
 import { effect } from '../state/effect.ts';
@@ -49,6 +50,7 @@ export class EfsShell extends EfsElement {
     wallet: { attribute: false },
     writer: { attribute: false },
     saves: { attribute: false },
+    hosting: { attribute: false },
     translator: { attribute: false },
     apps: { attribute: false },
   };
@@ -57,6 +59,8 @@ export class EfsShell extends EfsElement {
   declare wallet: WalletSession;
   declare writer: WriterSession;
   declare saves: SavesSession;
+  /** How this copy is hosted (a shared IPFS path gateway runs read-only). */
+  declare hosting: Hosting;
   declare translator: Translator;
   declare apps: readonly AppDescriptor[];
 
@@ -219,6 +223,7 @@ export class EfsShell extends EfsElement {
       track: (progress, draft) => saves.track(progress, draft),
       reopening: saves.reopening,
       takeReopen: (link) => saves.takeReopen(link),
+      hosting: this.hosting,
     };
   }
 
@@ -320,6 +325,7 @@ export class EfsShell extends EfsElement {
             <efs-wallet
               .wallet=${this.wallet}
               .network=${this.os.network.get()}
+              .hosting=${this.hosting}
               .translator=${this.translator}
             ></efs-wallet>
             <efs-network-indicator

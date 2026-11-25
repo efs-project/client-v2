@@ -41,7 +41,7 @@ Evidence goes to `apps/web/dist-evidence/`.
 
 ## Rules
 
-1. **Guest boot is wallet-free.** It reads only the settings record and the operator's `efs.config.json`, writes nothing to storage unless the user saves a setting, and contacts the network only through the selected RPC and gateways (today: nothing beyond its own static files). Don't import wallet or write code from anything `boot/main.ts` reaches. *(Changed in slice A from "storage-free and network-free apart from its own static files"; see `docs/design/shell.md`.)*
+1. **Guest boot is wallet-free.** It reads only the settings record and the operator's `efs.config.json`, writes nothing to storage unless the user saves a setting (and never on a shared IPFS path gateway), and contacts the network only through the selected RPC and gateways (today: nothing beyond its own static files). Don't import wallet or write code from anything `boot/main.ts` reaches. *(Changed in slice A from "storage-free and network-free apart from its own static files"; see `docs/design/shell.md`.)*
 2. **No Kernel singleton, no ambient authority.** Create things in an entry or composition step and pass them explicitly. Module evaluation must do no I/O; `tools/checks/source-rules.test.ts` enforces this.
 3. **Custom elements are registered only in `define.ts`** (`efs-*` names), imported only by entry modules (`boot/main.ts`, `apps/*/entry.ts`). Web Awesome's `wa-*` elements are registered by importing their modules in `ui/wa/define.ts`.
 4. **Protocol semantics belong to the EFS SDK.** Never decode records, compute IDs, walk pages, build or parse links, or treat a wallet acknowledgement as success here. `viem` and `ethers` are banned in `apps/web`. Only `session/reader.ts` creates an SDK instance, and the SDK core stays out of the startup set (reads load it lazily).
@@ -55,6 +55,8 @@ Evidence goes to `apps/web/dist-evidence/`.
 ## Don'ts
 
 - Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the PR.
-- Don't add a Service Worker, manifest, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred. Remote requests go only through the SDK to endpoints the user can see in Settings.
+- Don't add a Service Worker, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred (`docs/design/offline-brief.md`). Remote requests go only through the SDK to endpoints the user can see in Settings.
+- `manifest.webmanifest` is committed with its fixed `id` (`/`, the origin root, so moving the app within its origin never orphans installs; `start_url` and `scope` stay `./`), but `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`: an install anywhere else would be tied to the wrong origin for good. Don't link it unconditionally.
+- On a shared IPFS path gateway (`/ipfs/<cid>/…`, `/ipns/<name>/…`) the app is read-only: nothing is stored (settings last for the tab), no journal is opened, no wallet is touched. Keep it that way for anything new that stores or saves.
 - Don't widen the CSP. If something needs it, say why in the PR (`docs/design/shell.md` lists every exception and its reason).
 - Don't guess a dev server URL or kill processes by port: `pnpm dev:status` gives this worktree's URLs, and `pnpm dev:stop` stops only what this worktree started.

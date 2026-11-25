@@ -1,0 +1,9 @@
+{
+  "id": "/",
+  "name": "EFS",
+  "short_name": "EFS",
+  "description": "The Ethereum File System web client.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone"
+}
