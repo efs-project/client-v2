@@ -37,6 +37,8 @@
 - **A folder is a Files Type** under an address or another folder. It can be tagged like anything else.
 - **Tag is system, folder is app (T-1).** A topic shows things of every Type, with a filter.
 - **Public lists are newest first:** *"Newest first is the only way that makes sense otherwise data views are static and nearly useless."*
+  - **"Newest" means most recently first stated, not most recently changed** (tag PM session, planning `965b5eb`). Changing a number, or removing and re-adding a tag, doesn't move a thing up.
+  - So the interface labels the order **"recently added"**, never "newest" or "recent activity".
 - **No small depth limit.** Topic paths go to at least 64 words, and folder paths have no limit.
 
 **Still open, for James, so this note doesn't assume them:**
@@ -45,7 +47,7 @@
 - whether a file's name is its own mechanism or the last word of a path;
 - settings that inherit down a path.
 
-**Engineering, invisible here:** whether a word page is one list per word or a directory of the paths that use it. A person sees the same either way.
+**How word pages are served:** from the directory of places that use a word. There are no per-word item lists (planning `965b5eb`). Each group's items come from that place's own list.
 
 **The client never derives a topic id,** folds a word, or builds or parses a link (AGENTS.md rule 4). The SDK does all of that, from vectors shared with the contracts.
 
@@ -98,9 +100,9 @@ For each (topic, thing), the first of these with a stance decides (§3.1). An UN
 | Everyone | Everyone | the lens, then public; hidden: what lens authors marked "not this" |
 | Raw | Unfiltered | everything, with "not this" marks shown greyed, with who made them |
 
-**The public tier is labelled clearly** (pitfall §7.7: newest-first public views reward whoever posted last).
+**The public tier is labelled clearly** (pitfall §7.7: a recently-added public order rewards whoever posted last).
 - Lens results come first, in their own section.
-- Public results follow under "From everyone else · not checked by anyone you trust · newest first".
+- Public results follow under "From everyone else · not checked by anyone you trust · recently added".
 - Rows reached only through public open the Preview behind the media gate (below).
 
 **Default for topics: Everyone** (PM working default D11, reversible; recommended here).
@@ -166,7 +168,7 @@ Tags under this one
 From you and the people you trust
   cat.jpg                  Image · tagged by alice.eth
   notes.txt                Text  · tagged by you · filed at /cars/tesla/model_y
-From everyone else · not checked by anyone you trust · newest first
+From everyone else · not checked by anyone you trust · recently added
   cat.jpg                  Image · tagged by 0x44…7c
   e4                       Chess move · tagged by 0x9f…01
                            [ Show more ]
@@ -235,7 +237,7 @@ Also: "テスラ" is the same as "tesla" (said by carol.eth) · [ Include ]
 ```
 
 **Groups:**
-- **A group is a place whose own last word is the word** (§3.4, confirmed by the tag PM session). It shows that place's roll-up, with its counts, its newest few items, and Open.
+- **A group is a place whose own last word is the word** (§3.4, confirmed by the tag PM session). It shows that place's roll-up, with its counts, its few most recently added items, and Open.
   - So `/cars/tesla/model_y` sits in the `/cars/tesla` group, not in a group of its own.
   - **A place below another group isn't a second group.** `/tesla/cars/tesla` is already inside plain `/tesla`.
   - The groups are exactly the contracts' "topics that use a word" directory.
@@ -244,7 +246,7 @@ Also: "テスラ" is the same as "tesla" (said by carol.eth) · [ Include ]
   2. **then places the lens has used,** by the lens's count;
   3. **then the rest by global count,** largest first.
 
-  So a spammer's count can't jump the lens's places (§7.6), and both counts are shown. Within a group, the lens tier comes first, then public, newest first.
+  So a spammer's count can't jump the lens's places (§7.6), and both counts are shown. Within a group, the lens tier comes first, then public, most recently added first.
 - **There's no "all in one list" option.** A bare word mixes the company, the inventor and the unit, and the place is what tells them apart.
 
 **Synonyms, translations and "moved to"** (§3.5):
@@ -273,7 +275,7 @@ An address opens the ordinary place view (the folder listing in `file-operations
 ───────────────────────────────────────────────────────────────────────────────
   pet.jpg        Image · yours                  also: 0x12…ab's, 3 others
   talk.pdf       File
-  ▾ dog.png      2 versions from everyone, newest first
+  ▾ dog.png      2 versions from everyone, recently added
       dog.png    Image · 0x44…7c's, from everyone · 20 Nov
       dog.png    Image · 0x9f…01's, from everyone · 2 Oct
 ```
@@ -281,7 +283,7 @@ An address opens the ordinary place view (the folder listing in `file-operations
 - **Each name shows its first answer in lens order:** yours, else the address's, else others'. That's James's `pet.jpg` example.
   - "also: …" marks the other versions (requirement L2: a marker, never a merge).
 - **Only the address's own rows are unlabelled.** "talk.pdf" above is 0x12…ab's.
-- **Several versions from public** of one name are shown as a list, newest first.
+- **Several versions from public** of one name are shown as a list, most recently first stated at the top, labelled "recently added".
 - **The address is what's shown and what's checked.** ENS is display only, held behind the PM's ENS privacy question.
 - **An address with nothing of its own** says "0x12…ab hasn't put anything here", besides whatever the lens finds.
 - **Attaching to someone else's address** says first: "Your entry appears at 0x12…ab for you, for anyone whose lens names you, and for everyone with public on. Where 0x12…ab has its own entry with this name, people viewing the address see theirs first, unless it's you."
@@ -396,7 +398,7 @@ Plus 320 px, keyboard, and axe in light and dark.
 **By James:**
 1. The tag model: paths tell tags apart, and a word's page shows every place, grouped by place.
 2. No small depth limit.
-3. Public lists are newest first.
+3. Public lists are newest first, meaning most recently first stated, and labelled "recently added".
 
 **By the PM:**
 1. **The default view for topics is Everyone** (PM working default D11, reversible). It's listed for James as a default he can flip in one line. It follows his *"a lot of people are going to want to… just 'view all'"*. The first build shows Mine until view-all ships.

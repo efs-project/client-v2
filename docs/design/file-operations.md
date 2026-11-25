@@ -1,6 +1,6 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
+**Status:** draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first, labelled "recently added"; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
 
 **Scope:**
 - **In scope:** list a folder; create a file; create a folder; rename and move; remove your own entry and restore it; filter by kind.
@@ -69,7 +69,7 @@
     - So a folder opened from a link shows its creator's files even when the creator isn't in the reader's view (decision-sheet default). Without that, a shared folder link would open empty.
     - The person can take the creator out for this view, as with an address.
   - The lens line, the "everyone" switch and the media gate are the ones in `tags.md`.
-  - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, newest first. James: oldest first would make public views static.
+  - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, most recently first stated at the top and labelled "recently added". James: oldest first would make public views static. Changing an entry doesn't move it up.
 - **What a path that doesn't resolve shows** (`resolvePath`, one call per segment, no depth cap):
   - **ABSENT_PROVEN at a segment:** "Nothing is called "2026" in /photos now. It may have been renamed or moved." When the SDK offers `files.placements`, it adds "Find it by its permanent link".
   - **MASKED at a segment:** "Removed and blocked by someone in your lens."
@@ -77,7 +77,7 @@
   - **UNKNOWN:** the reason, with Try again. **INVALID:** "This link isn't a folder path this version can read."
 - **Several people's entries under one name** (`lookupEntry`):
   - `selected` is the row shown.
-  - `candidates` (in lens order, each with `firstBound`) feed the row's "also: …" marker and its list of versions. With public on, the client sorts the versions from everyone newest first by `firstBound`.
+  - `candidates` (in lens order, each with `firstBound`) feed the row's "also: …" marker and its list of versions. With public on, the client sorts the versions from everyone by `firstBound`, most recent first ("recently added").
   - A `conflict` shows the existing "Authors in your lens disagree".
 - **Rows** (`listFolder`, 50 a page). There's one row per name, by the lens law.
   - Folders come first, then files, each in the SDK's order, plus Type and size.
