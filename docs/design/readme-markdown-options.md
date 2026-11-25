@@ -8,6 +8,7 @@
 - **Links:** only `https:` (opened apart, `rel="noopener noreferrer"`) and EFS object and revision links (parsed by the SDK, opened in the app). Anything else, `javascript:` and plain words the link grammar would read as topic paths included, stays text.
 - **Different from CommonMark on purpose:** raw HTML is text, images show their alt text, no tables, no setext headings, no lazy continuation lines, no reference links, and emphasis uses simple delimiter matching rather than the full flanking rules.
 - **Only VERIFIED text is formatted** (read like the Preview, in the listing's place Lens); otherwise the pane says why and shows the folder's summary.
+- **When tag (topic) and home links come to Markdown, they need an explicit EFS form, never a bare word.** `parseLink` accepts most bare words as topic paths, by design, so `[x](cars)` or `[x](javascript:alert(1))` would otherwise turn ordinary text into an in-app link. The explicit form is to be decided then (for example a leading `~efs/`, or this realm's `#/r/…` route), and the renderer accepts nothing else as a link (PM, 2026-11-25).
 
 **Context:**
 - The File Browser's Overview pane says "When this location has a README, it will appear here."
