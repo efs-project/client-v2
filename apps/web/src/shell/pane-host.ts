@@ -16,16 +16,31 @@ export class EfsPaneHost extends EfsElement {
     panes: { attribute: false },
     views: { attribute: false },
     translator: { attribute: false },
+    frontView: { attribute: false },
+    frontKey: { attribute: false },
   };
   declare panes: readonly PaneSpec[];
   declare views: ReadonlyMap<string, ViewDescriptor>;
   declare translator: Translator;
+  /**
+   * The view to bring to the front, as a tab, each time `frontKey` changes to a new value: the
+   * app's `linkView` while the route names a link (the link is the key). So a shared file link
+   * opens on its Preview, and the person can still switch tabs freely afterwards.
+   */
+  declare frontView: string | undefined;
+  declare frontKey: string | undefined;
 
   #scope: OwnerScope | undefined;
   #elements = new Map<string, HTMLElement>();
   /** Narrow (tabs) until measured: a first paint wider than a phone would scroll sideways. */
   #wide = state(false);
-  #active = state(0);
+  /**
+   * The tab shown when narrow. A plain field, not a signal: it changes in `willUpdate`, which
+   * runs inside the signal-tracked update, where writing a signal isn't allowed.
+   */
+  #active = 0;
+  /** The link whose view was last brought to the front. */
+  #fronted: string | undefined;
   #observer: ResizeObserver | undefined;
 
   protected override createRenderRoot() {
@@ -53,6 +68,15 @@ export class EfsPaneHost extends EfsElement {
     this.#scope?.dispose();
     this.#scope = undefined;
     this.#elements.clear();
+  }
+
+  /** A new link: its view comes to the front (once; the person's tab choice stands after that). */
+  override willUpdate(): void {
+    if (this.frontKey === this.#fronted) return;
+    this.#fronted = this.frontKey;
+    if (this.frontKey === undefined || this.frontView === undefined) return;
+    const index = (this.panes ?? []).findIndex((pane) => pane.view === this.frontView);
+    if (index >= 0) this.#active = index;
   }
 
   #element(view: string): HTMLElement | undefined {
@@ -91,12 +115,14 @@ export class EfsPaneHost extends EfsElement {
     const panes = this.panes ?? [];
     if (panes.length === 0) return nothing;
     if (this.#wide.get() || panes.length === 1) return this.#split(panes);
-    const active = Math.min(this.#active.get(), panes.length - 1);
+    const active = Math.min(this.#active, panes.length - 1);
     return html`<wa-tab-group
       class="efs-pane-tabs"
       active=${`pane-${active}`}
-      @wa-tab-show=${(event: CustomEvent<{ name: string }>) =>
-        this.#active.set(Number(event.detail.name.replace('pane-', '')) || 0)}
+      @wa-tab-show=${(event: CustomEvent<{ name: string }>) => {
+        this.#active = Number(event.detail.name.replace('pane-', '')) || 0;
+        this.requestUpdate();
+      }}
     >
       ${panes.map((pane, i) => {
         const descriptor = this.views.get(pane.view);

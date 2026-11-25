@@ -78,7 +78,7 @@ type PaneLayout = { panes: readonly { view: string; size?: number }[] };
 
 - The layout is **data**. v1's README / list / preview arrangement is the File Browser's `defaultLayout`. Making panes configurable later means persisting a `PaneLayout` in settings; no code change is needed.
 - Panes are keyed on view ids that describe "entries of X", never directory-specific fields, so the shape survives the folder/tag decision.
-- When `<main>` is at least 18rem per pane wide, panes sit side by side in nested `<wa-split-panel>`s, with keyboard-resizable dividers. Narrower, they become tabs (`<wa-tab-group>`), one visible at a time. Each view element is created once and kept, so switching presentation or tab loses no state. Drill-in (choosing an entry moves to the next pane on a phone) arrives with real data.
+- When `<main>` is at least 18rem per pane wide, panes sit side by side in nested `<wa-split-panel>`s, with keyboard-resizable dividers. Narrower, they become tabs (`<wa-tab-group>`), one visible at a time. Each view element is created once and kept, so switching presentation or tab loses no state. Arriving by a link (a shared file link, or back to one) brings the app's `linkView` to the front, the File Browser's Preview, so a link opens on what it names; after that the person's tab choice stands until the link changes. Drill-in (choosing an entry moves to the next pane on a phone) arrives with real data.
 - There is no compositor, plugin container or service locator. Third-party apps and the Session Shell come later through the module/runner design. A descriptor plus `mount` on a scope is the seam that grows into that.
 
 ## Routing

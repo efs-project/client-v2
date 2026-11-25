@@ -1,5 +1,13 @@
+import { link } from '@efs/sdk';
 import { expect, test } from '@playwright/test';
-import { booted, distText } from './support.ts';
+import {
+  booted,
+  distText,
+  replayRpc,
+  serveConfig,
+  serveDeployment,
+  transcript,
+} from './support.ts';
 
 const VIEWPORTS = [
   [320, 568],
@@ -40,6 +48,37 @@ for (const [width, height] of VIEWPORTS) {
     await page.screenshot({ path: info.outputPath(`layout-${width}.png`) });
   });
 }
+
+test('375 px: a file link opens on its Preview tab; the person can still switch tabs', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await serveConfig(page);
+  await serveDeployment(page);
+  const replay = await replayRpc(page, ['pin-verified', 'open-inline']);
+  const { ids } = transcript('open-inline');
+  await page.goto(`./#/r/testnet/${link({ kind: 'object', subject: ids.file as `0x${string}` })}`);
+  await booted(page);
+  const tab = (name: string) => page.getByRole('tab', { name });
+  // Lands on the file, not on Overview: how a shared link first looks on a phone.
+  await expect(tab('Preview')).toHaveAttribute('aria-selected', 'true');
+  const text = page.locator('efs-files-preview .efs-preview-text');
+  await expect(text).toHaveText('Meeting at 10:00.\n');
+  await expect(text).toBeVisible();
+  // The person's choice stands while the link stays the same.
+  await tab('Overview').click();
+  await expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+  await expect(text).toBeHidden();
+  // Arriving by the link again (back from another route) shows the file again.
+  await page.evaluate(() => {
+    location.hash = '#/files';
+  });
+  await expect(text).toHaveCount(0);
+  await page.goBack();
+  await expect(tab('Preview')).toHaveAttribute('aria-selected', 'true');
+  await expect(text).toBeVisible();
+  expect(replay.misses).toEqual([]);
+});
 
 test('narrow panes switch by tab and keep each view mounted', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
