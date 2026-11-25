@@ -20,6 +20,7 @@ import type { Efs, Hex, Lens } from '@efs/sdk';
 import type { EfsWriter, SequenceOpts, SequenceProgress } from '@efs/sdk/actions';
 import type { EditPlanResult, OpenedFile, RevisionRef } from '@efs/sdk/files';
 import type { AppHost } from '../../shell/apps.ts';
+import { type SaveHold, saveHold } from '../../shell/save-hold.ts';
 import {
   isFault,
   type SaveOutcome,
@@ -28,7 +29,6 @@ import {
   saveValues,
   thrownOutcome,
 } from '../../shell/save-outcome.ts';
-import { unsettled } from '../../shell/saves-state.ts';
 import { shortAccount } from '../../shell/wallet-state.ts';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -91,13 +91,8 @@ type Hold =
   | { readonly kind: 'no-journal' }
   /** A send for this file may have gone out and no check has found it yet. */
   | { readonly kind: 'paused' }
-  /** A save to finish or stop (PARTIAL, NOT_STARTED). */
-  | { readonly kind: 'unsettled' }
-  /** One in flight; `minutes` until its deadline when known (else "Check again"). */
-  | { readonly kind: 'waiting'; readonly minutes?: number };
-
-/** Seconds past a plan's deadline before the local clock treats it as lapsed (clock skew). */
-const LAPSE_MARGIN_S = 60;
+  /** A save to finish or stop, or one in flight (see shell/save-hold.ts). */
+  | SaveHold;
 
 export class EfsFileEditor extends EfsElement {
   static override properties = {
@@ -125,9 +120,6 @@ export class EfsFileEditor extends EfsElement {
   #phase = state<Phase>({ phase: 'editing' });
   /** A re-read this editor needs: running, failed (or timed out), or the journal is off here. */
   #holding = state<'no' | 'checking' | 'failed' | 'no-journal'>('no');
-  /** The clock a waiting hold is measured against (ticks while the editor is open). */
-  #now = state(Date.now());
-  #tick: ReturnType<typeof setInterval> | undefined;
   #base: RevisionRef | undefined;
   #controller = new AbortController();
 
@@ -140,13 +132,11 @@ export class EfsFileEditor extends EfsElement {
     this.#text.set(this.draft ?? this.original);
     this.#base = { kind: 'revision', recordId: this.file.revision };
     this.#controller = new AbortController();
-    this.#tick = setInterval(() => this.#now.set(Date.now()), 15_000);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#controller.abort();
-    if (this.#tick !== undefined) clearInterval(this.#tick);
   }
 
   override firstUpdated(): void {
@@ -174,33 +164,11 @@ export class EfsFileEditor extends EfsElement {
     }
     const a = this.host.saving.availability.get();
     if (a.status !== 'READY') return { lapsed: false };
-    const now = this.#now.get();
-    let waiting: number | undefined;
-    let waitingUnknown = false;
-    let lapsed = false;
-    for (const p of this.host.saving.saves.get()) {
-      if (p.sequenceId === except || !unsettled(p)) continue;
-      if (p.account.toLowerCase() !== a.account.toLowerCase()) continue;
-      // Per file when the save says which (SDK 0.1 records); older records hold every file.
-      const file = p.effect?.kind === 'files.edit' ? p.effect.file : undefined;
-      if (file && file.toLowerCase() !== mine) continue;
-      if (p.state !== 'IN_FLIGHT') return { hold: { kind: 'unsettled' }, lapsed: false };
-      // In flight: it can still land until its deadline. Past it at the latest block (the SDK's
-      // pastDeadline; until then the local clock plus a margin for skew) it can't, short of a
-      // reorg: a send from here would then only be refused as changed. Not "proven not saved".
-      const past = (p.current as { pastDeadline?: boolean } | undefined)?.pastDeadline;
-      const deadline = this.host.saving.deadlineOf(p);
-      if (past === true) lapsed = true;
-      else if (deadline === undefined) waitingUnknown = true;
-      else if (past === undefined && now > (deadline + LAPSE_MARGIN_S) * 1000) lapsed = true;
-      else if (now > (deadline + LAPSE_MARGIN_S) * 1000) lapsed = true;
-      else waiting = Math.max(waiting ?? 0, Math.ceil((deadline * 1000 - now) / 60_000));
-    }
-    if (waitingUnknown) return { hold: { kind: 'waiting' }, lapsed: false };
-    if (waiting !== undefined) {
-      return { hold: { kind: 'waiting', minutes: Math.max(1, waiting) }, lapsed: false };
-    }
-    return { lapsed };
+    return saveHold(this.host.saving.saves.get(), {
+      account: a.account,
+      file: this.file.file,
+      except,
+    });
   }
 
   #progressOpts(plan: Planned): SequenceOpts {
@@ -572,7 +540,11 @@ export class EfsFileEditor extends EfsElement {
     return html`<wa-callout variant="neutral" size="small" class="efs-edit-blocked" data-hold=${hold.kind}>
       <span slot="icon">${appIcon('circle-info')}</span>
       <div class="wa-split wa-gap-s">
-        <p>${hold.kind === 'waiting' && hold.minutes !== undefined ? t(message, { minutes: hold.minutes }) : t(message)}</p>
+        <p>${
+          hold.kind === 'waiting' && hold.minutes !== undefined
+            ? t(message, { minutes: hold.minutes, block: String(hold.block ?? '') })
+            : t(message)
+        }</p>
         ${
           canCheck
             ? html`<wa-button size="s" class="efs-edit-check-again" @click=${() => void this.#recheck()}

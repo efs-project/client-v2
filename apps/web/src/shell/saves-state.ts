@@ -57,8 +57,6 @@ export interface SavesSession {
   reopen(draft: Draft): void;
   /** Takes the pending reopen if it is for `link`. */
   takeReopen(link: string): Draft | undefined;
-  /** When an in-flight save's current part expires (unix seconds), as that part's plan says. */
-  deadlineOf(progress: SequenceProgress): number | undefined;
   /** Sends that threw before anything could be confirmed, until a check shows their save. */
   readonly unconfirmed: ReadonlySignal<readonly Unconfirmed[]>;
   markUnconfirmed(u: Unconfirmed): void;
@@ -127,8 +125,6 @@ export function createSavesSession(
   let generation = 0;
   /** The open saves, in display order. */
   let open: SequenceProgress[] = [];
-  /** Each in-flight part's deadline (unix seconds) by plan id, read from its journaled plan. */
-  const deadlines = new Map<Hex, number>();
   const unconfirmed = state<readonly Unconfirmed[]>([]);
   /** Checks started and finished, so `refresh()` can wait for the one it started. */
   let started = 0;
@@ -262,17 +258,6 @@ export function createSavesSession(
           else forget(p.sequenceId);
         }
         open = merge(settled.filter(needsAttention), since);
-        // Each in-flight part's deadline, from its own journaled plan (a later part, or a part
-        // sent again, has a later one): how long a hold lasts.
-        for (const p of open) {
-          const planId = p.state === 'IN_FLIGHT' ? p.current?.planId : undefined;
-          if (!planId || deadlines.has(planId)) continue;
-          const record = await journal.get(planId).catch((error: unknown) => {
-            console.warn('plan deadline not read', planId, error);
-            return undefined;
-          });
-          if (record) deadlines.set(planId, Number(record.plan.deadline));
-        }
         if (mine.signal.aborted) return;
         publish();
         schedule(efs);
@@ -314,7 +299,6 @@ export function createSavesSession(
       finals.clear();
       tracked.clear();
       drafts.clear();
-      deadlines.clear();
       unconfirmed.set([]);
       open = [];
       if (efs) check(efs);
@@ -347,13 +331,6 @@ export function createSavesSession(
         });
         settleWaiters();
       });
-    },
-    deadlineOf(progress) {
-      // The SDK's own figure when it has one (sdk-v2: current.deadline), else the journaled plan's.
-      const fromSdk = (progress.current as { deadline?: bigint | number } | undefined)?.deadline;
-      if (fromSdk !== undefined) return Number(fromSdk);
-      const planId = progress.current?.planId;
-      return planId ? deadlines.get(planId) : undefined;
     },
     unconfirmed,
     markUnconfirmed(u) {

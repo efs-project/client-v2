@@ -344,38 +344,6 @@ describe('createSavesSession', () => {
     info.mockRestore();
   });
 
-  it("reads an in-flight save's deadline from its journaled plan", async () => {
-    const reader = state<ReaderState>({ status: 'OFF' });
-    const planId = `0x${'0e'.repeat(32)}`;
-    const inFlight = progress({ state: 'IN_FLIGHT', current: { index: 0, planId } as never });
-    const view = {
-      pendingSequences: vi.fn(async () => [inFlight]),
-      reconcileSequence: vi.fn(async () => inFlight),
-    };
-    const get = vi.fn(async (id: string) =>
-      id === planId ? { plan: { deadline: 1_900_000_000n } } : undefined,
-    );
-    const session = createSavesSession(reader, createScope(), {
-      loadJournal: async () =>
-        ({
-          indexedDbJournal: () => ({ openSequences: async () => [{}], close: () => {}, get }),
-        }) as never,
-      loadActions: async () => ({ openJournal: () => view }) as never,
-      settleEveryMs: 60_000,
-    });
-    reader.set(verified);
-    await vi.waitFor(() => expect(session.deadlineOf(inFlight)).toBe(1_900_000_000));
-    // Keyed by the part's plan: a later part (or one sent again) is measured by its own deadline.
-    const later = { ...inFlight, current: { index: 1, planId: `0x${'0f'.repeat(32)}` } } as never;
-    expect(session.deadlineOf(later)).toBeUndefined();
-    // The SDK's own figure wins when it reports one.
-    const reported = {
-      ...inFlight,
-      current: { index: 0, planId, deadline: 1_950_000_000n },
-    } as never;
-    expect(session.deadlineOf(reported)).toBe(1_950_000_000);
-  });
-
   it('a refresh that hangs (a lost IndexedDB connection) times out; it never reads as done', async () => {
     const reader = state<ReaderState>({ status: 'OFF' });
     let hang = false;
