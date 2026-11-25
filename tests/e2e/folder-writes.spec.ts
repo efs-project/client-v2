@@ -502,3 +502,82 @@ test("Move a folder: it can't be opened in the picker, its path travels with it,
     await chain.finish();
   }
 });
+
+const editorFor = (page: Page) => preview(page).locator('efs-file-editor');
+
+test('New text file: name it, write it, leave and come back to it, save it, and it opens by its link', async ({
+  page,
+}) => {
+  const chain = await testChain('client-new-text-file', 'The realm root; a new hello.txt.');
+  try {
+    await openRoot(page, chain);
+    await entries(page).locator('wa-button.efs-new-file').click();
+    await expect(dialog(page)).toContainText('New text file');
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('hello.txt');
+    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(editorFor(page)).toContainText('A new text file in');
+    await expect(editorFor(page).locator('wa-input.efs-new-name')).toHaveJSProperty(
+      'value',
+      'hello.txt',
+    );
+    await editorFor(page).locator('textarea.efs-edit-text').fill('Hello, world.\n');
+    chain.step('New text file: named hello.txt, then written in the editor');
+
+    // Leaving keeps it: the folder offers it back, unsaved, with its text.
+    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await expect(editorFor(page)).toHaveCount(0);
+    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await expect(row(page, 'docs')).toBeVisible();
+    const unsaved = entries(page).locator('.efs-entry-unsaved');
+    await expect(unsaved).toContainText('hello.txt');
+    await expect(unsaved).toContainText('Not saved yet');
+    await unsaved.locator('button.efs-entry-open').click();
+    await expect(editorFor(page)).toContainText('Your unsaved new file is back.');
+    await expect(editorFor(page).locator('textarea.efs-edit-text')).toHaveValue('Hello, world.\n');
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Into docs/ and back: hello.txt is offered back, with its text');
+
+    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    const review = page.locator('wa-dialog.efs-edit-review');
+    await expect(review).toContainText(/Creates\W+hello\.txt\W+in/);
+    await review.locator('wa-button.efs-review-send').click();
+    await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('Hello, world.\n');
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Review and send: once Saved, hello.txt opens by its own link');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('New text file with a name you already use here: refused in its own words, fixed in place, nothing sent', async ({
+  page,
+}) => {
+  const chain = await testChain('client-new-text-file-taken', 'taken.txt by anvil #6 at the root.');
+  try {
+    await fileAtRoot(chain, 6, 'taken.txt', 'already here\n');
+    await openRoot(page, chain);
+    await expect(row(page, 'taken.txt')).toBeVisible();
+    await entries(page).locator('wa-button.efs-new-file').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('taken.txt');
+    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await editorFor(page).locator('textarea.efs-edit-text').fill('new words\n');
+    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    await expect(editorFor(page).locator('.efs-new-refused')).toContainText(
+      /You already have something called\W+taken\.txt\W+here/,
+    );
+    chain.step('taken.txt is yours already: refused, with how to go on');
+
+    await editorFor(page).locator('wa-input.efs-new-name input').fill('fresh.txt');
+    await expect(editorFor(page).locator('.efs-new-refused')).toHaveCount(0);
+    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    const review = page.locator('wa-dialog.efs-edit-review');
+    await expect(review).toContainText(/Creates\W+fresh\.txt\W+in/);
+    await review.locator('wa-button', { hasText: 'Cancel' }).first().click();
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Renamed in place to fresh.txt: it plans; Cancel sends nothing');
+  } finally {
+    await chain.finish();
+  }
+});

@@ -3,13 +3,18 @@
 // reload or closing the tab loses them, so the shell asks first while any exist (shell.ts).
 //
 // One draft per file, keyed by the file's canonical route (`#/r/<realm>/<link>`): the same key
-// the banner's "Review changes" navigates to, so both talk about the same file.
+// the banner's "Review changes" navigates to, so both talk about the same file. A new file not yet
+// saved has no route: it is kept under its folder and name (the Files app's newFileKey) until it
+// is saved.
 
-import type { RevisionRef } from '@efs/sdk/files';
+import type { FolderRef, RevisionRef } from '@efs/sdk/files';
 import { formatRealmRoute, type RealmRef } from '../boot/route.ts';
 import { type ReadonlySignal, state } from '../state/signals.ts';
 
-export interface KeptDraft {
+export type KeptDraft = EditDraft | NewFileDraft;
+
+/** An unsaved edit of an existing file. */
+export interface EditDraft {
   readonly text: string;
   /**
    * The revision the edit is based on: the one on screen when the person pressed Edit (or the
@@ -19,10 +24,22 @@ export interface KeptDraft {
   readonly base: RevisionRef;
 }
 
+/** An unsaved new file: its text, and where it is to be created. */
+export interface NewFileDraft {
+  readonly text: string;
+  readonly create: {
+    readonly folder: FolderRef;
+    readonly folderName: string;
+    readonly name: string;
+  };
+}
+
 export interface DraftStore {
   get(key: string): KeptDraft | undefined;
   keep(key: string, draft: KeptDraft): void;
   drop(key: string): void;
+  /** Every unsaved new file, with its key (read `count` to follow additions and removals). */
+  newFiles(): readonly (readonly [string, NewFileDraft])[];
   /** How many files have an unsaved edit. */
   readonly count: ReadonlySignal<number>;
 }
@@ -42,6 +59,7 @@ export function createDraftStore(): DraftStore {
     drop(key) {
       if (drafts.delete(key)) count.set(drafts.size);
     },
+    newFiles: () => [...drafts].filter((e): e is [string, NewFileDraft] => 'create' in e[1]),
     count,
   };
 }

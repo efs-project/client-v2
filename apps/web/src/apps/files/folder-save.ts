@@ -40,6 +40,13 @@ import {
 import type { NavStep } from './navigation.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
+/** "New text file", named: the editor takes it from here (the listing starts the composer). */
+export const COMPOSE_EVENT = 'efs-compose';
+export interface ComposeDetail {
+  readonly folder: FolderRef;
+  readonly folderName: string;
+  readonly name: string;
+}
 /** The event's detail: the save the banner now owns, and what it was asked to do. */
 export interface FolderSavedDetail {
   readonly sequenceId: string;
@@ -63,6 +70,8 @@ const loadPlanners = async (): Promise<FolderPlanners> => {
 /** What the dialog is asked to do. Create and Rename are named in the dialog first. */
 export type FolderAsk =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly folderName: string }
+  /** Named here, then written in the editor (no plan in this dialog). */
+  | { readonly kind: 'createFile'; readonly folder: FolderRef; readonly folderName: string }
   | { readonly kind: 'rename'; readonly from: EntryRef }
   | {
       readonly kind: 'move';
@@ -168,13 +177,15 @@ export class EfsFolderSave extends EfsElement {
     this.#controller?.abort();
     this.#controller = new AbortController();
     this.#ask.set(ask);
-    if ((ask.kind === 'createFolder' || ask.kind === 'rename') && !this.#checkName.get()) {
+    const named = ask.kind === 'createFolder' || ask.kind === 'createFile' || ask.kind === 'rename';
+    if (named && !this.#checkName.get()) {
       loadCheckName()
         .then((check) => this.#checkName.set(check))
         .catch((error: unknown) => console.error(error));
     }
-    if (ask.kind === 'createFolder') this.#phase.set({ phase: 'naming', value: '' });
-    else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
+    if (ask.kind === 'createFolder' || ask.kind === 'createFile') {
+      this.#phase.set({ phase: 'naming', value: '' });
+    } else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
     else if (ask.kind === 'move') this.#pickAgain();
     else void this.#plan(this.#request(ask, ''));
   }
@@ -210,6 +221,8 @@ export class EfsFolderSave extends EfsElement {
     switch (ask.kind) {
       case 'createFolder':
         return { kind: 'createFolder', folder: ask.folder, name };
+      case 'createFile':
+        throw new Error('a new file is planned in the editor');
       case 'rename':
         return { kind: 'rename', from: ask.from, to: name };
       case 'move':
@@ -438,8 +451,22 @@ export class EfsFolderSave extends EfsElement {
                 ? nameRuleMessage(check.rule)
                 : 'files.name.rule.character',
             );
+    const writes = ask.kind === 'createFile';
     const review = () => {
-      if (check?.status !== 'VALID' || unchanged || !ready) return;
+      if (check?.status !== 'VALID' || unchanged) return;
+      if (writes) {
+        // Named: the editor writes it (no wallet needed to type), so this dialog is done.
+        this.dispatchEvent(
+          new CustomEvent<ComposeDetail>(COMPOSE_EVENT, {
+            detail: { folder: ask.folder, folderName: ask.folderName, name: check.text },
+            bubbles: true,
+            composed: true,
+          }),
+        );
+        this.#phase.set({ phase: 'closed' });
+        return;
+      }
+      if (!ready) return;
       void this.#plan(this.#request(ask, check.text));
     };
     return html`<div class="wa-stack wa-gap-s">
@@ -461,7 +488,7 @@ export class EfsFolderSave extends EfsElement {
             : nothing
         }
         ${
-          ready
+          ready || writes
             ? nothing
             : html`<wa-callout variant="neutral" size="small">
               <span slot="icon">${appIcon('wallet')}</span>
@@ -473,8 +500,17 @@ export class EfsFolderSave extends EfsElement {
         >${t('review.cancel')}</wa-button
       >
       ${
-        ready
+        writes
           ? html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-write"
+              ?disabled=${check?.status !== 'VALID'}
+              @click=${review}
+              >${t('files.new.continue')}</wa-button
+            >`
+          : ready
+            ? html`<wa-button
             slot="footer"
             variant="brand"
             class="efs-folder-review"
@@ -482,7 +518,7 @@ export class EfsFolderSave extends EfsElement {
             @click=${review}
             >${t('files.save.review')}</wa-button
           >`
-          : html`<wa-button
+            : html`<wa-button
             slot="footer"
             variant="brand"
             class="efs-folder-connect"
@@ -568,13 +604,15 @@ export class EfsFolderSave extends EfsElement {
     const title: MessageId =
       ask?.kind === 'createFolder'
         ? 'files.new.folder'
-        : ask?.kind === 'rename'
-          ? 'files.rename.title'
-          : ask?.kind === 'move'
-            ? 'files.move.title'
-            : ask?.kind === 'restore'
-              ? 'files.restore'
-              : 'files.remove.title';
+        : ask?.kind === 'createFile'
+          ? 'files.new.textFile'
+          : ask?.kind === 'rename'
+            ? 'files.rename.title'
+            : ask?.kind === 'move'
+              ? 'files.move.title'
+              : ask?.kind === 'restore'
+                ? 'files.restore'
+                : 'files.remove.title';
     const label =
       ask?.kind === 'remove'
         ? t(title, { name: ask.entry.name, folder: ask.folderName })

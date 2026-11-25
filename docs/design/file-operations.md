@@ -8,9 +8,10 @@
   - New folder, Rename, and Remove (a release), with Restore offered right after;
   - "Show removed": the person's own removed entries in the folder on screen, each with Restore (`apps/files/removed-list.ts`);
   - Move, with the folder picker and `via` (`apps/files/folder-picker.ts`);
+  - New text file: named in the folder dialog, written in the editor's create mode (`apps/files/compose.ts`, `editor.ts`);
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
-  - New text file and Upload;
+  - Upload;
   - "Remove and block this name";
   - multi-select batches;
   - the lazy "also: …" marker.
@@ -132,10 +133,12 @@ It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2
 **New ▾** offers New text file, New folder and Upload files.
 
 - **New text file**
-  1. **Name** (`checkName` as typed), in a small dialog.
-  2. **Write:** the Preview opens the existing editor on an empty document.
-  3. **Save:** "Review and save" plans `planCreateFile({ folder, name, content })`.
-  - The unsaved-edit rules of slice H apply from the first keystroke. A new file's draft is kept under its folder and name until saved.
+  1. **Name** (`checkName` as typed), in a small dialog. No wallet is needed to name or type.
+  2. **Write:** the Preview opens the existing editor in its create mode on an empty document, with the name still editable (so a refusal is fixed in place).
+  3. **Save:** "Review and save" plans `planCreateFile({ folder, name, content })` in the folder's place Lens, and the review says "Creates <name> in <folder>." Send, holds and the banner are the edit path's, held on the new file's (folder, name).
+  - The unsaved-edit rules of slice H apply from the first keystroke. A new file's draft is kept under its realm, folder and name (`newFileKey`) until it's sent; the banner then keeps its text for "Review changes", which brings it back in the editor at its folder.
+  - **Leaving keeps it.** The composer shows only where it was started; leaving ends it, and the folder lists the unsaved file as "Not saved yet", which opens it again ("Your unsaved new file is back").
+  - **Once Saved,** the new file opens by its own link (if the person is still where they wrote it), read in the folder's place Lens.
 - **Upload files**
   - Upload uses a file picker, or drag and drop onto the Entries pane.
   - The media type comes from the bytes' signature, never from the extension alone. The Preview already checks signatures.

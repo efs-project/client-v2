@@ -159,14 +159,14 @@ export class EfsSavesBanner extends EfsElement {
       this.#notice(p.sequenceId, { kind: 'message', id: 'saves.draftNotKept' });
       return;
     }
-    const unsaved = this.drafts.get(draft.route);
+    const unsaved = this.drafts.get(draft.key ?? draft.route);
     if (!replace && unsaved && unsaved.text !== draft.text) {
       this.#notice(p.sequenceId, { kind: 'confirm-replace' });
       return;
     }
     const stopped = await this.#act(p, (writer, id) => writer.abandon(id));
     if (stopped?.state !== 'ABANDONED') return;
-    this.drafts.drop(draft.route);
+    this.drafts.drop(draft.key ?? draft.route);
     this.saves.reopen(draft);
     if (location.hash !== draft.route) location.hash = draft.route;
   }

@@ -6,6 +6,7 @@ import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppEntry, AppHost, AppMount, PaneLayout, ViewDescriptor } from '../../shell/apps.ts';
 import { effect } from '../../state/effect.ts';
 import { computed, type ReadonlySignal } from '../../state/signals.ts';
+import { type Composer, createComposer } from './compose.ts';
 import { registerFilesElements } from './define.ts';
 import type { EfsFilesListing } from './listing.ts';
 import { createFolderNav, type FolderNav } from './navigation.ts';
@@ -18,11 +19,15 @@ const DEFAULT_LAYOUT: PaneLayout = {
   panes: [{ view: 'overview' }, { view: 'entries' }, { view: 'preview' }],
 };
 
-/** What the panes share: where the person is, the route's link, and what kind of thing it names. */
+/**
+ * What the panes share: where the person is, the route's link, what kind of thing it names, and
+ * the new text file being written, if any.
+ */
 interface Shared {
   readonly nav: FolderNav;
   readonly link: ReadonlySignal<LinkState>;
   readonly object: ObjectKindState;
+  readonly composer: Composer;
 }
 
 function view(host: AppHost, kind: FilesViewKind, nav: FolderNav): HTMLElement {
@@ -38,6 +43,7 @@ function listing(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   element.host = host;
   element.nav = shared.nav;
   element.object = shared.object;
+  element.composer = shared.composer;
   element.start(scope);
   return element;
 }
@@ -47,6 +53,7 @@ function preview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   element.host = host;
   element.nav = shared.nav;
   element.object = shared.object;
+  element.composer = shared.composer;
   const link = shared.link;
   element.target = link;
   // Shared links are normalized (e.g. uppercase hex) to the SDK's canonical form, in place.
@@ -68,7 +75,22 @@ export const entry: AppEntry = {
     // an object link names a folder or a file (one openObject read): shared by the panes.
     const nav = createFolderNav();
     const link = computed(() => linkState(host.location.get()));
-    const shared: Shared = { nav, link, object: objectKindState(host, link, nav, scope) };
+    const composer = createComposer();
+    const shared: Shared = {
+      nav,
+      link,
+      object: objectKindState(host, link, nav, scope),
+      composer,
+    };
+    // A new file is written where it was started: leaving that place ends the composer (its text
+    // stays kept, and the folder's listing offers it back).
+    effect(scope, () => {
+      const c = composer.current.get();
+      const location = host.location.get();
+      if (c && (location.kind !== 'realm' || location.link !== c.route)) {
+        queueMicrotask(() => composer.end());
+      }
+    });
     const views = new Map<string, ViewDescriptor>([
       [
         'overview',
@@ -103,6 +125,7 @@ export const entry: AppEntry = {
       // A link opens on what it names, also on a phone: a folder on its Entries, a file on its
       // Preview; undefined until openObject has said which.
       linkView: computed(() => {
+        if (composer.current.get()) return 'preview';
         const kind = shared.object.kind.get().status;
         if (kind === 'folder') return 'entries';
         return kind === 'pending' ? undefined : 'preview';
