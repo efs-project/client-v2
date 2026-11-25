@@ -14,6 +14,7 @@ import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { EditPlanResult, OpenedFile, RevisionRef } from '@efs/sdk/files';
 import type { AppHost } from '../../shell/apps.ts';
 import { isFault, type SaveOutcome, saveMessage, saveOutcome } from '../../shell/save-outcome.ts';
+import { shortAccount } from '../../shell/wallet-state.ts';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
@@ -193,6 +194,15 @@ export class EfsFileEditor extends EfsElement {
     this.#phase.set({ phase: 'editing' });
   }
 
+  /** The connected account when the SDK says it is the author (it always is for a plan). */
+  #authorLabel(author: string): string {
+    const a = this.host.saving.availability.get();
+    return a.status === 'READY' &&
+      this.efs.lens.principalOf(a.account as never).toLowerCase() === author.toLowerCase()
+      ? shortAccount(a.account)
+      : shortId(author);
+  }
+
   #walletNotice(t: Translator['t']) {
     const a = this.host.saving.availability.get();
     if (a.status === 'READY' || a.status === 'NO_SESSION') return nothing;
@@ -254,7 +264,7 @@ export class EfsFileEditor extends EfsElement {
           <dt>${t('review.layout')}</dt>
           <dd><code translate="no">${r.layout}</code></dd>
           <dt>${t('review.author')}</dt>
-          <dd><code translate="no" dir="ltr" class="efs-hash" title=${r.author}>${shortId(r.author)}</code></dd>
+          <dd><code translate="no" dir="ltr" class="efs-hash" title=${r.author}>${this.#authorLabel(r.author)}</code></dd>
           <dt>${t('review.parts')}</dt>
           <dd>${r.parts}</dd>
           <dt>${t('review.revision')}</dt>

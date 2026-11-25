@@ -263,6 +263,27 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* On a phone the value column gets too narrow for hashes: stack each term above its value. */
+@media (max-width: 30rem) {
+  .efs-facts {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+  }
+
+  .efs-facts dd {
+    margin-block-end: var(--wa-space-2xs);
+  }
+}
+
+/* The file editor: the same face as the preview, as wide as the pane. */
+.efs-edit-text {
+  inline-size: 100%;
+  min-block-size: 12lh;
+  font-family: var(--wa-font-family-code);
+  font-size: var(--wa-font-size-s);
+  resize: vertical;
+}
+
 .efs-hash,
 .efs-outcome-code {
   font-family: var(--wa-font-family-code);

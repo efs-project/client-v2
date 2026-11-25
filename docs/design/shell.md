@@ -106,6 +106,7 @@ The client ↔ SDK routing contract (PM ledger, 2026-11-24; naming review §6):
 | Built-in | the bundle | no networks; appearance follows the system |
 | Operator | `efs.config.json` beside `index.html` | static, public, validated input; never a backend |
 | User | IndexedDB `efs-client` / `settings` / `user` | `efs-settings/1`, revisioned |
+| Saves (slice C) | IndexedDB `efs-sdk-journal` (the SDK's write journal), created at the first real submission | the SDK's journal records; see `writes.md` |
 
 - **Writes are compare-and-set on `revision`.** A second tab gets `CONFLICT` instead of silently overwriting. Saves are announced on a BroadcastChannel so other tabs reload.
 - **Unknown fields survive.** A settings record from a newer schema is shown read-only and never overwritten, which keeps rollback to an older client safe.
