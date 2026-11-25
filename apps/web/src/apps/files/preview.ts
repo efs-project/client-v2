@@ -123,6 +123,10 @@ export class EfsFilesPreview extends EfsElement {
     }
     const run = this.#scope.child();
     this.#run = run;
+    // Opening from now on, not when the first read answers: until then the pane would still
+    // show the previous result, and anything waiting for "read" (focus returning to Edit after
+    // a save) would act on content that is about to be replaced.
+    this.#state.set({ phase: 'opening' });
     loadReads()
       .catch((error: unknown) => {
         if (!run.signal.aborted) {
@@ -153,9 +157,36 @@ export class EfsFilesPreview extends EfsElement {
     return mine ? efs.lens.mineFirst(mine as never, link.lens ?? efs.lens.default) : link.lens;
   }
 
+  /** Set when the editor closes: focus goes back to Edit once the file is on screen again. */
+  #returnFocus = false;
+
+  /** Marked once per page: the first verified contents on screen (the Preview's budget). */
+  static #markedVerified = false;
+
+  override updated(): void {
+    const shown = this.#state.get();
+    if (!EfsFilesPreview.#markedVerified && shown?.phase === 'read' && shown.content) {
+      EfsFilesPreview.#markedVerified = true;
+      performance.mark('efs:preview-verified');
+    }
+    if (!this.#returnFocus) return;
+    const s = this.#state.get();
+    if (s && s.phase !== 'read' && s.phase !== 'not-present' && s.phase !== 'failed') return;
+    this.#returnFocus = false;
+    // Edit when it's offered; otherwise the pane itself, so focus is never dropped on the page.
+    const target =
+      this.querySelector<HTMLElement>('wa-button.efs-edit-start') ??
+      this.querySelector<HTMLElement>('.efs-preview');
+    // A freshly rendered <wa-button> focuses its inner button only once its own first render
+    // is done; before that, focus() is a silent no-op.
+    const ready = (target as { updateComplete?: Promise<unknown> } | null)?.updateComplete;
+    void Promise.resolve(ready).then(() => target?.focus());
+  }
+
   #onEditDone = (event: Event): void => {
     const detail = (event as CustomEvent<EditDoneDetail>).detail;
     event.stopPropagation();
+    this.#returnFocus = true;
     const shown = this.#state.get();
     const author =
       shown && 'open' in shown && shown.open.status === 'PRESENT' ? shown.open.file.author : null;
@@ -438,7 +469,7 @@ export class EfsFilesPreview extends EfsElement {
     const notice = readerNotice(this, this.host, t);
     if (notice) return notice;
     const s = this.#state.get();
-    return html`<div class="wa-stack wa-gap-m efs-preview">
+    return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
       ${s ? this.#body(s, t) : html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${t('files.preview.opening')}</p>`}
     </div>`;
   }

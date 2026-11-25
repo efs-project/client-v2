@@ -28,6 +28,26 @@ import type { WriterSession } from './writer-state.ts';
 /** Asks the shell for the wallet dialog (Connect, or Switch network). */
 export const REQUEST_WALLET_EVENT = 'efs-request-wallet';
 
+/** A chain id as the person knows it: the network in view's label, else "chain N". */
+export function chainName(network: NetworkState, id: number, t: Translator['t']): string {
+  return 'network' in network && network.network.definition.chainId === id
+    ? network.network.definition.label
+    : t('saves.chainId', { id: String(id) });
+}
+
+/** What a save's row says, in words (the banner's message; the shell announces the same). */
+export function describeSave(
+  p: SequenceProgress,
+  network: NetworkState,
+  t: Translator['t'],
+): string {
+  const outcome = saveOutcome(p);
+  return t(
+    saveMessage(outcome),
+    saveValues(outcome, shortAccount, (id) => chainName(network, id, t)),
+  );
+}
+
 type RowNotice =
   | { readonly kind: 'confirm-abandon' }
   | { readonly kind: 'other-account' }
@@ -68,13 +88,6 @@ export class EfsSavesBanner extends EfsElement {
     if (notice) next.set(id, notice);
     else next.delete(id);
     this.#notices.set(next);
-  }
-
-  #chainName(id: number, t: Translator['t']): string {
-    const n = this.network;
-    return 'network' in n && n.network.definition.chainId === id
-      ? n.network.definition.label
-      : t('saves.chainId', { id: String(id) });
   }
 
   /**
@@ -170,7 +183,7 @@ export class EfsSavesBanner extends EfsElement {
     // A reorg or a lost wallet connection is worth a warning while it settles.
     const calm = outcome.kind !== 'undone-checking' && outcome.kind !== 'wallet-lost';
     const variant = done || (settling && calm) ? 'success' : 'warning';
-    const values = saveValues(outcome, shortAccount, (id) => this.#chainName(id, t));
+    const message = describeSave(p, this.network, t);
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).
     const canStop = !done && !settling && outcome.kind !== 'abandoned';
@@ -185,7 +198,7 @@ export class EfsSavesBanner extends EfsElement {
         >${appIcon(done || settling ? 'circle-check' : 'triangle-exclamation')}</span
       >
       <div class="wa-split wa-gap-s efs-save-row">
-        <p role="status" class="efs-save-message">${t(saveMessage(outcome), values)}</p>
+        <p class="efs-save-message">${message}</p>
         <div class="wa-cluster wa-gap-xs">
           ${this.#primary(p, action, t)}
           ${

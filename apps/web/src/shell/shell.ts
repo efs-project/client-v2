@@ -27,6 +27,8 @@ import {
 import { OPEN_SETTINGS_EVENT } from './network-indicator.ts';
 import type { OsState } from './os-state.ts';
 import type { ReaderSession } from './reader-state.ts';
+import { saveOutcome } from './save-outcome.ts';
+import { describeSave } from './saves-banner.ts';
 import type { SavesSession } from './saves-state.ts';
 import type { EfsSettingsPanel } from './settings-panel.ts';
 import type { WalletSession } from './wallet-state.ts';
@@ -69,6 +71,14 @@ export class EfsShell extends EfsElement {
   #loadGeneration = 0;
   #shellScope: OwnerScope | undefined;
   /**
+   * What the page last said about saves, in one live region that is always in the document:
+   * a region inserted together with its text (the banner appears only once there are saves) is
+   * not reliably read out. Polite: it never interrupts what the person is doing.
+   */
+  #announcement = state('');
+  /** Each save's outcome when last announced, so only changes are spoken. */
+  #announced = new Map<string, string>();
+  /**
    * <wa-page> starts as "desktop" and switches only after its first resize measurement, so a
    * phone would briefly lay out the desktop columns (wider than the screen). Its first render gets
    * the right view from the window; from then on its own measurement decides.
@@ -88,6 +98,25 @@ export class EfsShell extends EfsElement {
       );
     this.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
     this.#shellScope.defer(() => this.removeEventListener(OPEN_SETTINGS_EVENT, onOpen));
+    // Save outcomes as they change ("Saved · confirming", "Saved", "Partially saved (2 of 5)…").
+    effect(this.#shellScope, () => {
+      const s = this.saves.state.get();
+      const saves = s.status === 'READY' ? s.saves : [];
+      const network = this.os.network.get();
+      const t = this.translator.t.bind(this.translator);
+      const next = new Map<string, string>();
+      let spoken: string | undefined;
+      for (const p of saves) {
+        const kind = saveOutcome(p).kind;
+        next.set(p.sequenceId, kind);
+        if (this.#announced.get(p.sequenceId) !== kind) spoken = describeSave(p, network, t);
+      }
+      this.#announced = next;
+      if (spoken !== undefined) {
+        const text = spoken;
+        queueMicrotask(() => this.#announcement.set(text));
+      }
+    });
     // Realm links are kept in canonical form (lowercase ledger, trailing slash), in place.
     effect(this.#shellScope, () => {
       const route = this.os.route.get();
@@ -360,6 +389,9 @@ export class EfsShell extends EfsElement {
         }
         <main id="efs-main" class="efs-main" tabindex="-1">${this.#main(slot, t)}</main>
       </wa-page>
+      <p class="wa-visually-hidden efs-announcer" role="status" aria-live="polite">
+        ${this.#announcement.get()}
+      </p>
       <efs-settings-panel
         .os=${this.os}
         .reader=${this.reader}

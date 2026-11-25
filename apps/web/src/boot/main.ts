@@ -136,6 +136,8 @@ async function boot(): Promise<void> {
   shell.apps = APPS;
   document.getElementById('efs-boot')?.replaceWith(shell);
   root.setAttribute('data-efs-booted', '');
+  // Startup budget (tests/e2e/budgets.spec.ts): the shell is on screen.
+  performance.mark('efs:booted');
 }
 
 boot().catch((error: unknown) => {

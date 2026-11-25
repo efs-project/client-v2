@@ -26,6 +26,9 @@ One row per web-platform feature the client **actually uses**. A PR that adds a 
 | Dynamic viewport units (`viewport-unit-variants`) | CSS Values 4 | Baseline high | required | full | `main` `min-block-size` | css/css |
 | Safe-area insets (`env()`) | CSS Env 1 | Baseline high | enhancement | ignored where absent | page and header padding (`viewport-fit=cover`) | — |
 | `prefers-color-scheme` / `color-scheme` (`prefers-color-scheme`, `color-scheme`) | Media Queries 5 / CSS Color Adjust | Baseline high | enhancement | light where absent | `wa-light`/`wa-dark` follow it live (`matchMedia` change events) unless the user picks a mode | ui-atoms/component-specific-light-dark-theme |
+| `prefers-contrast: more` (`prefers-contrast`) | Media Queries 5 | Baseline low | enhancement | the theme's normal contrast where unsupported | quiet text and borders take the normal text color, thicker focus ring (`efs-themes.css`) | accessibility/accessibility |
+| `prefers-reduced-transparency` (`prefers-reduced-transparency`) | Media Queries 5 | limited (Chromium) | enhancement | translucent overlays where unsupported | dialog and drawer overlays become solid (`efs-themes.css`) | accessibility/accessibility |
+| User Timing marks (`user-timing`) | User Timing 3 | Baseline high | test-only measurement | — | `efs:booted`, `efs:preview-verified`, read by `tests/e2e/budgets.spec.ts` | performance/* |
 | `forced-colors` | Media Queries 5 | Baseline high | enhancement | system colors | theme overrides (`efs-themes.css`) | accessibility/accessibility |
 | Web Crypto `digest` (`web-cryptography`) | WebCrypto | Baseline high | enhancement | secure contexts only; Settings → About says "unavailable" otherwise | release digest | — |
 | IndexedDB (`indexeddb`) | IndexedDB 3 | Baseline high | enhancement | in-memory settings for the tab where refused | user settings, opened without creating it on read | — |
