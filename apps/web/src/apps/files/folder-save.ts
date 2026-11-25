@@ -42,6 +42,8 @@ import {
 import type { NavStep } from './navigation.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
+/** The dialog closed and the control that opened it is gone: its pane should take focus. */
+export const FOCUS_LOST_EVENT = 'efs-folder-focus-lost';
 /** "New text file", named: the editor takes it from here (the listing starts the composer). */
 export const COMPOSE_EVENT = 'efs-compose';
 export interface ComposeDetail {
@@ -526,6 +528,12 @@ export class EfsFolderSave extends EfsElement {
       }`;
   }
 
+  /** The name typed so far (the naming phase's value), else `fallback`. */
+  #nameNow(fallback: string): string {
+    const s = this.#phase.get();
+    return s.phase === 'naming' ? s.value : fallback;
+  }
+
   #naming(ask: FolderAsk, value: string) {
     const t = this.host.translator.t.bind(this.host.translator);
     const checkName = this.#checkName.get();
@@ -543,15 +551,20 @@ export class EfsFolderSave extends EfsElement {
                 : 'files.name.rule.character',
             );
     const writes = ask.kind === 'createFile';
-    const review = () => {
-      if (check?.status !== 'VALID' || unchanged) return;
+    // Enter can come before checkName has loaded (it loads with the SDK when the dialog opens):
+    // it waits for it, then checks the name as it is now, so a fast typist's Enter is never lost.
+    const review = async () => {
+      const check = (this.#checkName.get() ?? (await loadCheckName()))(this.#nameNow(value));
+      if (this.#ask.get() !== ask || this.#phase.get().phase !== 'naming') return;
+      if (check.status !== 'VALID' || (ask.kind === 'rename' && check.text === ask.from.name))
+        return;
       if (writes) {
         // Named: the editor writes it (no wallet needed to type), once this dialog has closed.
         this.#composing = { folder: ask.folder, folderName: ask.folderName, name: check.text };
         this.#phase.set({ phase: 'closed' });
         return;
       }
-      if (!ready) return;
+      if (this.host.saving.availability.get().status !== 'READY') return;
       void this.#plan(this.#request(ask, check.text));
     };
     return html`<div class="wa-stack wa-gap-s">
@@ -563,7 +576,7 @@ export class EfsFolderSave extends EfsElement {
           @input=${(event: Event) =>
             this.#phase.set({ phase: 'naming', value: (event.target as HTMLInputElement).value })}
           @keydown=${(event: KeyboardEvent) => {
-            if (event.key === 'Enter') review();
+            if (event.key === 'Enter') void review();
           }}
         ></wa-input>
         ${error ? html`<p class="efs-folder-name-error" role="alert">${error}</p>` : nothing}
@@ -1040,9 +1053,21 @@ export class EfsFolderSave extends EfsElement {
       }}
       @wa-after-hide=${(event: Event) => {
         if (event.target !== event.currentTarget) return;
+        const dialog = event.currentTarget as HTMLElement;
         const detail = this.#composing;
         this.#composing = undefined;
-        if (!detail) return;
+        if (!detail) {
+          // The dialog gives focus back to what opened it; when that's gone (a removed or moved
+          // row, a notice that closed), focus would drop to the page: the Entries pane takes it.
+          setTimeout(() => {
+            const active = document.activeElement;
+            if (active && active !== document.body && !dialog.contains(active)) return;
+            this.dispatchEvent(
+              new CustomEvent(FOCUS_LOST_EVENT, { bubbles: true, composed: true }),
+            );
+          });
+          return;
+        }
         // After the dialog's own focus return (queued just before this event), so the editor's
         // focus on its text is the last word.
         setTimeout(() =>
