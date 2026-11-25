@@ -49,7 +49,7 @@ saves session <── journal (non-creating check) <── every verified sessio
 
 ## Testing
 
-`tests/e2e/edit.spec.ts` drives the real UI and SDK through the whole flow, in three modes (`tests/e2e/chain.ts`):
+`tests/e2e/edit.spec.ts` and `tests/e2e/edit-failures.spec.ts` drive the real UI and SDK through the whole flow, in three modes (`tests/e2e/chain.ts`):
 
 | Mode | Where | Chain | Wallet |
 |---|---|---|---|
@@ -62,9 +62,23 @@ The cases:
 2. The PM's proof. The wallet broadcasts, but its answer is lost, and the page is left while the transaction is pending. The next load settles the save from the ledger with no wallet request ("Saved · confirming"). After finality the banner says "Saved". One `eth_sendTransaction` in all.
 3. A guest reading a file creates no journal database and touches no wallet.
 
+The failure cases, all in one tab (slice D). Each asserts what the wallet was asked to send, and, live, what it broadcast:
+
+4. **Lost answer, same tab.** The wallet broadcasts but its answer is lost; the SDK settles the part from the ledger: "Saved · confirming". One send.
+5. **Storage lost right after a send.** IndexedDB writes fail once the wallet has answered. The page says "We couldn't confirm this save yet", and the editor holds new saves. When storage is back, the banner settles it. One send.
+6. **Own version changed before Send (E_CAS).** The same account saves the file elsewhere between Review and Send. The ledger refuses before the wallet is asked; the editor says the person's own version changed and offers "Review and save anyway". One send in all.
+7. **A declined part.** A two-part (150 KiB) edit; the wallet declines part 2. The banner says "You declined part 2", and Continue finishes it. Each part is broadcast once.
+8. **The finishing part loses a race (PARTIAL + E_CAS).** The same account saves the file elsewhere before Send. Part 1 (content) lands; the bind is refused. The banner says the file changed while saving, and "Review changes" stops the old save and reopens the editor with the person's text.
+9. **Two tabs.** Tab 1's wallet request stays open; tab 2's Review re-lists the journal, finds tab 1's save in flight and waits. Tab 2 sends nothing.
+10. **Wallet switched networks before Send.** NOT_SENT (WALLET_MISMATCH): "Switch your wallet to … on Testnet". The wallet switches back; Send again continues the same save. One broadcast.
+11. **Another author changed the file.** Review finds BASE_CHANGED; "Save my edit over the new version" plans from the new head. One send.
+
+**Deterministic timing.** The reload test pauses the page clock as soon as the lost send is seen. The SDK's next ledger check waits on a timer, so it can't start; its first check finishes on answers already in flight. The test leaves once no RPC is in flight (`chain.idle()`), so the recording and its replay always contain exactly one check before the reload.
+
 **Transcripts are recorded, never edited.** Replay matches calls by order, so the order belongs to the caller: the client records its own (agreed with the SDK dev, 2026-11-24). The SDK's edit transcripts remain the SDK's contract tests.
 - Re-record after any change to the client's call order. A re-record rewrites every value (fresh block hashes and timestamps), so review the diff for changes in the calls' shape, not their values.
-- Two recordings of the same order have produced identical call shapes. If they ever differ, that is SDK nondeterminism: send the diff to the SDK dev.
+- Two recordings of the same order have produced identical call shapes, except where the client itself runs two readers at once: in the reload test's second load, the Preview and the saves check read concurrently from an unchanging chain, so their calls can interleave either way. Replay matches calls by method and parameters, so either order replays. Any other difference is SDK nondeterminism: send the diff to the SDK dev.
+- Recordings are excluded from Biome, so no tool rewrites them.
 
 ## Bundle
 

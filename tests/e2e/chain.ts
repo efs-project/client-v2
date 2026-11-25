@@ -66,8 +66,26 @@ export interface TestChain {
     | undefined;
   /** The next eth_sendTransaction is broadcast, but the page gets "connection lost" instead. */
   dropNextSendResponse(): void;
-  /** Resolves once the page has made no RPC request for `ms`. */
-  quiet(ms: number): Promise<void>;
+  /** Live: refuse the nth eth_sendTransaction (1-based) in the wallet, before broadcast. */
+  refuseSend(n: number): void;
+  /** Live: the wallet reports this chain id (undefined: the chain's own again). */
+  walletChainId(id: string | undefined): void;
+  /** All modes: the next eth_sendTransaction waits (in the wallet) until `release()`. */
+  holdNextSend(): { readonly reached: Promise<void>; release(): void };
+  /** All modes: break IndexedDB writes in `page` once the next send has been answered. */
+  breakJournalAfterSend(page: Page): Promise<void>;
+  /** All modes: let `page` write to IndexedDB again. */
+  restoreJournal(page: Page): Promise<void>;
+  /** Live and record: edit the seeded readme from Node as anvil account `index`. */
+  readonly editAs: ((index: number, text: string) => Promise<void>) | undefined;
+  /** Transactions the wallet actually broadcast (sent, not refused). */
+  readonly broadcasts: readonly string[];
+  /**
+   * Resolves once no RPC request is in flight and none has started for `ms`. Use it with the
+   * page clock paused: then the SDK can only continue through answers already in flight (its
+   * timers can't fire), so "idle" means its current step is done, not merely quiet for a while.
+   */
+  idle(ms?: number): Promise<void>;
   /** Routes the page's RPC origin and installs the EIP-6963 test wallet. Call before goto. */
   attach(page: Page): Promise<void>;
   /** Records the steps of this case (written into the transcript in record mode). */
@@ -100,7 +118,18 @@ function anvilRpc(url: string): Rpc {
  * A wallet over anvil: the editing account, already unlocked there, so eth_sendTransaction is
  * signed by anvil exactly as a wallet would sign it. No EIP-5792 (the SDK goes part by part).
  */
-function anvilWallet(rpc: Rpc, account: string, state: { drop: boolean }) {
+/** What the live test wallet is told to do (record mode captures its answers for replay). */
+interface WalletBehaviour {
+  /** The next broadcast's answer is lost. */
+  drop: boolean;
+  /** Refuse these sends (1-based, counting every eth_sendTransaction) with 4001, unsent. */
+  readonly refuse: Set<number>;
+  /** Report this chain id instead of the chain's (a wallet switched away). */
+  chainId?: string | undefined;
+  sends: number;
+}
+
+function anvilWallet(rpc: Rpc, account: string, state: WalletBehaviour) {
   return {
     async request({ method, params }: WalletRequest): Promise<unknown> {
       switch (method) {
@@ -108,10 +137,12 @@ function anvilWallet(rpc: Rpc, account: string, state: { drop: boolean }) {
         case 'eth_accounts':
           return [account];
         case 'eth_chainId':
-          return rpc('eth_chainId');
+          return state.chainId ?? rpc('eth_chainId');
         case 'wallet_switchEthereumChain':
           return null;
         case 'eth_sendTransaction': {
+          state.sends++;
+          if (state.refuse.has(state.sends)) throw fault('User rejected the request.', 4001);
           const hash = await rpc(method, params as unknown[]);
           if (state.drop) {
             state.drop = false;
@@ -139,7 +170,14 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   /** Failures of the test's own chain or wallet plumbing: any one fails the test in finish(). */
   const harnessErrors: unknown[] = [];
   let lastRpc = Date.now();
-  const drop = { drop: false };
+  let inFlight = 0;
+  const drop: WalletBehaviour = { drop: false, refuse: new Set(), sends: 0 };
+  /** The send to hold, and how to let it go. */
+  let hold: { reached: () => void; released: Promise<void> } | undefined;
+  /** Pages whose journal breaks once the next send is answered. */
+  const breakAfterSend = new Set<Page>();
+  const broadcasts: string[] = [];
+  let editAs: TestChain['editAs'];
 
   let answerRpc: (body: unknown) => Promise<unknown>;
   let askWallet: (r: WalletRequest) => Promise<unknown>;
@@ -174,6 +212,32 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     if (!readme) throw new Error('the fixture seed has no readme.txt');
     deployment = `${JSON.stringify(chain.deployment, null, 2)}\n`;
     ids = { file: readme.subjectId, account };
+    editAs = async (index, text) => {
+      const [{ createEfs }, { createWriter, memoryJournal }, { openFile, planEditFile }] =
+        await Promise.all([
+          import('@efs/sdk'),
+          import('@efs/sdk/actions'),
+          import('@efs/sdk/files'),
+        ]);
+      const efs = createEfs({ rpcs: [chain.rpcUrl], deployment: chain.deployment as never });
+      const who = (chain.accounts.unlocked[index] as string).toLowerCase();
+      const wallet = anvilWallet(rpc, who, { drop: false, refuse: new Set(), sends: 0 });
+      const writer = await createWriter(efs, {
+        authorizer: { kind: 'eip1193', profile: 'direct', provider: wallet, account: who as never },
+        journal: memoryJournal(),
+      });
+      const file = { kind: 'file', subject: readme.subjectId as `0x${string}` } as const;
+      const opened = await openFile(efs, file);
+      if (opened.status !== 'PRESENT') throw new Error(`editAs: ${opened.status}`);
+      const plan = await planEditFile(efs, writer, {
+        file,
+        base: { kind: 'revision', recordId: opened.file.revision },
+        content: new TextEncoder().encode(text),
+      });
+      if (plan.status !== 'PLANNED') throw new Error(`editAs: ${plan.status}`);
+      const done = await writer.runSequence(plan.parts);
+      if (done.state !== 'COMPLETE') throw new Error(`editAs: ${done.state}`);
+    };
     control = {
       automine: async (on) => {
         await rpc('evm_setAutomine', [on]);
@@ -229,11 +293,35 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     dropNextSendResponse() {
       drop.drop = true;
     },
-    async quiet(ms) {
+    refuseSend(n) {
+      drop.refuse.add(n);
+    },
+    walletChainId(id) {
+      drop.chainId = id;
+    },
+    holdNextSend() {
+      let reached: () => void = () => {};
+      let release: () => void = () => {};
+      const reachedP = new Promise<void>((resolve) => (reached = resolve));
+      const released = new Promise<void>((resolve) => (release = resolve));
+      hold = { reached, released };
+      return { reached: reachedP, release };
+    },
+    async breakJournalAfterSend(page) {
+      breakAfterSend.add(page);
+    },
+    async restoreJournal(page) {
+      await page.evaluate(() => {
+        (window as unknown as { __efsBreakJournal?: boolean }).__efsBreakJournal = false;
+      });
+    },
+    editAs,
+    broadcasts,
+    async idle(ms = 300) {
       for (;;) {
-        const idle = Date.now() - lastRpc;
-        if (idle >= ms) return;
-        await new Promise((resolve) => setTimeout(resolve, ms - idle));
+        const quiet = Date.now() - lastRpc;
+        if (inFlight === 0 && quiet >= ms) return;
+        await new Promise((resolve) => setTimeout(resolve, Math.max(20, ms - quiet)));
       }
     },
     step(text) {
@@ -251,32 +339,63 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     async attach(page) {
       await page.route(RPC_ORIGIN, async (route) => {
         lastRpc = Date.now();
-        let json: unknown;
+        inFlight++;
         try {
-          json = await answerRpc(JSON.parse(route.request().postData() ?? 'null'));
-        } catch (error) {
-          // The harness itself failed (anvil down, a broken transcript): fail the test.
-          harnessErrors.push(error);
-          await route.abort('failed').catch(() => undefined);
-          return;
-        }
-        lastRpc = Date.now();
-        await route.fulfill({ json }).catch((error: unknown) => {
-          // Only a page that has navigated away (the reload test) may drop an answer.
-          if (!/closed|detached|navigat|already handled/i.test(String(error))) {
+          let json: unknown;
+          try {
+            json = await answerRpc(JSON.parse(route.request().postData() ?? 'null'));
+          } catch (error) {
+            // The harness itself failed (anvil down, a broken transcript): fail the test.
             harnessErrors.push(error);
+            await route.abort('failed').catch(() => undefined);
+            return;
           }
-        });
+          await route.fulfill({ json }).catch((error: unknown) => {
+            // Only a page that has navigated away (the reload test) may drop an answer.
+            if (!/closed|detached|navigat|already handled/i.test(String(error))) {
+              harnessErrors.push(error);
+            }
+          });
+        } finally {
+          inFlight--;
+          lastRpc = Date.now();
+        }
       });
       await page.exposeFunction('__efsTestWallet', async (r: WalletRequest) => {
         calls.push(r.method);
         try {
-          return { result: await askWallet(r) } satisfies WalletAnswer;
+          if (r.method === 'eth_sendTransaction' && hold) {
+            const held = hold;
+            hold = undefined;
+            held.reached();
+            await held.released;
+          }
+          const result = await askWallet(r);
+          if (r.method === 'eth_sendTransaction') {
+            broadcasts.push(String(result));
+            if (breakAfterSend.delete(page)) {
+              await page.evaluate(() => {
+                (window as unknown as { __efsBreakJournal?: boolean }).__efsBreakJournal = true;
+              });
+            }
+          }
+          return { result } satisfies WalletAnswer;
         } catch (error) {
           const { code, message } = error as { code?: number; message: string };
           return {
             error: code === undefined ? { message } : { code, message },
           } satisfies WalletAnswer;
+        }
+      });
+      await page.addInitScript(() => {
+        // Lets a test break IndexedDB writes (a browser dropping storage mid-save).
+        const win = window as unknown as { __efsBreakJournal?: boolean };
+        for (const method of ['put', 'add', 'delete'] as const) {
+          const original = IDBObjectStore.prototype[method] as (...a: unknown[]) => IDBRequest;
+          IDBObjectStore.prototype[method] = function (this: IDBObjectStore, ...args: unknown[]) {
+            if (win.__efsBreakJournal) throw new DOMException('storage was lost', 'UnknownError');
+            return original.apply(this, args);
+          } as never;
         }
       });
       await page.addInitScript(() => {
