@@ -46,6 +46,8 @@
    - A name that isn't in NFC form is allowed, as the profile allows it. The dialog says so: "This name isn't in the usual Unicode form, so a name that looks the same could be a different name. It will be saved exactly as typed."
 6. **A listing never reads as empty when it isn't known.**
    - Pages are COMPLETE or PARTIAL (#36 hard case 1). An empty PARTIAL page says "Nothing in the first 200 entries. [Keep looking]".
+   - **The SDK enforces this too** (folder-ops at `d3ff919`). An empty page is PRESENT only when COMPLETE, or at the end of a resumed listing; otherwise it's UNKNOWN.
+   - **A PARTIAL page with the reason `INDEX_PARTIAL`** says "The network's index hasn't caught up with this folder yet", with Try again, never "nothing here".
    - UNKNOWN shows its reason with Try again (`reads.md`).
 7. **Read-only where writes can't happen.**
    - On a shared IPFS path gateway, and while the reader session isn't VERIFIED, the operations aren't offered.
@@ -151,7 +153,10 @@ They are one SDK operation: one atomic change of placement. It releases the entr
   - The person can move an entry into any folder, including one another author made. The review says who will see it there: "Your entry appears in /team/plans for you, for anyone whose lens names you, and for everyone with public on."
   - **A folder can't be moved into itself or below itself.**
     - The picker greys those out, and the SDK refuses them too.
-    - Moving a folder passes the destination's chain (`via`), the folders the person went through to get there.
+    - **Moving a folder passes `via: { from, segments }`,** and the SDK resolves it itself (`d3ff919`).
+      - `from` is always the start of the person's view: their address, or the folder the view was opened from.
+      - It's never a subfolder of what's being moved. The SDK can't detect a `from` below the moved folder, so the client never derives `from` from the selection.
+      - If the path no longer ends at the destination, the refusal is `PATH_CHANGED`.
     - Folders form a graph seen through a lens, so the review says how far the check goes: "Checked under this lens: the destination isn't inside this folder."
   - **The review says what the old place shows at that name afterwards** (`shownAfter`), as for a rename.
 - **Links:**
@@ -255,6 +260,8 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.refused.notRemoved` | {$name} isn't removed, so there's nothing to restore. |
 | `files.refused.unknown` | Couldn't plan this ({$code}). |
 | `files.refused.leaveOut` | Leave these out and review the rest |
+| `files.refused.pathChanged` | The way to that folder changed while you were choosing. Choose the destination again. |
+| `files.list.indexPartial` | The network's index hasn't caught up with this folder yet. |
 | `files.list.invalid` | This entry can't be read. |
 | `files.list.hidden` | {$count} hidden by a block in your lens |
 | `files.list.notAFolder` | {$path} is a file, not a folder. |
@@ -291,7 +298,7 @@ The shape agreed by the SDK dev and the PM (2026-11-25), all from `@efs/sdk/file
 - `planCreateFile({ folder, name, content, mediaType?, lens? })` and `planCreateFolder({ folder, name })`.
   - `mediaType` is set only from Upload's checked type, validated with `normalizeMediaType` as it's typed.
   - A new text file sends none.
-- `planMoveEntries({ moves: [{ from, to: { folder?, name?, via? } }] })`: a release plus a bind, atomic. Rename is a move with only `name`. `via` is required for a folder move.
+- `planMoveEntries({ moves: [{ from, to: { folder?, name?, via? } }] })`: a release plus a bind, atomic. Rename is a move with only `name`. `via` (`{ from: FolderRef, segments }`) is required for a folder move; `from` is the start of the view.
 - `planRemoveEntries({ entries, hide? })`: releases by default, and `hide` masks (offered only to the place's owner).
 - `planRestoreEntries({ entries })`.
 
@@ -304,6 +311,9 @@ The shape agreed by the SDK dev and the PM (2026-11-25), all from `@efs/sdk/file
 | `FOLDER_ABSENT` | "That folder isn't there any more." |
 | `ENTRY_ABSENT` | "{$name} isn't here any more." |
 | `NOT_REMOVED` | "{$name} isn't removed, so there's nothing to restore." |
+| `PATH_CHANGED` | "The way to that folder changed while you were choosing. Choose the destination again." |
+
+`INTO_ITSELF` is a MISUSE, not a refusal. The picker greys those destinations out, so reaching it is a client bug, reported as one.
 
 An unrecognised code is shown as "Couldn't plan this ({$code})", with its raw code, and never as success.
 
