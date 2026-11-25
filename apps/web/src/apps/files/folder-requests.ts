@@ -72,7 +72,8 @@ export type FolderRequest =
  * folder never lands inside itself. The SDK resolves it again against the chain.
  */
 export interface ViewPath {
-  readonly from: FolderRef;
+  /** Where the path starts: the realm's root, or an address the person came in through. */
+  readonly from: ParentRef;
   readonly segments: readonly string[];
 }
 

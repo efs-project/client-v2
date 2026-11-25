@@ -756,18 +756,6 @@ export class EfsFilesTopic extends EfsElement {
     const place = this.place.get();
     if (!place) return nothing;
     const notice = readerNotice(this, this.host, t);
-    if (place.status === 'home' && place.names.length > 0) {
-      const home = linkOf({ kind: 'home', address: place.address as Address, names: [] });
-      return html`<div class="wa-stack wa-gap-s efs-topic" data-place="home">
-        ${this.#header(place, t)}
-        <p class="efs-home-names-soon" role="status">${t('files.home.namesSoon')}</p>
-        <div>
-          <wa-button size="s" class="efs-home-open" @click=${() => this.host.openLink(home)}
-            >${t('files.home.openBare')}</wa-button
-          >
-        </div>
-      </div>`;
-    }
     const s = this.#state.get();
     const efs = verifiedEfs(this.host.reader.get());
     return html`<div class="wa-stack wa-gap-s efs-topic" data-place=${place.status}>

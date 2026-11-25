@@ -12,7 +12,14 @@
 
 import type { Efs, Lens } from '@efs/sdk';
 import type { SequenceProgress } from '@efs/sdk/actions';
-import type { EntryKind, EntryRef, FolderRef, FolderRow, RemovedRow } from '@efs/sdk/files';
+import type {
+  EntryKind,
+  EntryRef,
+  FolderRef,
+  FolderRow,
+  ParentRef,
+  RemovedRow,
+} from '@efs/sdk/files';
 import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
@@ -53,7 +60,7 @@ import { authorLabel } from './who.ts';
  */
 const UPLOAD_MAX_MB = 50;
 
-import { type FolderNav, viewPath } from './navigation.ts';
+import { type FolderNav, parentKey, sameParent, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import type { ObjectKindState } from './object-kind.ts';
 import type { RestoreRemovedDetail } from './removed-list.ts';
@@ -178,14 +185,20 @@ export class EfsFilesListing extends EfsElement {
       if (efs && routeLink !== this.#arrived && named.status !== 'pending') {
         this.#arrived = routeLink;
         const arrivedAt = named.status === 'folder' ? named.folder : undefined;
-        if (atRoot || arrivedAt) queueMicrotask(() => this.nav.arrive(arrivedAt));
+        // An address: its entries are listed, and the trail starts there.
+        if (named.status === 'home') queueMicrotask(() => this.nav.arriveHome(named.home));
+        else if (atRoot || arrivedAt) queueMicrotask(() => this.nav.arrive(arrivedAt));
       }
       if (atRoot && !this.nav.browsing.get()) queueMicrotask(() => this.nav.startBrowsing());
-      const browsing = atRoot || named.status === 'folder' || this.nav.browsing.get();
+      const browsing =
+        atRoot || named.status === 'folder' || named.status === 'home' || this.nav.browsing.get();
       const folder = browsing ? this.#folder(efs) : undefined;
       const kind = this.#kind.get();
       const reader = this.#reader();
-      const key = efs && folder ? `${folder.directory}|${kind}|${reader ?? ''}` : undefined;
+      const key =
+        efs && folder
+          ? `${parentKey(folder)}|${folder.owner ?? ''}|${kind}|${reader ?? ''}`
+          : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => this.#load(efs, folder, kind));
@@ -194,7 +207,9 @@ export class EfsFilesListing extends EfsElement {
     // list again once every part is committed, and again once it's final.
     effect(scope, () => {
       const s = this.#state.get();
-      const dir = s?.phase === 'page' ? s.folder.directory : undefined;
+      // Saves name a folder by its record (an address's own key waits for writes at an address).
+      const dir =
+        s?.phase === 'page' && s.folder.kind === 'folder' ? s.folder.directory : undefined;
       for (const p of this.host.saving.saves.get()) {
         this.#watchRemoval(p);
         if (!dir || !touchesFolder(p.effect, dir)) continue;
@@ -225,7 +240,7 @@ export class EfsFilesListing extends EfsElement {
     const efs = this.#efs;
     if (s?.phase !== 'page' || !efs || this.#kind.get() !== 'all' || attempt >= 3) return;
     const me = efs.lens.principalOf(account as never);
-    if (showsEffect(saved, s.folder.directory, s.rows, me)) return;
+    if (s.folder.kind !== 'folder' || showsEffect(saved, s.folder.directory, s.rows, me)) return;
     setTimeout(() => void this.#listAgainFor(saved, account, attempt + 1), 1500);
   }
 
@@ -266,7 +281,9 @@ export class EfsFilesListing extends EfsElement {
    */
   #restoreAsk(entries: readonly SelectedEntry[], blocked = false): FolderAsk | undefined {
     const efs = this.#efs;
-    const via = efs ? viewPath(this.nav.path.get(), rootFolder(efs)) : undefined;
+    const via = efs
+      ? viewPath(this.nav.path.get(), this.nav.base.get() ?? rootFolder(efs))
+      : undefined;
     if (!via && entries.some((e) => e.isFolder)) return undefined;
     return {
       kind: 'restore',
@@ -279,8 +296,9 @@ export class EfsFilesListing extends EfsElement {
   }
 
   /** Why a removed row's Restore (or Unblock) can't be taken now, if it can't. */
-  #unrestorable(folder: FolderRef, row: RemovedRow, pending: ReadonlySet<string>) {
-    if (pending.has(placeKey(folder.directory, row.name) ?? '')) return 'files.pending' as const;
+  #unrestorable(folder: ParentRef, row: RemovedRow, pending: ReadonlySet<string>) {
+    const key = folder.kind === 'folder' ? placeKey(folder.directory, row.name) : undefined;
+    if (pending.has(key ?? '')) return 'files.pending' as const;
     if (row.last !== 'KNOWN') return undefined;
     const entry = { folder, name: row.name };
     return this.#restoreAsk([{ entry, isFolder: row.target.kind === 'folder' }])
@@ -331,9 +349,10 @@ export class EfsFilesListing extends EfsElement {
   }
 
   /** The folder now shown: the last one opened, else the realm's root. */
-  #folder(efs: Efs | undefined): FolderRef | undefined {
+  /** The place listed: the last folder opened, else the trail's start (an address, or the root). */
+  #folder(efs: Efs | undefined): ParentRef | undefined {
     if (!efs) return undefined;
-    return this.nav.path.get().at(-1)?.folder ?? rootFolder(efs);
+    return this.nav.path.get().at(-1)?.folder ?? this.nav.base.get() ?? rootFolder(efs);
   }
 
   /** The connected account, when there is one on this network. */
@@ -342,16 +361,15 @@ export class EfsFilesListing extends EfsElement {
     return a.status === 'READY' ? a.account : undefined;
   }
 
-  #lens(efs: Efs, folder: FolderRef): Lens {
+  #lens(efs: Efs, folder: ParentRef): Lens {
     return placeLens(efs, folder, this.#reader());
   }
 
-  #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): Promise<void> {
+  #load(efs: Efs | undefined, folder: ParentRef | undefined, kind: KindFilter): Promise<void> {
     // Another folder: what was selected there isn't here.
     const selected = this.#selected.get();
     const parent = selected.values().next().value?.entry.folder;
-    const was = parent?.kind === 'folder' ? parent.directory.toLowerCase() : undefined;
-    if (was !== undefined && was !== folder?.directory.toLowerCase()) this.#selected.set(new Map());
+    if (parent && !sameParent(parent, folder)) this.#selected.set(new Map());
     this.#run?.dispose();
     this.#run = undefined;
     if (!efs || !folder || !this.#scope || this.#scope.signal.aborted) {
@@ -415,7 +433,9 @@ export class EfsFilesListing extends EfsElement {
     const folder = this.#folder(efs);
     const kind = this.#kind.get();
     this.#loaded =
-      efs && folder ? `${folder.directory}|${kind}|${this.#reader() ?? ''}` : undefined;
+      efs && folder
+        ? `${parentKey(folder)}|${folder.owner ?? ''}|${kind}|${this.#reader() ?? ''}`
+        : undefined;
     return this.#load(efs, folder, kind);
   }
 
@@ -436,9 +456,12 @@ export class EfsFilesListing extends EfsElement {
     >`;
   }
 
-  #row(row: FolderRow, folder: FolderRef, pending: ReadonlySet<string>, lens: Lens | undefined) {
+  #row(row: FolderRow, folder: ParentRef, pending: ReadonlySet<string>, lens: Lens | undefined) {
     const t = this.host.translator.t.bind(this.host.translator);
-    const saving = pending.has(placeKey(folder.directory, row.name) ?? '');
+    const saving =
+      folder.kind === 'folder' && pending.has(placeKey(folder.directory, row.name) ?? '');
+    // An address's own entries are read-only here until writes at an address are wired.
+    const writable = folder.kind === 'folder';
     const meta = html`<span class="efs-entry-meta efs-quiet">
       <span>${t(KIND_LABEL[row.kind])}</span>
       ${
@@ -469,7 +492,7 @@ export class EfsFilesListing extends EfsElement {
         >`
       : nothing;
     const actions =
-      this.#isMine(row.author) && row.kind !== 'invalid'
+      writable && this.#isMine(row.author) && row.kind !== 'invalid'
         ? html`<span class="efs-entry-actions">
             ${tag}
             <wa-button
@@ -553,7 +576,7 @@ export class EfsFilesListing extends EfsElement {
       open = html`<span class="efs-entry-open">${appIcon('circle-info')} ${name}</span>`;
     }
     const select =
-      this.#isMine(row.author) && row.kind !== 'invalid'
+      writable && this.#isMine(row.author) && row.kind !== 'invalid'
         ? html`<input
             type="checkbox"
             class="efs-entry-select"
@@ -691,18 +714,16 @@ export class EfsFilesListing extends EfsElement {
       const removedSave = this.#removed.get();
       const removed = removedSave?.entries[0]?.entry;
       const removedCount = removedSave?.entries.length ?? 0;
-      const creating = pendingCreates(
-        this.host.saving.saves.get(),
-        folder.directory,
-        s.rows,
-        unsettled,
-      );
-      const unsaved = this.#unsavedNewFiles(folder);
+      const creating =
+        folder.kind === 'folder'
+          ? pendingCreates(this.host.saving.saves.get(), folder.directory, s.rows, unsettled)
+          : [];
+      const unsaved = folder.kind === 'folder' ? this.#unsavedNewFiles(folder) : [];
       const restoreAsk = removedSave
         ? this.#restoreAsk(removedSave.entries, removedSave.blocked)
         : undefined;
       body = html`${
-        removed?.folder.kind === 'folder' && removed.folder.directory === folder.directory
+        removed && sameParent(removed.folder, folder)
           ? html`<p class="efs-entries-removed" role="status">
               ${
                 removedSave?.blocked
@@ -794,7 +815,9 @@ export class EfsFilesListing extends EfsElement {
         }`;
     }
     const efs = this.#efs;
-    const folder = s?.phase === 'page' ? s.folder : undefined;
+    const place = s?.phase === 'page' ? s.folder : undefined;
+    // Writes here are a folder's: an address's own entries are read-only until they're wired.
+    const folder = place?.kind === 'folder' ? place : undefined;
     const ready = this.host.saving.availability.get().status !== 'SHARED_GATEWAY';
     // Whose removed entries: the connected account's, so only with one (READY).
     const reader = this.#reader();
@@ -894,7 +917,7 @@ export class EfsFilesListing extends EfsElement {
       <efs-files-folder-save
         .host=${this.host}
         .efs=${efs}
-        .lens=${efs && folder ? this.#lens(efs, folder) : undefined}
+        .lens=${efs && place ? this.#lens(efs, place) : undefined}
       ></efs-files-folder-save>
     </div>`;
   }
@@ -923,6 +946,7 @@ export class EfsFilesListing extends EfsElement {
     ]);
     const bytes = new Uint8Array(buffer);
     const type = uploadMediaType(bytes, file.type, normalizeMediaType);
+    if (s.folder.kind !== 'folder') return;
     this.#ask({
       kind: 'upload',
       folder: s.folder,

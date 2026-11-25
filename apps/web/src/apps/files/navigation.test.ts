@@ -1,6 +1,6 @@
 import type { FolderRef } from '@efs/sdk/files';
 import { describe, expect, it } from 'vitest';
-import { createFolderNav, viewPath } from './navigation.ts';
+import { createFolderNav, parentKey, sameParent, viewPath } from './navigation.ts';
 
 const folder = (n: string): FolderRef => ({
   kind: 'folder',
@@ -58,5 +58,47 @@ describe('goTo: a folder chosen in the tree', () => {
     expect(nav.path.get()).toEqual(steps);
     nav.arrive(folder('b'));
     expect(nav.path.get()).toEqual(steps);
+  });
+});
+
+describe('base: a trail that starts at an address', () => {
+  const home = { kind: 'home' as const, address: `0x${'ab'.repeat(20)}` as `0x${string}` };
+  it('an address arrived at starts the trail there; folders below keep it; the root ends it', () => {
+    const nav = createFolderNav();
+    nav.open({ folder: folder('a'), name: 'docs' });
+    nav.arriveHome(home);
+    expect(nav.base.get()).toBe(home);
+    expect(nav.path.get()).toEqual([]);
+    expect(nav.browsing.get()).toBe(true);
+    nav.open({ folder: folder('b'), name: 'photos' });
+    expect(nav.base.get()).toBe(home);
+    expect(viewPath(nav.path.get(), nav.base.get() ?? ROOT)).toEqual({
+      from: home,
+      segments: ['photos'],
+    });
+    nav.arrive(undefined);
+    expect(nav.base.get()).toBeUndefined();
+    expect(nav.path.get()).toEqual([]);
+  });
+
+  it('a path from an address sets both; a folder opened by its own link drops the address', () => {
+    const nav = createFolderNav();
+    nav.goTo([{ folder: folder('b'), name: 'photos' }], home);
+    expect(nav.base.get()).toBe(home);
+    nav.goTo([{ folder: folder('a'), name: 'docs' }]);
+    expect(nav.base.get()).toBeUndefined();
+    nav.goTo([], home);
+    nav.arrive(folder('c'));
+    expect(nav.base.get()).toBeUndefined();
+    expect(nav.path.get()).toEqual([{ folder: folder('c'), name: '' }]);
+  });
+
+  it('the same place, by kind and id, whatever the case', () => {
+    expect(sameParent(folder('a'), { ...folder('A') })).toBe(true);
+    expect(sameParent(folder('a'), home)).toBe(false);
+    const shouted = { ...home, address: home.address.toUpperCase() as `0x${string}` };
+    expect(sameParent(home, shouted)).toBe(true);
+    expect(parentKey(home)).toBe(`home:0x${'ab'.repeat(20)}`);
+    expect(parentKey(folder('A'))).toBe(`0x${'a'.repeat(64)}`);
   });
 });

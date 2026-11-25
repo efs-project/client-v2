@@ -906,8 +906,9 @@ export class EfsFilesPreview extends EfsElement {
     const composing = this.composer?.current.get();
     if (composing) return readerNotice(this, this.host, t) ?? this.#compose(composing);
     if (link.status === 'none') return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
-    // A tag or an address lists in Entries; a row opened from it shows here.
-    if (link.status === 'topic' || link.status === 'home') {
+    // A tag or an address lists in Entries; a row opened from it shows here. Names under an
+    // address are looked up first, then opened by their own link (or said why not), as paths are.
+    if (link.status === 'topic' || (link.status === 'home' && link.names.length === 0)) {
       return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
     }
     if (link.status === 'invalid') {
@@ -923,7 +924,7 @@ export class EfsFilesPreview extends EfsElement {
     if (notice) return notice;
     // A path link: looked up, then replaced by the link of what it leads to; until then (or when
     // it leads nowhere) this pane says so.
-    if (link.status === 'path') {
+    if (link.status === 'path' || link.status === 'home') {
       return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
         ${this.#object(this.object?.kind.get() ?? { status: 'pending' }, t)}
       </div>`;

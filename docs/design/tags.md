@@ -33,6 +33,13 @@
 - **"Remove my tag"** on a row you decided, in a tag's or an address's list: planUntag at the tag it was filed under (the thing's kind read first with openObject). Its review says "Your tag goes … Other people's tags stay"; the list reads again once the save completes.
 - A tag holds no folder name, so a tag save is held only by unsettled saves the SDK records without an effect (fail-closed), never by a name.
 - **Names:** a file tagged from its Preview is named by its short id until the SDK names files in lists (`topicName` and a file's name in a topic are coming); room is left for them in the review and the rows.
+
+**Built (stage 4a, addresses as places, reads; sdk-v2 13a733d homes):**
+- **An address (`#/r/<realm>/0x…`) lists its own entries in the Entries pane, like a folder** (`listFolder` with the home as the parent), in openHome's Lens: you, then the address's owner (as of the read), then the default. Every row that isn't the owner's says whose, "yours" included, so your own `pet.txt` there shows first and labelled. With nothing of its own: "Nothing is placed at this address yet, in your view."
+- **What's tagged at the address** lists below its entries ("Things tagged at 0x…"), as before.
+- **The trail can start at an address** (`nav.base`): a folder opened below it keeps the address as the location bar's first crumb ("0x12…ab › docs"). The realm's root, a tree pick, or a folder opened by its own link start a trail of their own.
+- **Names under an address** (`0x…/docs/note.txt`) are looked up with openPath, then opened by the entry's own link (the URL replaced), as path links are; a path that leads nowhere stays and says which name, and why.
+- **Read-only at the address itself for now:** no create, upload, rename, move, remove or Show removed there until writes at an address are wired (stage 4b). Folders below an address are ordinary folders. Tag works everywhere.
 - **A file opened from a tag (or any file link) whose versions are all by people outside the view's Lens** is read in its own place, as a folder is: you, then its creator, then that Lens. It never reads "Confirmed not present" for that alone. A link carrying its own Lens is read in that Lens only.
 
 **Build order:**

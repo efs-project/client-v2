@@ -23,8 +23,8 @@
 // never an earlier answer. So nothing acting on it (the listing following the URL with its trail)
 // can mistake the folder just left for the one arrived at, or "no reader yet" for an answer.
 
-import type { Efs, Lens, Reason } from '@efs/sdk';
-import type { FolderRef, OpenResult, PathOpen } from '@efs/sdk/files';
+import type { Efs, HomeLink, Lens, PathLink, Reason } from '@efs/sdk';
+import type { FolderRef, HomeRef, OpenResult, PathOpen } from '@efs/sdk/files';
 import { link as linkOf } from '@efs/sdk/links';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
@@ -40,6 +40,8 @@ export type ObjectKind =
   | { readonly status: 'none' }
   | { readonly status: 'pending' }
   | { readonly status: 'folder'; readonly folder: FolderRef }
+  /** An address (a home): its owner as of the read, and the Lens to list it in (openHome's). */
+  | { readonly status: 'home'; readonly home: HomeRef; readonly lens: Lens }
   /** A file, opened under `lens` (its HEAD may still be absent under it). */
   | { readonly status: 'file'; readonly open: OpenResult; readonly lens: Lens | undefined }
   /** Nothing has this id (no folder record, no created subject), as of the read. */
@@ -135,16 +137,20 @@ export function objectKindState(
     readonly kind: ObjectKind;
   }>({ key: 'none', efs: undefined, kind: { status: 'none' } });
   const readerFor = (l: LinkState) =>
-    (l.status === 'target' && !l.lens) || (l.status === 'path' && !l.link.lens)
+    (l.status === 'target' && !l.lens) ||
+    (l.status === 'path' && !l.link.lens) ||
+    (l.status === 'home' && !l.lens)
       ? readerOf(host)
       : undefined;
   const keyOf = (l: LinkState, reader: string | undefined) =>
-    l.status === 'target' || l.status === 'path' ? `${l.canonical}|${reader ?? ''}` : l.status;
+    l.status === 'target' || l.status === 'path' || l.status === 'home'
+      ? `${l.canonical}|${reader ?? ''}`
+      : l.status;
   const kind = computed<ObjectKind>(() => {
     const l = link.get();
     const efs = verifiedEfs(host.reader.get());
     const a = answer.get();
-    if (l.status === 'path') {
+    if (l.status === 'path' || l.status === 'home') {
       return a.key === keyOf(l, readerFor(l)) && a.efs === efs ? a.kind : { status: 'pending' };
     }
     if (l.status !== 'target' || l.target.kind !== 'file') return { status: 'none' };
@@ -163,7 +169,18 @@ export function objectKindState(
     const key = keyOf(l, reader);
     const set = (k: ObjectKind) => answer.set({ key, efs, kind: k });
     if (efs && l.status === 'path') {
-      followPath(efs, l, reader, set);
+      followPath(efs, l.link, reader, set);
+      return;
+    }
+    if (efs && l.status === 'home') {
+      const homeLink: HomeLink = {
+        kind: 'home',
+        address: l.address,
+        names: l.names,
+        ...(l.lens ? { lens: l.lens } : {}),
+      };
+      if (l.names.length > 0) followPath(efs, homeLink, reader, set);
+      else openAddress(efs, l, reader, set);
       return;
     }
     if (!efs || l.status !== 'target' || l.target.kind !== 'file') {
@@ -233,10 +250,45 @@ export function objectKindState(
       }
     })();
   };
+  /**
+   * An address (a home): its owner, as of the read, and the Lens to list it in (the link's own,
+   * else you, then the address, then the default). Its entries list like a folder's.
+   */
+  const openAddress = (
+    efs: Efs,
+    l: Extract<LinkState, { status: 'home' }>,
+    reader: string | undefined,
+    set: (k: ObjectKind) => void,
+  ) => {
+    const mine = scope.child();
+    run = mine;
+    set({ status: 'pending' });
+    const { signal } = mine;
+    void (async () => {
+      try {
+        const { openHome } = await loadFiles();
+        const home = await openHome(efs, l.address, {
+          signal,
+          ...(reader ? { reader: reader as never } : {}),
+          base: efs.lens.default,
+        });
+        if (signal.aborted) return;
+        set(
+          home.status === 'PRESENT'
+            ? { status: 'home', home: home.home, lens: l.lens ?? home.lens }
+            : { status: 'unknown', reason: home.reason },
+        );
+      } catch (error) {
+        if (signal.aborted) return;
+        console.error(error);
+        set({ status: 'unknown', reason: { code: 'CLIENT_ERROR', retry: 'transient' } as Reason });
+      }
+    })();
+  };
   /** Looks a path link up, then opens what it leads to by its own link (or says why not). */
   const followPath = (
     efs: Efs,
-    l: Extract<LinkState, { status: 'path' }>,
+    l: PathLink | HomeLink,
     reader: string | undefined,
     set: (k: ObjectKind) => void,
   ) => {
@@ -251,7 +303,7 @@ export function objectKindState(
         if (signal.aborted) return;
         // The Lens is openPath's: the link's own; else you first, then the start folder's
         // creator, then the default. It comes back with the answer, and the file opens in it.
-        const answer = await openPath(efs, l.link, {
+        const answer = await openPath(efs, l, {
           signal,
           ...(reader ? { reader: reader as never } : {}),
           base: efs.lens.default,
@@ -261,7 +313,7 @@ export function objectKindState(
           arrive(l, answer, root);
           return;
         }
-        set(pathKind(answer, l.link.names));
+        set(pathKind(answer, l.names));
       } catch (error) {
         if (signal.aborted) return;
         console.error(error);
@@ -277,27 +329,39 @@ export function objectKindState(
    * link instead).
    */
   const arrive = (
-    l: Extract<LinkState, { status: 'path' }>,
+    l: PathLink | HomeLink,
     answer: Extract<PathOpen, { status: 'PRESENT' }>,
     root: FolderRef,
   ) => {
     const target = answer.target;
-    const own = l.link.lens ? { lens: l.link.lens } : {};
+    const own = l.lens ? { lens: l.lens } : {};
     if (target.kind === 'file') {
-      if (!l.link.lens) nav.rememberLens(target.subject, answer.lens);
+      if (!l.lens) nav.rememberLens(target.subject, answer.lens);
       host.openLink(linkOf({ kind: 'object', subject: target.subject, ...own }), { replace: true });
       return;
     }
+    // Where the names start: an address (the trail starts there), or a folder by its id (the
+    // realm's root, or a folder off it, first by its short id).
     const first = answer.chain[0]?.folder;
-    const start: FolderRef =
-      first?.kind === 'folder' ? first : { kind: 'folder', directory: l.link.folder };
-    const fromRoot = start.directory.toLowerCase() === root.directory.toLowerCase();
-    const trail: NavStep[] = fromRoot ? [] : [{ folder: start, name: '' }];
+    const home: HomeRef | undefined =
+      l.kind === 'home'
+        ? first?.kind === 'home'
+          ? first
+          : { kind: 'home', address: l.address }
+        : undefined;
+    const start: FolderRef | undefined =
+      l.kind === 'path'
+        ? first?.kind === 'folder'
+          ? first
+          : { kind: 'folder', directory: l.folder }
+        : undefined;
+    const fromRoot = !start || start.directory.toLowerCase() === root.directory.toLowerCase();
+    const trail: NavStep[] = fromRoot || !start ? [] : [{ folder: start, name: '' }];
     for (const step of answer.chain) {
       if (step.target.kind === 'folder') trail.push({ folder: step.target, name: step.name });
     }
     folders.set(target.directory.toLowerCase(), target);
-    nav.goTo(trail);
+    nav.goTo(trail, home);
     host.openLink(linkOf({ kind: 'object', subject: target.directory as never, ...own }), {
       replace: true,
     });

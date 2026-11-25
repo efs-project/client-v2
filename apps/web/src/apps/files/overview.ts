@@ -24,7 +24,7 @@ import { shortId } from './editor.ts';
 import { type ListingState, placeLens, rootFolder } from './folder-model.ts';
 import { type Block, parseMarkdown } from './markdown.ts';
 import { type LinkResolver, renderMarkdown } from './markdown-view.ts';
-import type { FolderNav } from './navigation.ts';
+import { type FolderNav, parentKey, sameParent } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
 import { type PreviewReads, runPreview } from './preview-model.ts';
@@ -87,7 +87,7 @@ export class EfsFilesOverview extends EfsElement {
       const subject = row?.target?.kind === 'file' ? row.target.subject : undefined;
       const key =
         efs && s?.phase === 'page' && subject
-          ? `${s.folder.directory}|${subject}|${reader ?? ''}|${generation}`
+          ? `${parentKey(s.folder)}|${subject}|${reader ?? ''}|${generation}`
           : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
@@ -181,16 +181,14 @@ export class EfsFilesOverview extends EfsElement {
   #folderName(s: Extract<ListingState, { phase: 'page' }>): string {
     const t = this.host.translator.t.bind(this.host.translator);
     if (this.#isRoot(s)) return t('files.location.root');
+    if (s.folder.kind === 'home') return shortId(s.folder.address);
     return this.nav.path.get().at(-1)?.name || shortId(s.folder.directory);
   }
 
   /** Whether the folder on screen is the realm's shared root (however it was opened). */
   #isRoot(s: Extract<ListingState, { phase: 'page' }>): boolean {
     const efs = verifiedEfs(this.host.reader.get());
-    return (
-      efs !== undefined &&
-      rootFolder(efs).directory.toLowerCase() === s.folder.directory.toLowerCase()
-    );
+    return efs !== undefined && sameParent(rootFolder(efs), s.folder);
   }
 
   #summary(s: Extract<ListingState, { phase: 'page' }>) {
