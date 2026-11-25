@@ -5,6 +5,7 @@
 // opened fresh would otherwise be read as a file and show "Confirmed not present". So the URL stays
 // at the realm root while the person browses; files still open by their permanent link.
 
+import type { Lens } from '@efs/sdk';
 import type { FolderRef } from '@efs/sdk/files';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 
@@ -28,12 +29,27 @@ export interface FolderNav {
   open(step: NavStep): void;
   /** Back to the root (0), or to the folder at `depth` (1 is the first opened). */
   back(depth: number): void;
+  /**
+   * Remembers the Lens a file row was shown in, before the file opens. The Preview reads that
+   * file in it, so a file listed as "yours" isn't "not present" there. Tab memory only: links
+   * stay clean object links, and a copied link never carries the person's trust list.
+   */
+  rememberLens(subject: string, lens: Lens): void;
+  /** The Lens `subject` was last listed in, in this tab. */
+  lensFor(subject: string): Lens | undefined;
 }
 
 export function createFolderNav(): FolderNav {
   const path = state<readonly NavStep[]>([]);
   const browsing = state(false);
+  const lenses = new Map<string, Lens>();
   return {
+    rememberLens(subject, lens) {
+      lenses.set(subject.toLowerCase(), lens);
+    },
+    lensFor(subject) {
+      return lenses.get(subject.toLowerCase());
+    },
     path,
     browsing,
     startBrowsing() {

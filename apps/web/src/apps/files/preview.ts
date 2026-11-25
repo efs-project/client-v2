@@ -15,6 +15,7 @@ import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { type EditDoneDetail, shortId } from './editor.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
+import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
@@ -68,8 +69,11 @@ export class EfsFilesPreview extends EfsElement {
   static override properties = {
     host: { attribute: false },
     target: { attribute: false },
+    nav: { attribute: false },
   };
   declare host: AppHost;
+  /** Where the person browsed in this tab: a file opened from a listing reads in its Lens. */
+  declare nav: FolderNav | undefined;
   /** What the route's link asks for. */
   declare target: ReadonlySignal<LinkState>;
 
@@ -244,10 +248,15 @@ export class EfsFilesPreview extends EfsElement {
     }
   }
 
-  /** The Lens this pane reads under: the link's (else the default), or that with "mine first". */
+  /**
+   * The Lens this pane reads under: the link's; else, for a file opened from a listing in this
+   * tab, the Lens it was listed in; else the default. "Mine first" goes in front of that.
+   */
   #viewLens(efs: Efs, link: Extract<LinkState, { status: 'target' }>): Lens | undefined {
+    const listed = link.target.kind === 'file' ? this.nav?.lensFor(link.target.subject) : undefined;
+    const base = link.lens ?? listed;
     const mine = this.#mine.get();
-    return mine ? efs.lens.mineFirst(mine as never, link.lens ?? efs.lens.default) : link.lens;
+    return mine ? efs.lens.mineFirst(mine as never, base ?? efs.lens.default) : base;
   }
 
   /** Set when the editor closes: focus goes back to Edit once the file is on screen again. */

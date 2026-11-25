@@ -165,6 +165,9 @@ test('Rename: the review says links keep working and what the old name shows aft
       .poll(() => new URL(page.url()).hash)
       .toContain(objectLink(chain.ids['draft.txt@6'] as string).split('?')[0] as string);
     await expect(preview(page).locator('.efs-preview-text')).toHaveText('first words\n');
+    // The Lens it was listed in stays in the tab's memory: the URL is a clean object link that
+    // never carries the person's trust list.
+    expect(new URL(page.url()).hash).not.toContain('lens=');
   } finally {
     await chain.finish();
   }

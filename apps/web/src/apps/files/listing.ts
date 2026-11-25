@@ -317,13 +317,9 @@ export class EfsFilesListing extends EfsElement {
       </button>`;
     } else if (row.kind === 'file' && target?.kind === 'file') {
       const location = this.host.location.get();
-      // The file opens in the Lens this row was shown in (the place Lens), so the Preview shows the
-      // version the listing did: the person's own file, listed as "yours", isn't "not present".
-      const objectLink = link({
-        kind: 'object',
-        subject: target.subject,
-        ...(lens ? { lens } : {}),
-      });
+      // A clean object link: the Lens this row was shown in travels in the tab's memory, not the
+      // URL, so a copied link never carries the person's trust list.
+      const objectLink = link({ kind: 'object', subject: target.subject });
       const href =
         location.kind === 'realm' ? formatRealmRoute(location.realm, objectLink) : undefined;
       open = html`<a
@@ -332,6 +328,7 @@ export class EfsFilesListing extends EfsElement {
         @click=${(event: MouseEvent) => {
           if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
           event.preventDefault();
+          if (lens) this.nav.rememberLens(target.subject, lens);
           this.host.openLink(objectLink);
         }}
         >${appIcon('file')} ${name}</a

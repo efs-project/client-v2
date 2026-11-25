@@ -33,9 +33,10 @@ function listing(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement 
   return element;
 }
 
-function preview(host: AppHost, scope: OwnerScope): HTMLElement {
+function preview(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement {
   const element = document.createElement('efs-files-preview') as EfsFilesPreview;
   element.host = host;
+  element.nav = nav;
   const link = computed(() => linkState(host.location.get()));
   element.target = link;
   // Shared links are normalized (e.g. uppercase hex) to the SDK's canonical form, in place.
@@ -74,7 +75,11 @@ export const entry: AppEntry = {
       ],
       [
         'preview',
-        { id: 'preview', title: 'files.preview.title', create: (scope) => preview(host, scope) },
+        {
+          id: 'preview',
+          title: 'files.preview.title',
+          create: (scope) => preview(host, nav, scope),
+        },
       ],
     ]);
     return {
