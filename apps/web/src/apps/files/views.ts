@@ -51,10 +51,10 @@ export class EfsFilesView extends EfsElement {
     const item = (c: (typeof crumbs)[number]) =>
       c.depth === last
         ? html`<wa-breadcrumb-item aria-current="location"
-            ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+            ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
           >`
         : html`<wa-breadcrumb-item @click=${() => this.#go(c.depth)}
-            ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+            ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
           >`;
     if (crumbs.length <= BREADCRUMB_MAX) {
       return html`<wa-breadcrumb label=${t('files.location.label')}>
@@ -79,7 +79,7 @@ export class EfsFilesView extends EfsElement {
           ${middle.map(
             (c) =>
               html`<wa-option value=${String(c.depth)}
-                ><span translate="no">${c.name}</span></wa-option
+                ><span translate="no" dir="auto">${c.name}</span></wa-option
               >`,
           )}
         </wa-select>

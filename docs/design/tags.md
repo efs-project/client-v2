@@ -155,6 +155,13 @@ For each (topic, thing), the first of these with a stance decides (§3.1). An UN
 - **In a topic view** there's no owner, so every row says who tagged it.
 - **The L1 rule** ("no lens chrome until it changes an answer") yields to this. At a place, authorship always changes the answer.
 
+## Text direction: every label on its own
+
+**Every label from the chain is rendered isolated for text direction** (tag spec, planning `ba33d7f`): a topic's display name, any chain text shown inline, and names and authors shown next to each other. Each sits in its own element with `dir="auto"` (or `<bdi>`), so it never reorders the text around it.
+- **Labels refuse direction-control characters** (the SDK's name rules), but a right-to-left label beside other text can still pull its neighbours into its direction without isolation.
+- **Inside messages,** MF2 already wraps each argument in bidi isolates. The rule covers labels rendered outside a message: list rows, breadcrumbs, chips and the word view's headings.
+- **Built so far** for names in the Files app: entry names in the listing, the removed list and the Move picker, and breadcrumb names, each `translate="no" dir="auto"`.
+
 ## The path view (a topic)
 
 It opens in the File Browser's panes, which are keyed on "entries of X":

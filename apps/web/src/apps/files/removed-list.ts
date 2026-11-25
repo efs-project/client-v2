@@ -117,7 +117,7 @@ export class EfsFilesRemoved extends EfsElement {
     return html`<li class="efs-entry efs-entry-removed" data-state=${row.state}>
       <span class="efs-entry-open">
         ${appIcon(row.target.kind === 'folder' ? 'folder' : 'file')}
-        <span class="efs-entry-name" translate="no">${row.name}</span>
+        <span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>
       </span>
       <span class="efs-entry-meta efs-quiet">
         ${label ? t(label) : html`<code translate="no">${row.state}</code>`}

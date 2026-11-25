@@ -195,7 +195,7 @@ export class EfsFolderPicker extends EfsElement {
         ?disabled=${why !== undefined}
         @click=${() => this.#path.set([...this.#pathNow(), { folder: target, name: row.name }])}
       >
-        ${appIcon('folder')} <span class="efs-entry-name" translate="no">${row.name}</span>
+        ${appIcon('folder')} <span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>
       </button>
       <span class="efs-entry-meta efs-quiet">${whose}${why ? html`<span>${t(why)}</span>` : nothing}</span>
     </li>`;
@@ -212,11 +212,11 @@ export class EfsFolderPicker extends EfsElement {
       ${crumbs.map((c) =>
         c.depth === last
           ? html`<wa-breadcrumb-item aria-current="location"
-              ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+              ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
             >`
           : html`<wa-breadcrumb-item
               @click=${() => this.#path.set(this.#pathNow().slice(0, c.depth))}
-              ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+              ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
             >`,
       )}
     </wa-breadcrumb>`;

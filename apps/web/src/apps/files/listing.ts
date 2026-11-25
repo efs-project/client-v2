@@ -428,7 +428,7 @@ export class EfsFilesListing extends EfsElement {
             >
           </span>`
         : nothing;
-    const name = html`<span class="efs-entry-name" translate="no">${row.name}</span>`;
+    const name = html`<span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>`;
     const target = row.target;
     let open: unknown;
     if (row.kind === 'folder' && target?.kind === 'folder') {
@@ -573,7 +573,7 @@ export class EfsFilesListing extends EfsElement {
                 (c) => html`<li class="efs-entry efs-entry-creating" data-kind=${c.kind}>
                   <span class="efs-entry-open"
                     >${appIcon(c.kind)}
-                    <span class="efs-entry-name" translate="no">${c.name}</span></span
+                    <span class="efs-entry-name" translate="no" dir="auto">${c.name}</span></span
                   >
                   <span class="efs-entry-meta efs-quiet">
                     <span>${t(KIND_LABEL[c.kind])}</span>
