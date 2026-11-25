@@ -100,7 +100,7 @@
   "files.upload.typeText": "‮It's text; its type is stored as ‬{$type}‮.‬",
   "files.upload.typeUnknown": "‮Its type isn't recognized from its contents, so none is stored.‬",
   "files.upload.size": "{$size :number}‮ bytes.‬",
-  "files.upload.tooLarge": "‮This file is too large to save here.‬",
+  "files.upload.tooLarge": "‮This file is too large to save here. Files up to about 1 MB can be saved here for now.‬",
   "files.upload.tooBig": "‮This file is too large to upload here (the limit is ‬{$limit :number}‮ MB).‬",
   "files.upload.oneAtATime": "‮Upload one file at a time for now.‬",
   "files.new.folder": "‮New folder‬",

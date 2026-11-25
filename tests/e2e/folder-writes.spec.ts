@@ -742,3 +742,28 @@ test('Upload: several files at once are refused with a note, and nothing is read
     await chain.finish();
   }
 });
+
+test('Upload: a file over the limit says how large a file can be saved here, with no retry, and sends nothing', async ({
+  page,
+}) => {
+  const chain = await testChain('client-upload-too-large', 'The realm root; a 1.2 MiB text file.');
+  try {
+    await openRoot(page, chain);
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({
+        name: 'big.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('x'.repeat(1200 * 1024)),
+      });
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await expect(dialog(page)).toContainText(
+      'This file is too large to save here. Files up to about 1 MB can be saved here for now.',
+    );
+    await expect(dialog(page).locator('wa-button', { hasText: 'Try again' })).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Review: TOO_LARGE, said with the limit; no retry; nothing sent');
+  } finally {
+    await chain.finish();
+  }
+});
