@@ -824,6 +824,12 @@ export class EfsFilesListing extends EfsElement {
     </div>`;
     return html`<div
       class="wa-stack wa-gap-s efs-listing"
+      tabindex="-1"
+      aria-label=${t('files.entries.title')}
+      @efs-folder-focus-lost=${(event: Event) => {
+        event.stopPropagation();
+        (event.currentTarget as HTMLElement).focus();
+      }}
       @efs-folder-saved=${this.#onSaved}
       @efs-restore-removed=${this.#onRestoreRemoved}
       @efs-compose=${this.#onCompose}

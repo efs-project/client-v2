@@ -47,6 +47,28 @@ export class EfsWallet extends EfsElement {
     if (dialog) dialog.open = true;
   }
 
+  /**
+   * Closed: the dialog gives focus back to what opened it, but connecting replaces the wallet
+   * button (connected or not are different buttons), so that can be gone and focus would drop to
+   * the page (or stay inside the closed dialog). Then the wallet button takes it. Queued after the
+   * dialog's own focus return (queued just before this event), so a return to a control that still
+   * exists is kept.
+   */
+  #afterHide = (event: Event): void => {
+    if (event.target !== event.currentTarget) return;
+    const dialog = event.currentTarget as HTMLElement;
+    setTimeout(() => {
+      if (!this.isConnected) return;
+      // Lost: on the page, or still inside the dialog that just closed.
+      const active = document.activeElement;
+      if (active && active !== document.body && !dialog.contains(active)) return;
+      const button = this.querySelector<HTMLElement & { updateComplete?: Promise<unknown> }>(
+        'wa-button.efs-wallet-button',
+      );
+      void Promise.resolve(button?.updateComplete).then(() => button?.focus());
+    });
+  };
+
   #connect = () => {
     this.#switchNotice.set(undefined);
     this.#open();
@@ -215,7 +237,12 @@ export class EfsWallet extends EfsElement {
   override render() {
     const t = this.translator.t.bind(this.translator);
     return html`${this.#button(t)}
-      <wa-dialog class="efs-wallet-dialog" label=${t('wallet.title')} light-dismiss>
+      <wa-dialog
+        class="efs-wallet-dialog"
+        label=${t('wallet.title')}
+        light-dismiss
+        @wa-after-hide=${this.#afterHide}
+      >
         <div class="wa-stack wa-gap-m">${this.#body(t)}</div>
       </wa-dialog>`;
   }

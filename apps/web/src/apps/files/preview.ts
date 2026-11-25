@@ -141,6 +141,8 @@ export class EfsFilesPreview extends EfsElement {
   /** Starts following the session and the target. Everything stops when `scope` is disposed. */
   start(scope: OwnerScope): void {
     this.#scope = scope;
+    // Focus can be handed to the pane itself (after a new file is sent, before it opens).
+    if (!this.hasAttribute('tabindex')) this.tabIndex = -1;
     effect(scope, () => {
       const efs = verifiedEfs(this.host.reader.get());
       const link = this.target.get();
@@ -370,6 +372,8 @@ export class EfsFilesPreview extends EfsElement {
 
   /** Set when the editor closes: focus goes back to Edit once the file is on screen again. */
   #returnFocus = false;
+  /** A new file handed to the banner from here: focus goes to its Edit once it opens. */
+  #focusNew: string | undefined;
 
   /** Marked once per page: the first verified contents on screen (the Preview's budget). */
   static #markedVerified = false;
@@ -380,8 +384,16 @@ export class EfsFilesPreview extends EfsElement {
       EfsFilesPreview.#markedVerified = true;
       performance.mark('efs:preview-verified');
     }
-    if (!this.#returnFocus) return;
     const s = this.#state.get();
+    if (
+      this.#focusNew &&
+      s?.phase === 'read' &&
+      s.open.file.file.toLowerCase() === this.#focusNew.toLowerCase()
+    ) {
+      this.#focusNew = undefined;
+      this.#returnFocus = true;
+    }
+    if (!this.#returnFocus) return;
     if (s && s.phase !== 'read' && s.phase !== 'not-present' && s.phase !== 'failed') return;
     this.#returnFocus = false;
     // Edit when it's offered; otherwise the pane itself, so focus is never dropped on the page.
@@ -403,6 +415,17 @@ export class EfsFilesPreview extends EfsElement {
     const p = detail.progress;
     // The editor handed the save to the banner (with its text, for "Review changes"); it opens
     // here once Saved (the effect above), including when it's Saved already.
+    // The editor is gone: focus goes to this pane now (after the review dialog's own focus
+    // return, to a control that no longer exists), and to the new file's Edit once it opens.
+    this.#focusNew = detail.created;
+    setTimeout(() => {
+      if (
+        this.isConnected &&
+        (document.activeElement === document.body || !document.activeElement)
+      ) {
+        this.focus();
+      }
+    });
     if (p && detail.created && c) {
       const efs = verifiedEfs(this.host.reader.get());
       this.#created.set(p.sequenceId, {
