@@ -33,7 +33,11 @@ function setup(
   confirmEveryMs = 60_000,
 ) {
   const reader = state<ReaderState>({ status: 'OFF' });
-  const journal = { openSequences: vi.fn(async () => open), close: vi.fn() };
+  const journal = {
+    openSequences: vi.fn(async () => open),
+    close: vi.fn(),
+    get: vi.fn(async () => undefined),
+  };
   const view = {
     pendingSequences: vi.fn(async () => listed),
     reconcileSequence: vi.fn(async (id: string) =>
@@ -259,6 +263,108 @@ describe('createSavesSession', () => {
     expect(session.takeReopen('other')).toBeUndefined();
     expect(session.takeReopen('x')).toEqual(draft);
     expect(session.reopening.get()).toBeUndefined();
+  });
+
+  it('refresh() resolves only once the check it started has finished reading', async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    let release: (list: SequenceProgress[]) => void = () => {};
+    let calls = 0;
+    const view = {
+      pendingSequences: vi.fn(() => {
+        calls++;
+        return calls === 1
+          ? Promise.resolve([])
+          : new Promise<SequenceProgress[]>((resolve) => (release = resolve));
+      }),
+      reconcileSequence: vi.fn(),
+    };
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({
+            openSequences: async () => [{}],
+            close: () => {},
+            get: async () => undefined,
+          }),
+        }) as never,
+      loadActions: async () => ({ openJournal: () => view }) as never,
+    });
+    reader.set(verified);
+    await vi.waitFor(() => expect(view.pendingSequences).toHaveBeenCalledTimes(1));
+    let done = false;
+    void session.refresh().then(() => {
+      done = true;
+    });
+    await vi.waitFor(() => expect(view.pendingSequences).toHaveBeenCalledTimes(2));
+    await tick();
+    expect(done).toBe(false);
+    release([]);
+    await vi.waitFor(() => expect(done).toBe(true));
+  });
+
+  it('a journal lost on a later check keeps the saves already shown, and keeps checking', async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const fault = Object.assign(new Error('dropped'), {
+      name: 'EfsFault',
+      code: 'JOURNAL_UNAVAILABLE',
+    });
+    let lost = false;
+    const inFlight = progress({ state: 'IN_FLIGHT', committed: 0, total: 1 });
+    const view = {
+      pendingSequences: vi.fn(async () => [inFlight]),
+      reconcileSequence: vi.fn(async () => inFlight),
+    };
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({
+            openSequences: async () => {
+              if (lost) throw fault;
+              return [{}];
+            },
+            close: () => {},
+            get: async () => undefined,
+          }),
+        }) as never,
+      loadActions: async () => ({ openJournal: () => view }) as never,
+      settleEveryMs: 20,
+    });
+    reader.set(verified);
+    await vi.waitFor(() =>
+      expect(session.state.get()).toEqual({ status: 'READY', saves: [inFlight] }),
+    );
+    lost = true;
+    await session.refresh();
+    expect(session.state.get()).toEqual({ status: 'READY', saves: [inFlight] });
+    // Still scheduled: once the journal is back, the save is settled from there.
+    lost = false;
+    const calls = view.pendingSequences.mock.calls.length;
+    await vi.waitFor(() => expect(view.pendingSequences.mock.calls.length).toBeGreaterThan(calls));
+    info.mockRestore();
+  });
+
+  it("reads an in-flight save's deadline from its journaled plan", async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    const planId = `0x${'0e'.repeat(32)}`;
+    const inFlight = progress({ state: 'IN_FLIGHT', current: { index: 0, planId } as never });
+    const view = {
+      pendingSequences: vi.fn(async () => [inFlight]),
+      reconcileSequence: vi.fn(async () => inFlight),
+    };
+    const get = vi.fn(async (id: string) =>
+      id === planId ? { plan: { deadline: 1_900_000_000n } } : undefined,
+    );
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({ openSequences: async () => [{}], close: () => {}, get }),
+        }) as never,
+      loadActions: async () => ({ openJournal: () => view }) as never,
+      settleEveryMs: 60_000,
+    });
+    reader.set(verified);
+    await vi.waitFor(() => expect(session.deadlineOf(inFlight.sequenceId)).toBe(1_900_000_000));
   });
 
   it('only final completed and abandoned saves need no attention', () => {

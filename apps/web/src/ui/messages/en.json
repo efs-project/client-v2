@@ -274,5 +274,13 @@
   "files.edit.reopened": "Your edit is back, on the current version of this file. Review it, then save.",
   "files.edit.unconfirmed": "We couldn't confirm your last save yet. The banner above shows it when the network answers.",
   "review.prepareAgain": "Prepare again",
-  "review.close": "Close"
+  "review.close": "Close",
+  "save.undoneChecking": "Undone by the network. Checking whether it comes back…",
+  "save.nothingNew": "Nothing new was sent. Parts sent earlier may already be on the network; send again to continue.",
+  "save.expired": "This save didn't go through in time. Nothing was saved.",
+  "save.expiredPart": "Partially saved ({$committed :integer} of {$total :integer}). Part {$part :integer} didn't go through in time.",
+  "save.notThrough": "This save didn't go through. Nothing was saved.",
+  "files.edit.waiting": "Waiting for your earlier save to confirm before saving again.",
+  "files.edit.waitingFor": "Waiting for your earlier save to confirm before saving again (at most about {$minutes :integer} min).",
+  "files.edit.lapsed": "Your earlier save didn't confirm in time. If it somehow still does, this new save will be refused as changed."
 }

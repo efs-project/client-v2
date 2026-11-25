@@ -36,7 +36,7 @@
     "@axe-core/playwright": "4.13.0",
     "@biomejs/biome": "2.5.14",
     "@efs/fixture": "file:vendor/efs-fixture-0.0.0-88bfc0c.tgz",
-    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-2ab07d7.tgz",
+    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-f839fca.tgz",
     "@playwright/test": "1.63.0",
     "@types/node": "24.13.6",
     "acorn": "8.15.0",

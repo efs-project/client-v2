@@ -26,6 +26,7 @@ import {
   saveMessage,
   saveOutcome,
   saveValues,
+  thrownOutcome,
 } from '../../shell/save-outcome.ts';
 import { unsettled } from '../../shell/saves-state.ts';
 import { shortAccount } from '../../shell/wallet-state.ts';
@@ -80,11 +81,14 @@ export const shortId = (id: string): string =>
 
 const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
 
-/** Optional facts the SDK adds to a thrown fault (sdk-v2: throws say whether a send was possible). */
-interface ThrownSave {
-  readonly sequenceId?: Hex;
-  readonly mayHaveSent?: boolean;
-}
+/** Why a new send waits: a re-read after a throw, a save to finish or stop, or one in flight. */
+type Hold =
+  | { readonly kind: 'confirming' }
+  | { readonly kind: 'unsettled' }
+  | { readonly kind: 'waiting'; readonly minutes?: number };
+
+/** Seconds past a plan's deadline before the local clock treats it as lapsed (clock skew). */
+const LAPSE_MARGIN_S = 60;
 
 export class EfsFileEditor extends EfsElement {
   static override properties = {
@@ -110,8 +114,11 @@ export class EfsFileEditor extends EfsElement {
 
   #text = state('');
   #phase = state<Phase>({ phase: 'editing' });
-  /** A send in this editor couldn't be confirmed: said until the banner has settled it. */
-  #unconfirmed = state(false);
+  /** A send threw: new sends wait until the re-read it started has finished. */
+  #holding = state(false);
+  /** The clock a waiting hold is measured against (ticks while the editor is open). */
+  #now = state(Date.now());
+  #tick: ReturnType<typeof setInterval> | undefined;
   #base: RevisionRef | undefined;
   #controller = new AbortController();
 
@@ -124,11 +131,13 @@ export class EfsFileEditor extends EfsElement {
     this.#text.set(this.draft ?? this.original);
     this.#base = { kind: 'revision', recordId: this.file.revision };
     this.#controller = new AbortController();
+    this.#tick = setInterval(() => this.#now.set(Date.now()), 15_000);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#controller.abort();
+    if (this.#tick !== undefined) clearInterval(this.#tick);
   }
 
   override firstUpdated(): void {
@@ -139,13 +148,39 @@ export class EfsFileEditor extends EfsElement {
     this.dispatchEvent(new CustomEvent(EDIT_DONE_EVENT, { bubbles: true, composed: true, detail }));
   }
 
-  /** The connected account has a save the banner hasn't settled: no fresh send until it is. */
-  #blocked(): boolean {
+  /**
+   * Why a new send must wait, if it must: the connected account has a save for this file that
+   * isn't settled (for older records, which don't say their file: any file). `except` is the
+   * save this review continues. `lapsed`: an earlier save's deadline has passed without it
+   * landing, so it no longer holds anything back (said, as a warning).
+   */
+  #hold(except?: Hex): { readonly hold?: Hold; readonly lapsed: boolean } {
+    if (this.#holding.get()) return { hold: { kind: 'confirming' }, lapsed: false };
     const a = this.host.saving.availability.get();
-    if (a.status !== 'READY') return false;
-    return this.host.saving.saves
-      .get()
-      .some((p) => unsettled(p) && p.account.toLowerCase() === a.account.toLowerCase());
+    if (a.status !== 'READY') return { lapsed: false };
+    const now = this.#now.get();
+    let waiting: number | undefined;
+    let waitingUnknown = false;
+    let lapsed = false;
+    for (const p of this.host.saving.saves.get()) {
+      if (p.sequenceId === except || !unsettled(p)) continue;
+      if (p.account.toLowerCase() !== a.account.toLowerCase()) continue;
+      const file = (p as { effect?: { file?: string } }).effect?.file;
+      if (file && file.toLowerCase() !== this.file.file.toLowerCase()) continue;
+      if (p.state !== 'IN_FLIGHT') return { hold: { kind: 'unsettled' }, lapsed: false };
+      // In flight: it can still land until its deadline. Past it (with a margin for clock skew,
+      // until the SDK reports the latest block's time), it can't: a send from here would only be
+      // refused as changed if it somehow did.
+      const deadline = this.host.saving.deadlineOf(p.sequenceId);
+      if (deadline === undefined) waitingUnknown = true;
+      else if (now > (deadline + LAPSE_MARGIN_S) * 1000) lapsed = true;
+      else waiting = Math.max(waiting ?? 0, Math.ceil((deadline * 1000 - now) / 60_000));
+    }
+    if (waitingUnknown) return { hold: { kind: 'waiting' }, lapsed: false };
+    if (waiting !== undefined) {
+      return { hold: { kind: 'waiting', minutes: Math.max(1, waiting) }, lapsed: false };
+    }
+    return { lapsed };
   }
 
   #progressOpts(plan: Planned): SequenceOpts {
@@ -169,7 +204,7 @@ export class EfsFileEditor extends EfsElement {
    * "your own version changed" first, never sent silently over that other save.
    */
   async #plan(base: RevisionRef, afterRace = false): Promise<void> {
-    if (this.host.saving.availability.get().status !== 'READY' || this.#blocked()) {
+    if (this.host.saving.availability.get().status !== 'READY' || this.#hold().hold) {
       this.#phase.set({ phase: 'editing' });
       return;
     }
@@ -229,12 +264,17 @@ export class EfsFileEditor extends EfsElement {
       this.host.saving.track(await writer.abandon(sequenceId));
     } catch (error) {
       console.warn('could not drop an unsent save', sequenceId, error);
-      this.host.saving.refresh();
+      void this.host.saving.refresh();
     }
   }
 
   /** Sends the reviewed plan; a save that wasn't sent before is continued, not started again. */
   async #send(plan: Planned, writer: EfsWriter, again?: Hex): Promise<void> {
+    // Checked again at Send: a save may have become unsettled since the plan was made.
+    if (this.#hold(again).hold) {
+      this.#phase.set({ phase: 'editing' });
+      return;
+    }
     this.#phase.set({ phase: 'sending', plan });
     let progress: SequenceProgress;
     try {
@@ -244,22 +284,21 @@ export class EfsFileEditor extends EfsElement {
         : await writer.runSequence(plan.parts, opts);
     } catch (error) {
       console.error(error);
-      const thrown = error as ThrownSave;
-      if (thrown.mayHaveSent === false) {
-        // The SDK proves nothing went out: the same save can be sent again (continued if known).
-        const sent: NotSent = {
-          outcome: isFault(error, 'JOURNAL_UNAVAILABLE')
-            ? { kind: 'no-journal' }
-            : { kind: 'not-sent', code: 'FAILED', canRetry: true },
-          ...(thrown.sequenceId ? { sequenceId: thrown.sequenceId } : {}),
-        };
+      const thrown = thrownOutcome(error);
+      if (thrown.kind === 'again') {
+        // The SDK proves this call sent nothing: the same save is offered again (continued when
+        // its record exists).
+        const sent: NotSent = thrown.sequenceId
+          ? { outcome: thrown.outcome, sequenceId: thrown.sequenceId }
+          : { outcome: thrown.outcome };
         this.#phase.set({ phase: 'review', plan, writer, sent });
         return;
       }
-      // It may have been sent: never "nothing was saved", never a fresh send from here.
-      this.#unconfirmed.set(true);
-      this.host.saving.refresh();
-      this.#phase.set({ phase: 'unconfirmed', noJournal: isFault(error, 'JOURNAL_UNAVAILABLE') });
+      // It may have been sent: never "nothing was saved", and no new send until the re-read
+      // this starts has finished (then the banner's list decides).
+      this.#holding.set(true);
+      void this.host.saving.refresh().finally(() => this.#holding.set(false));
+      this.#phase.set({ phase: 'unconfirmed', noJournal: thrown.noJournal });
       return;
     }
     const outcome = saveOutcome(progress);
@@ -373,6 +412,7 @@ export class EfsFileEditor extends EfsElement {
       sent.outcome.kind === 'refused' ||
       sent.outcome.kind === 'busy' ||
       sent.outcome.kind === 'wallet-mismatch' ||
+      sent.outcome.kind === 'nothing-new' ||
       (sent.outcome.kind === 'not-sent' && sent.outcome.canRetry);
     const prepareAgain = sent?.outcome.kind === 'stale';
     return html`<wa-dialog
@@ -450,7 +490,7 @@ export class EfsFileEditor extends EfsElement {
               variant="brand"
               class="efs-review-send"
               ?loading=${sending}
-              ?disabled=${sending || !canSendAgain}
+              ?disabled=${sending || !canSendAgain || this.#hold(sent?.sequenceId).hold !== undefined}
               @click=${() => {
                 if (s.phase === 'review') void this.#send(s.plan, s.writer, sent?.sequenceId);
               }}
@@ -513,13 +553,10 @@ export class EfsFileEditor extends EfsElement {
     const t = this.host.translator.t.bind(this.host.translator);
     const s = this.#phase.get();
     const ready = this.host.saving.availability.get().status === 'READY';
-    const blocked = this.#blocked();
+    const { hold, lapsed } = this.#hold();
+    const blocked = hold !== undefined;
     const changed = this.#text.get() !== this.original;
     const busy = s.phase === 'planning' || s.phase === 'sending';
-    // Once the banner has settled the unconfirmed save (or found nothing open), the note goes.
-    if (this.#unconfirmed.get() && !blocked && s.phase === 'editing') {
-      queueMicrotask(() => this.#unconfirmed.set(false));
-    }
     return html`<div class="wa-stack wa-gap-s efs-editor">
       ${
         this.draft !== undefined
@@ -540,12 +577,25 @@ export class EfsFileEditor extends EfsElement {
       </label>
       ${this.#walletNotice(t)}
       ${
-        blocked
-          ? html`<wa-callout variant="neutral" size="small" class="efs-edit-blocked">
+        hold
+          ? html`<wa-callout variant="neutral" size="small" class="efs-edit-blocked" data-hold=${hold.kind}>
               <span slot="icon">${appIcon('circle-info')}</span>
-              <p>${t(this.#unconfirmed.get() ? 'files.edit.unconfirmed' : 'files.edit.blocked')}</p>
+              <p>${
+                hold.kind === 'confirming'
+                  ? t('files.edit.unconfirmed')
+                  : hold.kind === 'unsettled'
+                    ? t('files.edit.blocked')
+                    : hold.minutes === undefined
+                      ? t('files.edit.waiting')
+                      : t('files.edit.waitingFor', { minutes: hold.minutes })
+              }</p>
             </wa-callout>`
-          : nothing
+          : lapsed
+            ? html`<wa-callout variant="warning" size="small" class="efs-edit-lapsed">
+                <span slot="icon">${appIcon('triangle-exclamation')}</span>
+                <p>${t('files.edit.lapsed')}</p>
+              </wa-callout>`
+            : nothing
       }
       ${this.#notices(s, t)}
       <div class="wa-cluster wa-gap-xs">

@@ -39,8 +39,11 @@ export interface Draft {
 
 export interface SavesSession {
   readonly state: ReadonlySignal<SavesState>;
-  /** Re-reads and settles open saves (after a reconnect, an unconfirmed send, "Check again"). */
-  refresh(): void;
+  /**
+   * Re-reads and settles open saves (after a reconnect, an unconfirmed send, "Check again").
+   * Resolves once a check started by this call (or a later one) has finished reading.
+   */
+  refresh(): Promise<void>;
   /** A save's latest progress, straight from the writer: shown now, settled from here on. */
   track(progress: SequenceProgress, draft?: Draft): void;
   /** Hides a finished ("Saved") save. */
@@ -52,6 +55,8 @@ export interface SavesSession {
   reopen(draft: Draft): void;
   /** Takes the pending reopen if it is for `link`. */
   takeReopen(link: string): Draft | undefined;
+  /** When an in-flight save's current part expires (unix seconds), as its plan says. */
+  deadlineOf(sequenceId: Hex): number | undefined;
 }
 
 type JournalModule = typeof import('@efs/sdk/web/journal');
@@ -106,6 +111,25 @@ export function createSavesSession(
   let generation = 0;
   /** The open saves, in display order. */
   let open: SequenceProgress[] = [];
+  /** Each in-flight save's current part deadline (unix seconds), read from its journaled plan. */
+  const deadlines = new Map<Hex, number>();
+  /** Checks started and finished, so `refresh()` can wait for the one it started. */
+  let started = 0;
+  let finished = 0;
+  let waiters: { readonly at: number; readonly resolve: () => void }[] = [];
+  const settleWaiters = (): void => {
+    const ready = waiters.filter((w) => w.at <= finished);
+    waiters = waiters.filter((w) => w.at > finished);
+    for (const w of ready) w.resolve();
+  };
+  const finish = (id: number): void => {
+    finished = Math.max(finished, id);
+    settleWaiters();
+  };
+  scope.defer(() => {
+    finished = started;
+    settleWaiters();
+  });
 
   const publish = (): void => {
     for (const p of open) watched.add(p.sequenceId);
@@ -120,6 +144,7 @@ export function createSavesSession(
     watched.delete(id);
     tracked.delete(id);
     drafts.delete(id);
+    deadlines.delete(id);
   };
 
   const schedule = (efs: Efs): void => {
@@ -155,6 +180,7 @@ export function createSavesSession(
     const mine = scope.child();
     run = mine;
     const since = generation;
+    const id = ++started;
     void (async () => {
       try {
         const { indexedDbJournal } = await loadJournal();
@@ -167,6 +193,7 @@ export function createSavesSession(
           open = merge([], since);
           publish();
           schedule(efs);
+          finish(id);
           return;
         }
         if (mine.signal.aborted) return;
@@ -203,20 +230,33 @@ export function createSavesSession(
           else forget(p.sequenceId);
         }
         open = merge(settled.filter(needsAttention), since);
+        // The deadline of each in-flight part, from its journaled plan: how long a hold lasts.
+        for (const p of open) {
+          const planId = p.state === 'IN_FLIGHT' ? p.current?.planId : undefined;
+          if (!planId || deadlines.has(p.sequenceId)) continue;
+          const record = await journal.get(planId).catch(() => undefined);
+          if (record) deadlines.set(p.sequenceId, Number(record.plan.deadline));
+        }
+        if (mine.signal.aborted) return;
         publish();
         schedule(efs);
+        finish(id);
       } catch (error) {
         if (mine.signal.aborted) return;
         if (isFault(error, 'JOURNAL_UNAVAILABLE')) {
-          // This browser won't keep the journal: nothing can have been saved from here, and
-          // reading doesn't need it. No banner; saving says it's off if someone tries.
           console.info('save journal unavailable in this browser', error);
-          open = merge([], since);
+          // Nothing shown or handed over yet: reading doesn't need the journal, so no banner
+          // (saving says it's off if someone tries). Otherwise keep what's shown, and keep
+          // checking: a save already sent is still settled from the ledger next time.
+          open = merge(open, since);
           publish();
+          if (open.length > 0) schedule(efs);
+          finish(id);
           return;
         }
         console.error(error);
         current.set({ status: 'LOAD_FAILED' });
+        finish(id);
       }
     })();
   };
@@ -232,12 +272,15 @@ export function createSavesSession(
       finals.clear();
       tracked.clear();
       drafts.clear();
+      deadlines.clear();
       open = [];
       if (efs) check(efs);
       else {
         run?.dispose();
         if (timer !== undefined) clearTimeout(timer);
         current.set({ status: 'IDLE' });
+        finished = started;
+        settleWaiters();
       }
     });
   });
@@ -246,8 +289,15 @@ export function createSavesSession(
     state: current,
     reopening,
     refresh() {
-      if (active) check(active);
+      if (!active) return Promise.resolve();
+      check(active);
+      const at = started;
+      return new Promise<void>((resolve) => {
+        waiters.push({ at, resolve });
+        settleWaiters();
+      });
     },
+    deadlineOf: (sequenceId) => deadlines.get(sequenceId),
     track(progress, draft) {
       const efs = active;
       if (!efs) return;

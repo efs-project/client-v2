@@ -110,7 +110,7 @@ export class EfsSavesBanner extends EfsElement {
         kind: 'message',
         id: isFault(error, 'JOURNAL_UNAVAILABLE') ? 'save.noJournal' : 'save.unconfirmed',
       });
-      this.saves.refresh();
+      void this.saves.refresh();
       return undefined;
     } finally {
       this.#busy.set(undefined);
@@ -161,8 +161,13 @@ export class EfsSavesBanner extends EfsElement {
     const action = saveAction(outcome);
     const notice = this.#notices.get().get(p.sequenceId);
     const done = outcome.kind === 'saved';
-    const settling = outcome.kind === 'confirming' || outcome.kind === 'checking';
-    const variant = done || settling ? 'success' : 'warning';
+    // The network is deciding: nothing to press, and stopping would be refused (a part is in flight).
+    const settling =
+      outcome.kind === 'confirming' ||
+      outcome.kind === 'checking' ||
+      outcome.kind === 'undone-checking';
+    const variant =
+      done || (settling && outcome.kind !== 'undone-checking') ? 'success' : 'warning';
     const values = saveValues(outcome, shortAccount, (id) => this.#chainName(id, t));
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).

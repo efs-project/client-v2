@@ -1,3 +1,4 @@
+import { EfsFault } from '@efs/sdk';
 import type { SequenceProgress } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
 import en from '../ui/messages/en.json' with { type: 'json' };
@@ -8,6 +9,7 @@ import {
   saveMessage,
   saveOutcome,
   saveValues,
+  thrownOutcome,
 } from './save-outcome.ts';
 
 const p = (over: Partial<SequenceProgress>): SequenceProgress =>
@@ -22,7 +24,7 @@ const p = (over: Partial<SequenceProgress>): SequenceProgress =>
     ...over,
   }) as SequenceProgress;
 
-// Only (code, retry) pairs the SDK emits (sdk-v2 2ab07d7, src/actions): never invented ones.
+// Only (code, retry) pairs the SDK emits (sdk-v2 f839fca, src/actions): never invented ones.
 const R = {
   userRejected: { code: 'USER_REJECTED', retry: 'never' },
   busy: { code: 'BUSY', retry: 'transient' },
@@ -58,6 +60,11 @@ const R = {
   rpcUnavailable: { code: 'RPC_UNAVAILABLE', retry: 'transient' },
   responseLost: { code: 'RESPONSE_LOST', retry: 'after-reconcile' },
   reorged: { code: 'REORGED', retry: 'after-reconcile' },
+  // sdk-v2 #32: a reorged part proven dropped, and the decline made transient.
+  reorgedDropped: { code: 'REORGED_DROPPED', retry: 'transient' },
+  userRejectedTransient: { code: 'USER_REJECTED', retry: 'transient' },
+  // The SDK's next PR (accepted): a part sent but proven not committed past its deadline.
+  expired: { code: 'EXPIRED', retry: 'transient' },
   notVerified: { code: 'NOT_VERIFIED_DEPLOYMENT', retry: 'never' },
   aborted: { code: 'ABORTED', retry: 'never' },
 } as const;
@@ -76,11 +83,41 @@ describe('saveOutcome', () => {
     }
   });
 
-  it('a reorg is "undone by the network", whatever state it left behind', () => {
-    for (const state of ['IN_FLIGHT', 'PARTIAL', 'NOT_STARTED'] as const) {
-      expect(saveOutcome(p({ state, reason: reason(R.reorged) }))).toEqual({ kind: 'undone' });
+  it("a reorg is the network's doing: state first, then the code", () => {
+    // REORGED while the part is in flight again: it may still land; no action.
+    expect(saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.reorged) }))).toEqual({
+      kind: 'undone-checking',
+    });
+    expect(saveAction({ kind: 'undone-checking' })).toBeUndefined();
+    // Proven dropped: re-sending (resume) is the person's click.
+    for (const state of ['PARTIAL', 'NOT_STARTED'] as const) {
+      expect(saveOutcome(p({ state, reason: reason(R.reorgedDropped) }))).toEqual({
+        kind: 'undone',
+      });
     }
     expect(saveAction({ kind: 'undone' })).toBe('send-again');
+    // The state decides first: a save already complete again is saved, whatever the reason says.
+    expect(
+      saveOutcome(p({ state: 'COMPLETE', committed: 1, final: true, reason: reason(R.reorged) })),
+    ).toEqual({ kind: 'saved' });
+  });
+
+  it('a part proven not committed past its deadline is "didn\'t go through in time", never "not sent"', () => {
+    expect(saveOutcome(p({ reason: reason(R.expired) }))).toEqual({
+      kind: 'expired',
+      committed: 0,
+      total: 1,
+    });
+    expect(saveMessage({ kind: 'expired', committed: 0, total: 1 })).toBe('save.expired');
+    const part = saveOutcome(
+      p({ state: 'PARTIAL', committed: 2, total: 4, reason: reason(R.expired) }),
+    );
+    expect(part).toEqual({ kind: 'expired', committed: 2, total: 4 });
+    expect(saveMessage(part)).toBe('save.expiredPart');
+    expect(saveAction(part)).toBe('send-again');
+    // Not started and no reason recorded (listed after a reload): it didn't go through.
+    expect(saveOutcome(p({ state: 'NOT_STARTED' }))).toEqual({ kind: 'not-through' });
+    expect(saveAction({ kind: 'not-through' })).toBe('send-again');
   });
 
   it('decides by code before retry: a gas-cap refusal is "too large", not "stale"', () => {
@@ -96,6 +133,12 @@ describe('saveOutcome', () => {
     );
     expect(o).toEqual({ kind: 'declined', committed: 2, total: 5, part: 3 });
     expect(saveAction(o)).toBe('continue');
+    // sdk-v2 #32 makes the decline "transient": the same outcome, decided by code.
+    expect(
+      saveOutcome(
+        p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason(R.userRejectedTransient) }),
+      ),
+    ).toEqual({ kind: 'declined', committed: 2, total: 5, part: 3 });
     // Before anything was sent it's a plain refusal, sent again from the review.
     expect(saveOutcome(p({ reason: reason(R.userRejected) }))).toEqual({ kind: 'refused' });
     expect(saveAction({ kind: 'refused' })).toBe('retry');
@@ -186,6 +229,45 @@ describe('saveOutcome', () => {
     });
   });
 
+  it('a thrown fault is offered again only when the SDK proves this call sent nothing', () => {
+    const id = `0x${'0d'.repeat(32)}` as const;
+    // Real faults, as runSequence/resume throw them (sdk-v2 #32).
+    const nothingAtAll = new EfsFault('INVARIANT', 'wallet refused before sending', {
+      sequence: { sequenceId: id, mayHaveSent: false, sequenceMayHaveSent: false },
+    });
+    expect(thrownOutcome(nothingAtAll)).toEqual({
+      kind: 'again',
+      outcome: { kind: 'not-sent', code: 'INVARIANT', canRetry: true },
+      sequenceId: id,
+    });
+    // This call sent nothing, but earlier parts may be on chain: never "nothing was saved".
+    const earlierParts = new EfsFault('INVARIANT', 'journal read failed', {
+      sequence: { sequenceId: id, mayHaveSent: false, sequenceMayHaveSent: true },
+    });
+    expect(thrownOutcome(earlierParts)).toEqual({
+      kind: 'again',
+      outcome: { kind: 'nothing-new' },
+      sequenceId: id,
+    });
+    expect(saveAction({ kind: 'nothing-new' })).toBe('retry');
+    // No record yet: a fresh save, nothing sent.
+    const noRecord = new EfsFault('JOURNAL_UNAVAILABLE', 'no journal', {
+      sequence: { sequenceId: undefined as never, mayHaveSent: false, sequenceMayHaveSent: false },
+    });
+    expect(thrownOutcome(noRecord)).toEqual({ kind: 'again', outcome: { kind: 'no-journal' } });
+    // May have sent: unconfirmed, whatever else it says.
+    const mayHave = new EfsFault('JOURNAL_UNAVAILABLE', 'IndexedDB dropped after broadcast', {
+      sequence: { sequenceId: id, mayHaveSent: true, sequenceMayHaveSent: true },
+    });
+    expect(thrownOutcome(mayHave)).toEqual({ kind: 'unconfirmed', noJournal: true });
+    // Older faults and plain errors carry no proof.
+    expect(thrownOutcome(new EfsFault('INVARIANT', 'no sequence facts'))).toEqual({
+      kind: 'unconfirmed',
+      noJournal: false,
+    });
+    expect(thrownOutcome(new TypeError('x'))).toEqual({ kind: 'unconfirmed', noJournal: false });
+  });
+
   it('recognizes a thrown SDK fault by code', () => {
     const fault = Object.assign(new Error('no journal'), {
       name: 'EfsFault',
@@ -203,6 +285,8 @@ describe('saveOutcome', () => {
       'save.partialStuck',
       'save.refusedByLedger',
       'save.walletMismatchTo',
+      'save.nothingNew',
+      'save.expiredPart',
     ])
       expect(en).toHaveProperty(id);
   });

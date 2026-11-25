@@ -51,8 +51,10 @@ export interface SavingHost {
   writer(): Promise<EfsWriter | undefined>;
   /** The saves the banner shows (open, confirming, just saved), newest first. */
   readonly saves: ReadonlySignal<readonly SequenceProgress[]>;
-  /** Re-reads open saves: after a send whose outcome couldn't be confirmed. */
-  refresh(): void;
+  /** Re-reads open saves (after a send whose outcome couldn't be confirmed); resolves when read. */
+  refresh(): Promise<void>;
+  /** When an in-flight save's current part expires (unix seconds), as its plan says. */
+  deadlineOf(sequenceId: SequenceProgress['sequenceId']): number | undefined;
   /**
    * Hands a save's progress to the shell, which shows it and carries it to "Saved". `draft` is
    * the person's edit, kept in memory so "Review changes" can bring it back.
