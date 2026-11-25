@@ -176,7 +176,7 @@ test.describe('verified reads (recorded chain traffic)', () => {
     await expect(preview(page)).toContainText(
       'Contents verified against the published fingerprint',
     );
-    await expect(preview(page)).toContainText("isn't text");
+    await expect(preview(page)).toContainText("can't preview this kind of file");
     await expect(preview(page)).toContainText('20,000 bytes');
     await expect(preview(page).getByRole('button', { name: 'Save a copy' })).toBeVisible();
     expect(replay.misses).toEqual([]);

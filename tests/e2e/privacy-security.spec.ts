@@ -51,7 +51,8 @@ test('CSP: exact policy, meta precedes scripts, injected inline script is blocke
   expect(directives.get('base-uri')).toBe("'self'");
   expect(directives.get('require-trusted-types-for')).toBe("'script'");
   expect(directives.get('trusted-types')).toBe('lit-html');
-  expect(directives.get('img-src')).toBe("'self' data:");
+  expect(directives.get('img-src')).toBe("'self' data: blob:");
+  expect(directives.get('media-src')).toBe('blob:');
   expect(directives.get('worker-src')).toBe("'self'");
   expect(directives.get('connect-src')).toBe(
     "'self' https: wss: http://localhost:* http://127.0.0.1:* http://*.localhost:* ws://localhost:* ws://127.0.0.1:* ws://*.localhost:*",

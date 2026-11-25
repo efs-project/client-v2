@@ -42,7 +42,9 @@ export const CSP = [
   `style-src 'self' '${WA_PAGE_STYLE_HASH}' 'report-sample'`,
   `style-src-attr 'unsafe-hashes' '${WA_PAGE_ATTR_HASH}' 'report-sample'`,
   // Web Awesome's native.css draws form-control glyphs with data: SVG images.
-  "img-src 'self' data:",
+  // blob: only for showing a file's VERIFIED bytes (images, audio, video) in the Preview.
+  "img-src 'self' data: blob:",
+  'media-src blob:',
   "font-src 'self'",
   `connect-src ${CONNECT_SRC.join(' ')}`,
   "worker-src 'self'",

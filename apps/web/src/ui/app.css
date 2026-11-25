@@ -275,6 +275,18 @@ code {
   }
 }
 
+/* A file's verified image, audio or video: as wide as the pane, never taller than most of it. */
+.efs-preview-media {
+  display: block;
+  max-inline-size: 100%;
+  max-block-size: 70dvh;
+  object-fit: contain;
+}
+
+audio.efs-preview-media {
+  inline-size: 100%;
+}
+
 /* The file editor: the same face as the preview, as wide as the pane. */
 .efs-edit-text {
   inline-size: 100%;
