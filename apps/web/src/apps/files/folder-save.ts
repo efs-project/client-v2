@@ -173,6 +173,8 @@ export class EfsFolderSave extends EfsElement {
   #pick = state<PickerSelection | undefined>(undefined);
   /** The destination's name as picked, for the move review. */
   #moveLabel = '';
+  /** Plans made since this opening (shown as data-plans; see #plan). */
+  #plans = 0;
   /**
    * "New text file", named: handed to the editor once the dialog has closed. The dialog gives
    * focus back to its trigger as it closes, so the editor opening any sooner would lose its
@@ -208,13 +210,20 @@ export class EfsFolderSave extends EfsElement {
   }
 
   #focusKeep(): void {
-    this.querySelector<HTMLElement>('wa-button.efs-folder-keep')?.focus();
+    // A freshly rendered <wa-button> ignores focus() until its own first render is done (its inner
+    // button isn't there yet): wait for it, not just for this dialog's update. Firefox showed it.
+    const keep = this.querySelector<HTMLElement & { updateComplete?: Promise<unknown> }>(
+      'wa-button.efs-folder-keep',
+    );
+    void Promise.resolve(keep?.updateComplete).then(() => keep?.focus());
   }
 
   /** Opens the dialog for `ask` (from a click). */
   open(ask: FolderAsk): void {
     this.#controller?.abort();
     this.#controller = new AbortController();
+    this.#plans = 0;
+    this.dataset.plans = '0';
     this.#ask.set(ask);
     const named =
       ask.kind === 'createFolder' ||
@@ -328,6 +337,10 @@ export class EfsFolderSave extends EfsElement {
     const lens = this.lens;
     const signal = this.#controller?.signal;
     if (!efs || !lens || !signal) return;
+    // How many plans this opening made, on the element (data-plans): a second plan racing the
+    // first could overwrite a review that's already being sent, so the tests count them.
+    this.#plans++;
+    this.dataset.plans = String(this.#plans);
     this.#phase.set({ phase: 'planning', request });
     try {
       const writer = await this.host.saving.writer();
@@ -1041,10 +1054,15 @@ export class EfsFolderSave extends EfsElement {
       label=${label}
       ?open=${open}
       @wa-after-show=${(event: Event) => {
-        // The dialog's own show focus runs last: a removal's review still opens on Keep it.
+        // The dialog's own show focus runs last: a removal's review still opens on Keep it. But
+        // never over a choice the person already made: if they moved to another control in the
+        // review while it was still showing, focus stays where they put it.
         if (event.target !== event.currentTarget) return;
         const phase = this.#phase.get().phase;
-        if (this.#ask.get()?.kind === 'remove' && phase === 'review') this.#focusKeep();
+        if (this.#ask.get()?.kind !== 'remove' || phase !== 'review') return;
+        const active = document.activeElement;
+        const moved = active !== null && active !== event.currentTarget && this.contains(active);
+        if (!moved || active?.matches('wa-button.efs-folder-keep')) this.#focusKeep();
       }}
       @wa-hide=${(event: Event) => {
         if (event.target !== event.currentTarget) return;

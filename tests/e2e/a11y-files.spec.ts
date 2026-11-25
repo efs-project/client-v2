@@ -70,31 +70,6 @@ async function slowNameCheck(page: Page): Promise<void> {
   });
 }
 
-/**
- * Counts the folder dialog's plans from here on: each one shows its "Preparing…" status (a new
- * spinner in the dialog), so two plans would show it twice.
- */
-async function countPlannings(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __plannings: number };
-    w.__plannings = 0;
-    const d = document.querySelector('wa-dialog.efs-folder-save');
-    if (!d) throw new Error('no folder dialog');
-    new MutationObserver((records) => {
-      for (const r of records) {
-        for (const n of r.addedNodes) {
-          if (
-            n instanceof Element &&
-            n.matches('p[role="status"]') &&
-            n.querySelector('wa-spinner')
-          )
-            w.__plannings++;
-        }
-      }
-    }).observe(d, { childList: true, subtree: true });
-  });
-}
-
 /** Focus is somewhere meaningful, never dropped on the page. */
 async function focusKept(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true);
@@ -115,14 +90,12 @@ test('New folder by keyboard: the name takes focus; Enter twice before the name 
     await expect(dialog(page).locator('wa-input.efs-folder-name')).toBeFocused();
     // Typed and Enter twice before the name check has even arrived (held back above): the
     // Enter waits for it, and plans once, never twice.
-    await countPlannings(page);
     await page.keyboard.type('projects');
     await page.keyboard.press('Enter');
     await page.keyboard.press('Enter');
     await expect(dialog(page)).toContainText(/Creates the folder\W+projects\W+in\W+Root/);
-    expect(
-      await page.evaluate(() => (window as unknown as { __plannings: number }).__plannings),
-    ).toBe(1);
+    // Exactly one plan for this naming (the dialog counts them: data-plans).
+    await expect(page.locator('efs-files-folder-save')).toHaveAttribute('data-plans', '1');
     expect(await axe(page), 'review').toEqual([]);
     chain.step('Keyboard: New folder, type, Enter: reviewed');
     await activate(page, send(page));
