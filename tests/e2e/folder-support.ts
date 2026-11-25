@@ -10,7 +10,8 @@ import { booted, serveConfig, serveDeployment } from './support.ts';
 export const entries = (page: Page) => page.locator('efs-files-listing');
 export const row = (page: Page, name: string) =>
   entries(page).locator('.efs-entry', { has: page.locator('.efs-entry-name', { hasText: name }) });
-export const dialog = (page: Page) => page.locator('wa-dialog.efs-folder-save');
+/** The folder listing's dialog (the Preview and a tag's list have their own, for tags). */
+export const dialog = (page: Page) => page.locator('efs-files-listing wa-dialog.efs-folder-save');
 export const send = (page: Page) => dialog(page).locator('wa-button.efs-folder-send');
 
 /**

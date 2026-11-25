@@ -78,7 +78,7 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
     chain.step('Connect as #6: the place Lens is #6, then the root owner, then the default');
 
     // Into the folder: the URL is the folder's own object link (routed through openObject).
-    await row(page, 'notes').getByRole('button').click();
+    await row(page, 'notes').locator('button.efs-entry-open').click();
     await expect(row(page, 'todo.txt')).toContainText('File');
     await expect(crumbs(page)).toHaveCount(2);
     await expect(crumbs(page).last()).toContainText('notes');
@@ -127,7 +127,7 @@ test('a file link opened fresh lists nothing until asked; a folder link survives
 
     await entries(page).getByRole('button', { name: 'Browse the shared folder' }).click();
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
-    await row(page, 'notes').getByRole('button').click();
+    await row(page, 'notes').locator('button.efs-entry-open').click();
     await expect(row(page, 'todo.txt')).toBeVisible();
 
     // A folder's link is in the URL now, and survives a reload: openObject says it's a folder,
@@ -240,7 +240,7 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
       ).toBeLessThanOrEqual(0);
-      await row(page, 'notes').getByRole('button').focus();
+      await row(page, 'notes').locator('button.efs-entry-open').focus();
       await page.keyboard.press('Enter');
       await expect(row(page, 'todo.txt')).toBeVisible();
       const violations = (await new AxeBuilder({ page }).withTags(TAGS).analyze()).violations.map(

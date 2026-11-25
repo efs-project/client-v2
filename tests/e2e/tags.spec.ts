@@ -6,7 +6,8 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
-import { expect, preview } from './edit-support.ts';
+import { expect, preview, save } from './edit-support.ts';
+import { fileAtRoot, openRoot, row } from './folder-support.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -297,6 +298,97 @@ test("an address lists what's attached to it, the address first: its own rows un
     await expect(section(page, 'lens')).toHaveCount(2);
     await chain.idle(500);
     chain.step('Names under the address: not readable yet; Open the address');
+  } finally {
+    await chain.finish();
+  }
+});
+
+const tagDialog = (page: Page) =>
+  page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
+
+test('Tag from the Preview: suggestions from the word, a new tag said new, the review names what it creates; then Remove my tag', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-tagging',
+    'note.txt at the root by anvil #6; c.txt tagged /cars/tesla by anvil #0.',
+  );
+  try {
+    await fileAtRoot(chain, 6, 'note.txt', 'note\n');
+    await taggedFile(chain, 0, 'c.txt', [['cars', 'tesla']]);
+    await openRoot(page, chain);
+    await row(page, 'note.txt').locator('.efs-entry-open').click();
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('note');
+    await preview(page).locator('wa-button.efs-preview-tag').click();
+    const d = tagDialog(page);
+    await expect(d).toHaveAttribute('open', '');
+    const path = d.locator('wa-input.efs-tag-path input');
+
+    // Typing a word lists the places that use it, with their counts.
+    await path.fill('tesla');
+    // The plain /tesla first (registered with /cars/tesla's words, nothing filed there), then
+    // /cars/tesla.
+    const suggestion = d.locator('.efs-tag-suggestion');
+    await expect(suggestion).toHaveCount(2);
+    await expect(suggestion.first()).toContainText('/tesla');
+    await expect(suggestion.first()).toContainText(/about\W+0\W+tagged things, from everyone/);
+    await expect(suggestion.nth(1)).toContainText('/cars/tesla');
+    await expect(suggestion.nth(1)).toContainText(/about\W+1\W+tagged thing, from everyone/);
+    // A path nobody has used is said to be new before anything is signed.
+    await path.fill('notes/todo');
+    await expect(d.locator('.efs-tag-new')).toContainText(/Nobody has used\W+\/notes\/todo\W+yet/);
+    // A word the grammar refuses is named, and Review stays off.
+    await path.fill('Notes');
+    await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
+    await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
+    await page.waitForFunction(() => document.getAnimations().length === 0);
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-folder-save.efs-preview-tag-dialog')
+      .withTags(AXE_TAGS)
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step('Tag note.txt: suggestions for tesla; notes/todo is new; Notes is refused');
+
+    // "Not this" is a different act: its review says what it hides, and where it doesn't reach.
+    await path.fill('notes/todo');
+    await d.locator('wa-radio-group.efs-tag-stance wa-radio[value="deny"]').click();
+    await d.locator('wa-button.efs-tag-review').click();
+    await expect(d.locator('.efs-tag-says')).toContainText(/Say\W+0x.+is not\W+\/notes\/todo/);
+    await expect(d.locator('.efs-tag-reach')).toContainText(/It says nothing about\W+\/notes\b/);
+    await expect(d.locator('wa-button.efs-folder-send')).toHaveText('Not this');
+    await d.locator('wa-button', { hasText: 'Cancel' }).click();
+    await expect(d).not.toHaveAttribute('open');
+    chain.step('Not this: its review states its reach; Cancel sends nothing');
+
+    await preview(page).locator('wa-button.efs-preview-tag').click();
+    await path.fill('notes/todo');
+    await d.locator('wa-button.efs-tag-review').click();
+    await expect(d.locator('.efs-tag-says')).toContainText(/Tag\W+0x.+\/notes\/todo/);
+    await expect(d.locator('.efs-tag-creates')).toContainText(
+      /Creates\W+2\W+new tags:\W+\/notes, \/notes\/todo/,
+    );
+    await expect(d.locator('.efs-tag-public')).toContainText('Tags are public and permanent');
+    await d.locator('wa-button.efs-folder-send').click();
+    await expect(d).not.toHaveAttribute('open');
+    await expect(save(page, 'confirming').or(save(page, 'saved'))).toHaveCount(1, {
+      timeout: 20_000,
+    });
+    chain.step('Review: creates /notes and /notes/todo, public and permanent; Send');
+
+    // The tag lists it as yours; Remove my tag takes it back.
+    await go(page, '#/r/testnet/notes/todo');
+    const mine = section(page, 'lens');
+    await expect(mine).toHaveCount(1);
+    await expect(mine).toContainText('tagged by you');
+    await mine.locator('wa-button.efs-topic-untag').click();
+    const untag = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
+    await expect(untag.locator('.efs-tag-untag')).toContainText('Your tag goes');
+    await expect(untag.locator('wa-button.efs-folder-send')).toHaveText('Remove my tag');
+    await untag.locator('wa-button.efs-folder-send').click();
+    await expect(untag).not.toHaveAttribute('open');
+    await expect(topic(page).locator('.efs-topic-empty')).toBeVisible({ timeout: 20_000 });
+    await chain.idle(500);
+    chain.step('notes/todo lists it as yours; Remove my tag; the list reads again, empty');
   } finally {
     await chain.finish();
   }

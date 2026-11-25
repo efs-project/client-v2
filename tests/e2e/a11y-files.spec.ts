@@ -345,9 +345,9 @@ test('a removal opens on Keep it unless the person moves: focus put elsewhere wi
     await start(page, chain);
     // A slow show, so the review is on screen well before the dialog's own after-show step.
     // (Set on the element: the app's CSP refuses an injected style sheet.)
-    await page
-      .locator('wa-dialog.efs-folder-save')
-      .evaluate((el) => (el as HTMLElement).style.setProperty('--show-duration', '1500ms'));
+    await dialog(page).evaluate((el) =>
+      (el as HTMLElement).style.setProperty('--show-duration', '1500ms'),
+    );
     const keep = dialog(page).locator('wa-button.efs-folder-keep');
     const remove = row(page, 'mine.txt').locator('wa-button.efs-entry-remove');
 

@@ -18,13 +18,14 @@ import { appIcon } from '../../ui/icons.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import type { EditDoneDetail } from './editor.ts';
 import { placeLens } from './folder-model.ts';
+import type { EfsFolderSave } from './folder-save.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
-import { authorLabel } from './who.ts';
+import { authorLabel, shortId } from './who.ts';
 
 /**
  * The SDK's byte reads load only when there is a verified session to read through, so opening
@@ -823,6 +824,16 @@ export class EfsFilesPreview extends EfsElement {
                       @click=${() => this.#save(verified, open.file.sha256, content)}
                       ><span slot="start">${appIcon('download')}</span>${t('files.preview.save')}</wa-button
                     >
+                    ${
+                      this.host.saving.hosting.shared
+                        ? nothing
+                        : html`<wa-button
+                            size="s"
+                            class="efs-preview-tag"
+                            @click=${() => this.#tag(open.file.file)}
+                            ><span slot="start">${appIcon('tag')}</span>${t('files.tag.button')}</wa-button
+                          >`
+                    }
                   </div>
                   ${
                     this.#editable(content) && this.host.saving.hosting.shared
@@ -874,6 +885,21 @@ export class EfsFilesPreview extends EfsElement {
     }
   }
 
+  /**
+   * Tag: the file shown, by its permanent subject. It's named by its short id until the SDK names
+   * files in lists (a file's name isn't part of its link).
+   */
+  #tag(subject: string): void {
+    const dialog = this.querySelector<EfsFolderSave>(
+      'efs-files-folder-save.efs-preview-tag-dialog',
+    );
+    dialog?.open({
+      kind: 'tag',
+      targets: [{ kind: 'file', subject: subject as never }],
+      names: [shortId(subject)],
+    });
+  }
+
   override render() {
     const t = this.host.translator.t.bind(this.host.translator);
     const link = this.target.get();
@@ -910,7 +936,14 @@ export class EfsFilesPreview extends EfsElement {
       </div>`;
     }
     const reordered = this.#reordered.get();
+    const efs = verifiedEfs(this.host.reader.get());
     return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
+      <efs-files-folder-save
+        class="efs-preview-tag-dialog"
+        .host=${this.host}
+        .efs=${efs}
+        .lens=${efs?.lens.default}
+      ></efs-files-folder-save>
       ${
         reordered?.canonical === link.canonical
           ? html`<p class="efs-quiet efs-preview-reordered" role="status">
