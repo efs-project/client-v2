@@ -90,3 +90,91 @@ describe('saveHold', () => {
     expect(hold([own], own.sequenceId)).toEqual({ lapsed: false });
   });
 });
+
+describe('saveHold for folder operations: per (folder, name), fail-closed', () => {
+  const DIR = `0x${'d1'.repeat(32)}`;
+  const DIR2 = `0x${'d2'.repeat(32)}`;
+  const T = `0x${'7a'.repeat(32)}`;
+  const partial = (effect: unknown) => p({ state: 'PARTIAL', effect: effect as never });
+  const at = (folder: string, name: string) => (saves: SequenceProgress[]) =>
+    saveHold(saves, { account: ME, places: [{ folder, name }] });
+  const create = (folder: string, name: string) => ({
+    kind: 'files.create',
+    folder,
+    name,
+    file: FILE,
+    revision: T,
+  });
+
+  it('a create at a different name, or in another folder, does not wait', () => {
+    expect(at(DIR, 'b.txt')([partial(create(DIR, 'a.txt'))])).toEqual({ lapsed: false });
+    expect(at(DIR2, 'a.txt')([partial(create(DIR, 'a.txt'))])).toEqual({ lapsed: false });
+  });
+
+  it('a save at the same (folder, name) waits, whatever its kind; case does not matter', () => {
+    expect(at(DIR, 'a.txt')([partial(create(DIR.toUpperCase(), 'a.txt'))]).hold).toEqual({
+      kind: 'unsettled',
+    });
+    const folder = {
+      kind: 'files.createFolder',
+      folder: DIR,
+      name: 'a.txt',
+      directory: T,
+      subject: T,
+    };
+    expect(at(DIR, 'a.txt')([partial(folder)]).hold).toEqual({ kind: 'unsettled' });
+    const removed = {
+      kind: 'files.remove',
+      hide: false,
+      entries: [{ folder: DIR, name: 'a.txt', target: T }],
+    };
+    expect(at(DIR, 'a.txt')([partial(removed)]).hold).toEqual({ kind: 'unsettled' });
+    const restored = {
+      kind: 'files.restore',
+      entries: [{ folder: DIR, name: 'a.txt', target: T }],
+    };
+    expect(at(DIR, 'a.txt')([partial(restored)]).hold).toEqual({ kind: 'unsettled' });
+  });
+
+  it('names are exact: a different case is a different name (files-name/2)', () => {
+    expect(at(DIR, 'A.txt')([partial(create(DIR, 'a.txt'))])).toEqual({ lapsed: false });
+  });
+
+  it('a move holds both the place it leaves and the place it goes to', () => {
+    const move = {
+      kind: 'files.move',
+      moves: [{ folder: DIR, name: 'old.txt', toFolder: DIR2, toName: 'new.txt', target: T }],
+    };
+    expect(at(DIR, 'old.txt')([partial(move)]).hold).toEqual({ kind: 'unsettled' });
+    expect(at(DIR2, 'new.txt')([partial(move)]).hold).toEqual({ kind: 'unsettled' });
+    expect(at(DIR2, 'old.txt')([partial(move)])).toEqual({ lapsed: false });
+  });
+
+  it('an edit and a folder operation do not hold each other', () => {
+    expect(at(DIR, 'a.txt')([partial({ kind: 'files.edit', file: FILE, revision: T })])).toEqual({
+      lapsed: false,
+    });
+    expect(hold([partial(create(DIR, 'a.txt'))])).toEqual({ lapsed: false });
+  });
+
+  it('an unknown or missing effect holds every save of the account', () => {
+    const unknown = partial({ kind: 'files.somethingNew', folder: DIR, name: 'a.txt' });
+    expect(at(DIR2, 'zzz')([unknown]).hold).toEqual({ kind: 'unsettled' });
+    expect(hold([unknown]).hold).toEqual({ kind: 'unsettled' });
+    const none = p({ state: 'PARTIAL' });
+    delete (none as { effect?: unknown }).effect;
+    expect(at(DIR2, 'zzz')([none]).hold).toEqual({ kind: 'unsettled' });
+  });
+
+  it('a malformed folder effect (no entries) holds everything', () => {
+    expect(at(DIR2, 'zzz')([partial({ kind: 'files.remove', hide: false })]).hold).toEqual({
+      kind: 'unsettled',
+    });
+  });
+
+  it('a new save that names neither a file nor places is held by any unsettled save', () => {
+    expect(saveHold([partial(create(DIR, 'a.txt'))], { account: ME }).hold).toEqual({
+      kind: 'unsettled',
+    });
+  });
+});
