@@ -44,8 +44,13 @@ function wav(): Uint8Array {
 /** A WebM signature with nothing playable after it. */
 const BROKEN_WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02]);
 
-async function openWith(page: Page, chain: TestChain, bytes: Uint8Array): Promise<void> {
-  await chain.editAs?.(0, bytes);
+async function openWith(
+  page: Page,
+  chain: TestChain,
+  bytes: Uint8Array,
+  mediaType?: string,
+): Promise<void> {
+  await chain.editAs?.(0, bytes, mediaType === undefined ? {} : { mediaType });
   chain.step("The readme's author saves new bytes into it");
   await chain.attach(page);
   await serveConfig(page);
@@ -63,6 +68,42 @@ test('a verified PNG shows as an image from a blob: URL; it is not editable', as
     await expect(img).toHaveAttribute('src', /^blob:/);
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
     await expect(preview(page).locator('wa-button.efs-edit-start')).toHaveCount(0);
+    await expect(preview(page).locator('wa-button', { hasText: 'Save a copy' })).toBeVisible();
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a PNG that declares image/png (stored as a chunk to carry it) reads back and shows', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-media-declared-png',
+    'The readme holds a 1×1 PNG that declares image/png.',
+  );
+  try {
+    await openWith(page, chain, PNG, 'image/png');
+    const img = preview(page).locator('img.efs-preview-media');
+    await expect(img).toHaveAttribute('src', /^blob:/);
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("a PNG that declares video/mp4 isn't shown: the declared type is only a hint, and it disagrees", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-media-mismatch',
+    'The readme holds a 1×1 PNG that declares video/mp4.',
+  );
+  try {
+    await openWith(page, chain, PNG, 'video/mp4');
+    await expect(preview(page).locator('.efs-preview-mismatch')).toContainText(
+      /says it's .*video\/mp4.*different kind of file/,
+    );
+    await expect(preview(page).locator('img, audio, video')).toHaveCount(0);
     await expect(preview(page).locator('wa-button', { hasText: 'Save a copy' })).toBeVisible();
   } finally {
     await chain.finish();

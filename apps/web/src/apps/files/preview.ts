@@ -528,7 +528,11 @@ export class EfsFilesPreview extends EfsElement {
                           ${content.truncated ? html`<p class="efs-quiet">${t('files.preview.truncated')}</p>` : nothing}`
                       : content?.kind === 'media'
                         ? this.#mediaView(content, verified.length, t)
-                        : html`<p>${t('files.preview.binary')}</p>`
+                        : content?.kind === 'mismatch'
+                          ? html`<p class="efs-preview-mismatch">
+                              ${t('files.preview.mismatch', { declared: content.declared })}
+                            </p>`
+                          : html`<p>${t('files.preview.binary')}</p>`
                   }
                   <div class="wa-cluster wa-gap-xs">
                     ${

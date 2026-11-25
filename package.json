@@ -39,8 +39,8 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@biomejs/biome": "2.5.14",
-    "@efs/fixture": "file:vendor/efs-fixture-0.0.0-a4b2113.tgz",
-    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-78464e9.tgz",
+    "@efs/fixture": "file:vendor/efs-fixture-0.0.0-e28a31e.tgz",
+    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-e28a31e.tgz",
     "@playwright/test": "1.63.0",
     "@types/node": "24.13.6",
     "acorn": "8.15.0",

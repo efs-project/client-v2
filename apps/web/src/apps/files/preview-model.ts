@@ -15,7 +15,7 @@ import type {
   ReadOpts,
   RevisionRef,
 } from '@efs/sdk/files';
-import { type MediaKind, sniffMedia } from './media.ts';
+import { agrees, type MediaKind, sniffMedia } from './media.ts';
 
 export type PreviewTarget = FileRef | RevisionRef;
 
@@ -28,6 +28,11 @@ export type Content =
   | { readonly kind: 'text'; readonly text: string; readonly truncated: boolean }
   /** An image, audio or video the bytes' own signature names (see media.ts). */
   | { readonly kind: 'media'; readonly media: MediaKind }
+  /**
+   * The bytes are media, but the file declares a different kind of type (its descriptor's media
+   * type, a hint only). Neither is trusted, so nothing is shown; the person can save a copy.
+   */
+  | { readonly kind: 'mismatch'; readonly declared: string; readonly media: MediaKind }
   | { readonly kind: 'binary' };
 
 type Present = Extract<OpenResult, { status: 'PRESENT' }>;
@@ -53,11 +58,20 @@ export interface PreviewReads {
   readBytes(efs: Efs, file: OpenedFile, o?: BytesOpts): Promise<ByteRangeResult>;
 }
 
-/** Text if the bytes are valid UTF-8 without NUL; otherwise binary. Never guesses an encoding. */
-export function classifyContent(bytes: Uint8Array): Content {
+/**
+ * Text if the bytes are valid UTF-8 without NUL; otherwise binary. Never guesses an encoding.
+ * `declared` is the file's declared media type (`OpenedFile.mediaType`), a hint: it can stop a
+ * preview when it disagrees with the bytes, but it never makes bytes count as something they
+ * aren't, so text stays text whatever it declares.
+ */
+export function classifyContent(bytes: Uint8Array, declared?: string): Content {
   // Media first: SVG is text too, and is shown only as an image.
   const media = sniffMedia(bytes);
-  if (media) return { kind: 'media', media };
+  if (media) {
+    return declared !== undefined && !agrees(declared, media)
+      ? { kind: 'mismatch', declared, media }
+      : { kind: 'media', media };
+  }
   if (bytes.includes(0)) return { kind: 'binary' };
   let text: string;
   try {
@@ -114,7 +128,7 @@ export async function runPreview(
   if (signal.aborted) return;
   emit(
     bytes.grade === 'VERIFIED' && bytes.bytes
-      ? { phase: 'read', open, bytes, content: classifyContent(bytes.bytes) }
+      ? { phase: 'read', open, bytes, content: classifyContent(bytes.bytes, open.file.mediaType) }
       : { phase: 'read', open, bytes },
   );
 }
