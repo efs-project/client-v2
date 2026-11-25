@@ -952,3 +952,79 @@ test('the folder tree: read as it opens, follows the trail both ways, leaves onl
     await chain.finish();
   }
 });
+
+const overview = (page: Page) => page.locator('efs-files-overview');
+
+test("the Overview shows a folder's README formatted (verified text only), links kept safe; without one, its summary", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-readme',
+    'guide/ by anvil #6 at the root, holding a README.md in the EFS Markdown subset.',
+  );
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const guide = (
+        (await done(
+          await files.planCreateFolder(efs, writer, { folder: root, name: 'guide', lens }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      const readme = [
+        '# Welcome',
+        '',
+        `This folder has **notes** and [docs](https://example.org/docs). Back to [the root](${objectLink(root.directory)}).`,
+        '',
+        '- one',
+        '- two',
+        '',
+        '<script>alert(1)</script>',
+        '',
+        '[not a link](javascript:alert(1))',
+      ].join('\n');
+      await done(
+        await files.planCreateFile(efs, writer, {
+          folder: guide,
+          name: 'README.md',
+          content: new TextEncoder().encode(readme),
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await expect(overview(page).locator('.efs-folder-summary')).toContainText(
+      "The realm's shared folder.",
+    );
+    chain.step('The root has no README: the Overview shows its summary');
+
+    await row(page, 'guide').locator('button.efs-entry-open').click();
+    const body = overview(page).locator('.efs-readme-body');
+    await expect(body.locator('h3')).toHaveText('Welcome');
+    await expect(body.locator('strong')).toHaveText('notes');
+    await expect(body.locator('li')).toHaveCount(2);
+    const external = body.locator('a', { hasText: 'docs' });
+    await expect(external).toHaveAttribute('href', 'https://example.org/docs');
+    await expect(external).toHaveAttribute('rel', 'noopener noreferrer');
+    // Raw HTML stays text; a javascript: link stays text.
+    await expect(body).toContainText('<script>alert(1)</script>');
+    await expect(overview(page).locator('script')).toHaveCount(0);
+    await expect(body.locator('a', { hasText: 'not a link' })).toHaveCount(0);
+    await expect(overview(page).locator('.efs-readme-caption')).toContainText('README.md');
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-overview')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step('Open guide/: its README, verified, formatted; raw HTML and javascript: stay text');
+
+    // An EFS link in the README opens in the app.
+    await body.locator('a', { hasText: 'the root' }).click();
+    await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
+    await expect(overview(page).locator('.efs-folder-summary')).toContainText(
+      "The realm's shared folder.",
+    );
+    await chain.idle(500);
+    chain.step('Its EFS link opens the root, in the app');
+  } finally {
+    await chain.finish();
+  }
+});

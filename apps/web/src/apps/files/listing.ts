@@ -102,6 +102,7 @@ export class EfsFilesListing extends EfsElement {
     nav: { attribute: false },
     object: { attribute: false },
     composer: { attribute: false },
+    shown: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
@@ -109,6 +110,8 @@ export class EfsFilesListing extends EfsElement {
   declare object: ObjectKindState;
   /** "New text file": the file being written (the Preview shows its editor). */
   declare composer: Composer | undefined;
+  /** Where this pane publishes what it lists (the Overview reads the folder's README from it). */
+  declare shown: { set(s: ListingState | undefined): void } | undefined;
 
   #state = state<PaneState | undefined>(undefined);
   #kind = state<KindFilter>('all');
@@ -145,6 +148,10 @@ export class EfsFilesListing extends EfsElement {
 
   start(scope: OwnerScope): void {
     this.#scope = scope;
+    effect(scope, () => {
+      const s = this.#state.get();
+      queueMicrotask(() => this.shown?.set(s?.phase === 'load-failed' ? undefined : s));
+    });
     effect(scope, () => {
       const efs = verifiedEfs(this.host.reader.get());
       // A different session (network, deployment): back to that realm's root.
