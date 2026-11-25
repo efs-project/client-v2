@@ -13,6 +13,7 @@ import { loadOperatorConfig } from '../platform/settings/config.ts';
 import { DEFAULT_SETTINGS } from '../platform/settings/model.ts';
 import { memorySettingsStore, openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
+import { createDraftStore } from '../shell/drafts.ts';
 import { createOsState } from '../shell/os-state.ts';
 import { createReaderSession } from '../shell/reader-state.ts';
 import { createSavesSession } from '../shell/saves-state.ts';
@@ -131,6 +132,8 @@ async function boot(): Promise<void> {
     sharedGateway: hosting.shared,
   });
   shell.saves = createSavesSession(reader.state, scope, { enabled: !hosting.shared });
+  // Unsaved edits, in this tab's memory only.
+  shell.drafts = createDraftStore();
   shell.hosting = hosting;
   shell.translator = translator;
   shell.apps = APPS;

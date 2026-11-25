@@ -9,6 +9,7 @@ import type { Hosting } from '../platform/hosting.ts';
 import type { OwnerScope } from '../platform/scope.ts';
 import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
+import type { DraftStore } from './drafts.ts';
 import type { NetworkState } from './network-state.ts';
 import type { ReaderState } from './reader-state.ts';
 import type { CheckResult, Draft, Unconfirmed } from './saves-state.ts';
@@ -69,6 +70,11 @@ export interface SavingHost {
   readonly reopening: ReadonlySignal<Draft | undefined>;
   /** Takes the pending reopen when its file (`link`) is the one on screen. */
   takeReopen(link: string): Draft | undefined;
+  /**
+   * Unsaved edits, one per file, kept in this tab's memory across navigation (never stored).
+   * While any exist, the shell asks before the tab is reloaded or closed.
+   */
+  readonly drafts: DraftStore;
   /** How this copy is hosted: on a shared IPFS path gateway, saving is off (and says why). */
   readonly hosting: Hosting;
 }

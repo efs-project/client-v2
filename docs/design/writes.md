@@ -47,6 +47,18 @@ saves session <── journal (non-creating check) <── every verified sessio
 - **Not sent stays visible.** A refusal in the review keeps the dialog and the text, with "Send again" (which resumes the same save). Cancel drops a save that was never sent. A thrown JOURNAL_UNAVAILABLE (for example a private window) reads as "saving is turned off here".
 - **The wallet's answer is not success.** The banner reconciles against the ledger: every 4 s while a part is in flight, every 12 s while confirming. One save that can't be read right now keeps its last known state and hides nothing else.
 
+## Unsaved edits (slice H)
+
+An edit survives moving around the app. Open another file, another app or Settings, come back, and the editor is open on the same text: "Your unsaved edit is back." It lives in this tab's memory only (`shell/drafts.ts`: one per file, keyed by the file's canonical route). Nothing is written to storage, so the shared-gateway rule and the "storage only for settings and the journal" rule are unchanged.
+
+- **The edit keeps its base.** It's kept with the revision it started from (or the newer one the person chose to save over), not just its text. If the file changed while the person was away, the editor says "This file has changed since you started it", and Review plans from the old base, so it finds BASE_CHANGED and asks. Without the base, coming back would plan from the new version and save over another author's change unasked.
+- **Discarded only after asking.** Cancel with changes opens "Discard your edit?". Keep editing is focused first, so Enter or Escape keeps the edit and returns to the text; Discard takes a deliberate Tab. Cancel with no changes closes at once. Typing back to the original text keeps nothing.
+- **Closing the editor ends the edit.** Saving (the banner keeps the text for "Review changes"), Discard, and "Discard my edit and show the new version" all drop the kept edit. Leaving the file never does.
+- **"Review changes" never replaces a newer edit unasked.** If the person has since started a different unsaved edit of that file, the banner asks first: "Replace my newer edit" stops the old save and brings its edit back; "Keep my newer edit" changes nothing.
+- **A reload or closing the tab asks first** while any edit is unsaved (the browser's own "Leave site?" prompt, from `beforeunload`). The listener is attached only while an edit exists, so the page stays eligible for the back/forward cache otherwise. iOS Safari has no `beforeunload`: there, a reload or closing the tab loses the edit without asking (`docs/web-platform/feature-policy.md`).
+- **An edit the editor can't show is still reachable.** If the file can't be opened as editable text when the person comes back (gone, no longer text, too large, or unreadable right now), the Preview says "You have an unsaved edit of this file…" with "Discard my unsaved edit", so the leave prompt never sticks with no way to clear it. A later read that gets the text reopens the editor on the edit.
+- **Not yet:** a marker on files with unsaved edits in the file list. That waits for folder listing, which is held.
+
 ## Testing
 
 `tests/e2e/edit.spec.ts` and `tests/e2e/edit-failures.spec.ts` drive the real UI and SDK through the whole flow, in three modes (`tests/e2e/chain.ts`):
@@ -73,6 +85,13 @@ The failure cases, all in one tab (slice D). Each asserts what the wallet was as
 10. **Wallet switched networks before Send.** NOT_SENT (WALLET_MISMATCH): "Switch your wallet to … on Testnet". The wallet switches back; Send again continues the same save. One broadcast.
 11. **Another author changed the file.** Review finds BASE_CHANGED; "Save my edit over the new version" plans from the new head. One send.
 
+Unsaved edits (slice H). `edit-drafts.spec.ts`, against the chain like the cases above:
+
+12. **The file changed while the edit was kept.** Edit, leave the file, and the author saves a new version meanwhile. Back on the file the edit returns, flagged as started on an older version; Review finds BASE_CHANGED and nothing is sent until "Save my edit over the new version". One send, and the saved edit isn't kept as unsaved.
+13. **"Review changes" over a newer unsaved edit.** After case 8's lost race, the person starts a newer edit of the file and leaves it. Review changes asks; "Keep my newer edit" changes nothing, "Replace my newer edit" stops the old save and reopens its text. One send.
+
+`drafts.spec.ts` (replayed reads, no saving, all browsers) covers leaving and coming back, Cancel asking (Keep editing, Escape, Discard), an unchanged edit keeping nothing, a kept edit whose file can't be read (said, and discardable), the leave-page prompt only while an edit is unsaved (and Chromium's real prompt on closing the tab), and the discard dialog by keyboard alone with axe in light and dark.
+
 **Deterministic timing.** The reload test pauses the page clock as soon as the lost send is seen. The SDK's next ledger check waits on a timer, so it can't start; its first check finishes on answers already in flight. The test leaves once no RPC is in flight (`chain.idle()`), so the recording and its replay always contain exactly one check before the reload.
 
 **Transcripts are recorded, never edited.** Replay matches calls by order, so the order belongs to the caller: the client records its own (agreed with the SDK dev, 2026-11-24). The SDK's edit transcripts remain the SDK's contract tests.
@@ -92,7 +111,5 @@ The failure cases, all in one tab (slice D). Each asserts what the wallet was as
 
 ## Later
 
-- `onProgress` (SDK #31) for "Approve part 2 of 5 in your wallet" during long sequential saves.
-- A draft kept across navigation. Today, leaving the file closes the editor, and an unsent draft is lost; nothing is ever saved silently.
-- The author's display name in place of a shortened principal id.
+- The author's display name in place of a shortened principal id. Held (PM, 2026-11-25): names come from ENS (network calls beyond the person's RPC list, a privacy question) or from EFS labels (C5, tied to the tag discussion).
 - Live deployment documents must carry the `chain` block before writes ship. Without it, planning answers UNKNOWN ("Couldn't check the file on the network").

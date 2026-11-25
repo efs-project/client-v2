@@ -30,7 +30,10 @@ export type SavesState =
 
 /** The edit a save was made from, kept in this tab's memory only (never stored). */
 export interface Draft {
-  /** The route to come back to (`#/r/<realm>/<link>`). */
+  /**
+   * The file's canonical route to come back to (`#/r/<realm>/<link>`), which is also its key
+   * among unsaved edits (shell/drafts.ts).
+   */
   readonly route: string;
   /** The file's canonical link, to recognize it when it's open again. */
   readonly link: string;

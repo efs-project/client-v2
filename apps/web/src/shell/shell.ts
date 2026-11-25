@@ -24,6 +24,7 @@ import {
   type AppMount,
   resolveLayout,
 } from './apps.ts';
+import type { DraftStore } from './drafts.ts';
 import { OPEN_SETTINGS_EVENT } from './network-indicator.ts';
 import type { OsState } from './os-state.ts';
 import type { ReaderSession } from './reader-state.ts';
@@ -52,6 +53,7 @@ export class EfsShell extends EfsElement {
     wallet: { attribute: false },
     writer: { attribute: false },
     saves: { attribute: false },
+    drafts: { attribute: false },
     hosting: { attribute: false },
     translator: { attribute: false },
     apps: { attribute: false },
@@ -61,6 +63,8 @@ export class EfsShell extends EfsElement {
   declare wallet: WalletSession;
   declare writer: WriterSession;
   declare saves: SavesSession;
+  /** Unsaved edits, kept in this tab's memory across navigation. */
+  declare drafts: DraftStore;
   /** How this copy is hosted (a shared IPFS path gateway runs read-only). */
   declare hosting: Hosting;
   declare translator: Translator;
@@ -98,6 +102,19 @@ export class EfsShell extends EfsElement {
       );
     this.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
     this.#shellScope.defer(() => this.removeEventListener(OPEN_SETTINGS_EVENT, onOpen));
+    // Unsaved edits live only in this tab: ask before a reload or closing the tab loses them.
+    // Listening only while one exists keeps the page eligible for the back/forward cache
+    // otherwise. (iOS Safari has no beforeunload: there, nothing asks.)
+    const guard = (event: BeforeUnloadEvent) => event.preventDefault();
+    let guarding = false;
+    effect(this.#shellScope, () => {
+      const unsaved = this.drafts.count.get() > 0;
+      if (unsaved === guarding) return;
+      guarding = unsaved;
+      if (unsaved) addEventListener('beforeunload', guard);
+      else removeEventListener('beforeunload', guard);
+    });
+    this.#shellScope.defer(() => removeEventListener('beforeunload', guard));
     // Save outcomes as they change ("Saved · confirming", "Saved", "Partially saved (2 of 5)…").
     effect(this.#shellScope, () => {
       const s = this.saves.state.get();
@@ -252,6 +269,7 @@ export class EfsShell extends EfsElement {
       track: (progress, draft) => saves.track(progress, draft),
       reopening: saves.reopening,
       takeReopen: (link) => saves.takeReopen(link),
+      drafts: this.drafts,
       hosting: this.hosting,
     };
   }
@@ -338,6 +356,7 @@ export class EfsShell extends EfsElement {
             ? html`<efs-saves-banner
                 slot="banner"
                 .saves=${this.saves}
+                .drafts=${this.drafts}
                 .writer=${this.writer}
                 .network=${this.os.network.get()}
                 .translator=${this.translator}
