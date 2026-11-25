@@ -92,6 +92,29 @@ test('an unsaved edit survives leaving the file, and is discarded only after ask
   expect(errors).toEqual([]);
 });
 
+test("a kept edit whose file can't be opened for editing is said, and can be discarded", async ({
+  page,
+}) => {
+  await openSeeded(page);
+  await preview(page).locator('wa-button.efs-edit-start').click();
+  await textarea(page).fill('Meeting moved to 11:00.\n');
+  await page.evaluate(() => {
+    location.hash = '#/files';
+  });
+  await expect(editor(page)).toHaveCount(0);
+  // From now on the network can't be read: the file can't be opened, let alone edited.
+  await page.route(/^https:\/\/rpc\.example\.net\//, (route) => route.abort());
+  await page.goBack();
+  const notice = preview(page).locator('.efs-draft-unreachable');
+  await expect(notice).toContainText('You have an unsaved edit of this file');
+  await expect(editor(page)).toHaveCount(0);
+  expect(await leavingAsks(page)).toBe(true);
+  await notice.locator('wa-button.efs-draft-discard').click();
+  await expect(notice).toHaveCount(0);
+  await expect(preview(page).locator('.efs-preview')).toBeFocused();
+  expect(await leavingAsks(page)).toBe(false);
+});
+
 test('an edit with no changes closes at once and keeps nothing', async ({ page }) => {
   await openSeeded(page);
   await preview(page).locator('wa-button.efs-edit-start').click();

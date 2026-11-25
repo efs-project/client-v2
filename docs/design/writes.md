@@ -56,6 +56,7 @@ An edit survives moving around the app. Open another file, another app or Settin
 - **Closing the editor ends the edit.** Saving (the banner keeps the text for "Review changes"), Discard, and "Discard my edit and show the new version" all drop the kept edit. Leaving the file never does.
 - **"Review changes" never replaces a newer edit unasked.** If the person has since started a different unsaved edit of that file, the banner asks first: "Replace my newer edit" stops the old save and brings its edit back; "Keep my newer edit" changes nothing.
 - **A reload or closing the tab asks first** while any edit is unsaved (the browser's own "Leave site?" prompt, from `beforeunload`). The listener is attached only while an edit exists, so the page stays eligible for the back/forward cache otherwise. iOS Safari has no `beforeunload`: there, a reload or closing the tab loses the edit without asking (`docs/web-platform/feature-policy.md`).
+- **An edit the editor can't show is still reachable.** If the file can't be opened as editable text when the person comes back (gone, no longer text, too large, or unreadable right now), the Preview says "You have an unsaved edit of this file…" with "Discard my unsaved edit", so the leave prompt never sticks with no way to clear it. A later read that gets the text reopens the editor on the edit.
 - **Not yet:** a marker on files with unsaved edits in the file list. That waits for folder listing, which is held.
 
 ## Testing
@@ -89,7 +90,7 @@ Unsaved edits (slice H). `edit-drafts.spec.ts`, against the chain like the cases
 12. **The file changed while the edit was kept.** Edit, leave the file, and the author saves a new version meanwhile. Back on the file the edit returns, flagged as started on an older version; Review finds BASE_CHANGED and nothing is sent until "Save my edit over the new version". One send, and the saved edit isn't kept as unsaved.
 13. **"Review changes" over a newer unsaved edit.** After case 8's lost race, the person starts a newer edit of the file and leaves it. Review changes asks; "Keep my newer edit" changes nothing, "Replace my newer edit" stops the old save and reopens its text. One send.
 
-`drafts.spec.ts` (replayed reads, no saving, all browsers) covers leaving and coming back, Cancel asking (Keep editing, Escape, Discard), an unchanged edit keeping nothing, the leave-page prompt only while an edit is unsaved (and Chromium's real prompt on closing the tab), and the discard dialog by keyboard alone with axe in light and dark.
+`drafts.spec.ts` (replayed reads, no saving, all browsers) covers leaving and coming back, Cancel asking (Keep editing, Escape, Discard), an unchanged edit keeping nothing, a kept edit whose file can't be read (said, and discardable), the leave-page prompt only while an edit is unsaved (and Chromium's real prompt on closing the tab), and the discard dialog by keyboard alone with axe in light and dark.
 
 **Deterministic timing.** The reload test pauses the page clock as soon as the lost send is seen. The SDK's next ledger check waits on a timer, so it can't start; its first check finishes on answers already in flight. The test leaves once no RPC is in flight (`chain.idle()`), so the recording and its replay always contain exactly one check before the reload.
 

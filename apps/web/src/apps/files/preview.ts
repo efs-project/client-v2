@@ -349,6 +349,49 @@ export class EfsFilesPreview extends EfsElement {
     return link.status === 'target' ? link.canonical : '';
   }
 
+  /**
+   * An unsaved edit of this file that the editor can't show, because the file can't be opened
+   * as editable text now: gone, no longer text, too large, or unreadable right now. Said, with a
+   * way to discard it, so the leave prompt never stays with no way to clear it. If a later read
+   * gets the text, the editor reopens on the edit as usual.
+   */
+  #unreachableDraft(s: PaneState | undefined, t: Translator['t']) {
+    const drafts = this.host.saving.drafts;
+    const key = this.#draftKey();
+    // Read the count so this re-renders when the edit is dropped.
+    if (drafts.count.get() === 0 || key === undefined || !drafts.get(key)) return nothing;
+    if (!s || s.phase === 'opening' || s.phase === 'reading') return nothing;
+    const editable =
+      s.phase === 'read' &&
+      s.bytes.grade === 'VERIFIED' &&
+      s.bytes.bytes !== undefined &&
+      this.#editable(s.content);
+    if (editable) return nothing;
+    return html`<wa-callout variant="warning" size="small" class="efs-draft-unreachable">
+      <span slot="icon">${appIcon('triangle-exclamation')}</span>
+      <div class="wa-stack wa-gap-xs">
+        <p>${t('files.edit.unreachable')}</p>
+        <div>
+          <wa-button
+            size="s"
+            appearance="outlined"
+            class="efs-draft-discard"
+            @click=${() => {
+              drafts.drop(key);
+              this.#editing.set(false);
+              this.#resumed = false;
+              // The button goes away with the notice: keep focus in the pane.
+              void this.updateComplete.then(() =>
+                this.querySelector<HTMLElement>('.efs-preview')?.focus(),
+              );
+            }}
+            >${t('files.edit.discardUnreachable')}</wa-button
+          >
+        </div>
+      </div>
+    </wa-callout>`;
+  }
+
   /** The key of this file's unsaved edit: its canonical route in the realm in view. */
   #draftKey(): string | undefined {
     const location = this.host.location.get();
@@ -578,6 +621,7 @@ export class EfsFilesPreview extends EfsElement {
     if (notice) return notice;
     const s = this.#state.get();
     return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
+      ${this.#unreachableDraft(s, t)}
       ${s ? this.#body(s, t) : html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${t('files.preview.opening')}</p>`}
     </div>`;
   }

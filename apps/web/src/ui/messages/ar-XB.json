@@ -281,6 +281,8 @@
   "files.edit.discardBody": "‮Your edit isn't saved, and this tab is the only place it's kept. Once discarded, it can't be brought back.‬",
   "files.edit.keepEditing": "‮Keep editing‬",
   "files.edit.discard": "‮Discard edit‬",
+  "files.edit.unreachable": "‮You have an unsaved edit of this file, but the file can't be opened for editing as it is now. Your edit stays in this tab until you discard it.‬",
+  "files.edit.discardUnreachable": "‮Discard my unsaved edit‬",
   "files.edit.unconfirmed": "‮We couldn't confirm your last save yet. The banner above shows it when the network answers.‬",
   "review.prepareAgain": "‮Prepare again‬",
   "review.close": "‮Close‬",
