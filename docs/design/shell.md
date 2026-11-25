@@ -83,10 +83,21 @@ type PaneLayout = { panes: readonly { view: string; size?: number }[] };
 
 ## Routing
 
-- The hash route is `#/<app>/<app-defined rest>`. An empty route opens the default app.
-- The router hands the app only its own `rest`. The File Browser's link grammar is the SDK's (path, object and revision links), and the client never invents one.
-- This is an **internal** route, not a frozen public link format.
-- Route state is a Signal. A pane change replaces history rather than pushing, so "back" stays meaningful.
+The client ↔ SDK routing contract (PM ledger, 2026-11-24; naming review §6):
+
+| Family | Fragment | Who parses it | Permanent? |
+|---|---|---|---|
+| Object link | `#/r/<realm>/~efs/o/<subject>[?lens=…]` | the SDK's `parseLink` | yes |
+| Revision link | `#/r/<realm>/~efs/v/<record>` | the SDK's `parseLink` | yes |
+| Path link | `#/r/<realm>/<path>` | the SDK (after the folder ruling) | yes |
+| App route | `#/<app>/<rest>` | the app | no (bookmarkable UI state) |
+
+- `<realm>` is a network `id` from `efs.config.json` (`sepolia`, `local-1`) or the full form `eip155:<chainId>/0x<ledger>`, matched against each network's `chainId` and `core` (its ledger proxy address). A realm the site doesn't configure is reported with its full id, never swapped for another network.
+- **Reservations**, so the families never collide: app ids are 2–32 characters of `[a-z0-9-]` starting with a letter, with no dot (keeping a later ENS-named layer such as `#/alice.eth/…` free). Every single-letter first segment is reserved for link forms; `r` is the only one in use.
+- Realm links open in the default app (the File Browser handles links). The route's realm picks the network for the view; Settings' choice is the *default network*, used only when the route names none.
+- `#/` is replaced (not pushed) with `#/r/<default network>/`. Links are replaced with the SDK's canonical form (for example, uppercase hex) in place.
+- Routes longer than 8,192 characters (a 64-entry `?lens=` is about 4.3 KB) are refused with a visible message, never truncated.
+- Link strings are only ever produced by the SDK's `link()` and parsed by its `parseLink()`. The router reads only the realm head; it moves to the SDK's `splitRealm` from the dependency-free `@efs/sdk/links` once that ships, so even the realm grammar lives in the SDK.
 
 ## Settings
 
@@ -139,7 +150,7 @@ type PaneLayout = { panes: readonly { view: string; size?: number }[] };
 | A required browser feature | The static "can't run" message from the boot probe; none of our code runs |
 | A startup module or the stylesheet (Web Awesome and app styles) | The static "didn't load" message with a Reload link to this document |
 | The icon sprite | The working shell, with icon-only controls shown as text |
-| An app's lazy chunk | The shell, with "This app didn't load" and Try again (a page reload: browsers keep a failed module fetch in their module map, so an in-page retry can't succeed) |
+| An app's lazy chunk | The shell, with "This app didn't load" and Try again (a page reload: browsers keep a failed module fetch in their module map, so an in-page retry can't succeed). WebKit needs one more condition: an app's entry chunk must statically import only startup chunks. Otherwise, once the chunk has failed, WebKit keeps the failure across reloads (measured during slice B), so `check-graph` enforces it. |
 | The operator config is absent or invalid | The shell; the File Browser explains there is no usable network. The build ships an empty `efs.config.json`, so a normal visit never 404s |
 
 ## Outcomes

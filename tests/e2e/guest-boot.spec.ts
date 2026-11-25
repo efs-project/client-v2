@@ -50,7 +50,8 @@ test('the route names the app; unknown apps get an honest message', async ({ pag
   await expect(main.locator('code')).toHaveText('no-such-app');
   await main.getByRole('link', { name: 'Open the File Browser' }).click();
   await expect(page.locator('efs-pane-host')).toBeVisible();
-  expect(new URL(page.url()).hash).toBe('#/files');
+  // Home: the default realm's root, or (as here, with no networks) the bare root.
+  expect(new URL(page.url()).hash).toBe('#/');
 });
 
 test('the skip link moves focus to main without changing the route', async ({

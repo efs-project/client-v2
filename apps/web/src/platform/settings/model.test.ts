@@ -4,6 +4,8 @@ import {
   DEFAULT_SETTINGS,
   effectiveNetwork,
   endpointLabel,
+  findNetwork,
+  type NetworkDefinition,
   type OperatorConfig,
   readConfig,
   readSettings,
@@ -17,6 +19,7 @@ const config: OperatorConfig = {
       id: 'local',
       label: 'Local chain',
       chainId: 31337,
+      core: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
       deployment: './deployments/local.json',
       release: './deployments/release.json',
       rpcs: [{ url: 'http://127.0.0.1:8545/', enabled: true }],
@@ -27,6 +30,7 @@ const config: OperatorConfig = {
       id: 'other',
       label: 'Other',
       chainId: 11155111,
+      core: '0x00000000000000000000000000000000000000aa',
       deployment: 'd.json',
       release: 'r.json',
       rpcs: [{ url: 'https://rpc.example/', enabled: true }],
@@ -137,6 +141,53 @@ describe('readConfig', () => {
 
   it('rejects documents that are not efs-config/1', () => {
     expect(readConfig({ networks: [] }).status).toBe('INVALID');
+  });
+
+  it('requires each network to name its ledger (core), stored lowercase', () => {
+    const { core: _omitted, ...noCore } = config.networks[0] as NetworkDefinition;
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [noCore, { ...config.networks[1], core: `0x${'AB'.repeat(20)}` }],
+    });
+    if (read.status !== 'OK') throw new Error('expected OK');
+    expect(read.config.networks.map((n) => n.id)).toEqual(['other']);
+    expect(read.config.networks[0]?.core).toBe(`0x${'ab'.repeat(20)}`);
+    expect(read.issues).toHaveLength(1);
+  });
+});
+
+describe('readSettings content', () => {
+  it('fetching from publisher addresses is off unless explicitly true', () => {
+    for (const value of [undefined, 'yes', 1, false]) {
+      const read = readSettings({
+        schema: 'efs-settings/1',
+        content: { publisherLocations: value },
+      });
+      expect(read.status === 'OK' && read.settings.content.publisherLocations).toBe(false);
+    }
+    const on = readSettings({ schema: 'efs-settings/1', content: { publisherLocations: true } });
+    expect(on.status === 'OK' && on.settings.content.publisherLocations).toBe(true);
+  });
+});
+
+describe('findNetwork', () => {
+  it('resolves an alias by id and the full form by chain id and ledger', () => {
+    expect(findNetwork(config, { kind: 'alias', id: 'other' })?.id).toBe('other');
+    expect(
+      findNetwork(config, {
+        kind: 'full',
+        chainId: 31337,
+        ledger: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
+      })?.id,
+    ).toBe('local');
+    expect(findNetwork(config, { kind: 'alias', id: 'mainnet' })).toBeUndefined();
+    expect(
+      findNetwork(config, {
+        kind: 'full',
+        chainId: 1,
+        ledger: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
+      }),
+    ).toBeUndefined();
   });
 });
 

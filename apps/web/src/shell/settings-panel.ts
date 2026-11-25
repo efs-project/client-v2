@@ -6,6 +6,8 @@ import {
   COLOR_MODES,
   type ColorMode,
   DEFAULT_SETTINGS,
+  defaultNetwork,
+  EMPTY_CONFIG,
   type Endpoint,
   type NetworkDefinition,
   type NetworkOverrides,
@@ -20,6 +22,7 @@ import { EfsElement, html, nothing } from '../ui/element.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
 import type { OsState } from './os-state.ts';
+import type { ReaderSession } from './reader-state.ts';
 
 type Section = 'appearance' | 'network' | 'data' | 'about';
 
@@ -70,9 +73,11 @@ type ListKey = keyof NetworkOverrides;
 export class EfsSettingsPanel extends EfsElement {
   static override properties = {
     os: { attribute: false },
+    reader: { attribute: false },
     translator: { attribute: false },
   };
   declare os: OsState;
+  declare reader: ReaderSession;
   declare translator: Translator;
 
   #notice = state<MessageId | undefined>(undefined);
@@ -214,8 +219,14 @@ export class EfsSettingsPanel extends EfsElement {
     const t = this.translator.t.bind(this.translator);
     const config = this.os.config.get();
     const networks = config.status === 'OK' ? config.config.networks : [];
+    // The endpoint lists edit the network in view (a link's realm, or the default); the select
+    // chooses the default network, which only applies when a link doesn't name one.
     const definition = this.#selectedNetwork();
     const settings = this.os.settings.get();
+    const fallback = defaultNetwork(
+      config.status === 'OK' ? config.config : EMPTY_CONFIG,
+      settings,
+    );
     const readOnly = this.os.settingsInfo.get().readOnly;
     const overrides = definition ? (settings.network.overrides[definition.id] ?? {}) : {};
     const list = (key: ListKey, heading: MessageId, kind: 'rpc' | 'gateway') =>
@@ -245,7 +256,8 @@ export class EfsSettingsPanel extends EfsElement {
           ? html`<p>${t('settings.network.none')}</p>`
           : html`<wa-select
               label=${t('settings.network.select')}
-              .value=${definition?.id ?? ''}
+              hint=${t('settings.network.selectHint')}
+              .value=${fallback?.id ?? ''}
               ?disabled=${readOnly || networks.length < 2}
               @change=${(event: Event) => {
                 const id = (event.target as HTMLElement & { value: string }).value;
@@ -259,11 +271,125 @@ export class EfsSettingsPanel extends EfsElement {
               )}
             </wa-select>`
       }
+      ${
+        definition
+          ? html`<h4 class="efs-network-heading">
+              ${t('settings.network.inView', { network: definition.label })}
+            </h4>`
+          : nothing
+      }
+      ${this.#networkStatus()}
       <p class="efs-quiet">${t('settings.network.privacy')}</p>
+      <div class="wa-stack wa-gap-2xs">
+        <wa-switch
+          class="efs-publisher-locations"
+          ?checked=${settings.content.publisherLocations}
+          ?disabled=${readOnly}
+          @change=${(event: Event) => {
+            const on = (event.target as HTMLInputElement).checked;
+            void this.#save((s) => ({ ...s, content: { ...s.content, publisherLocations: on } }));
+          }}
+          >${t('settings.content.publisherLocations')}</wa-switch
+        >
+        <p class="efs-quiet">${t('settings.content.publisherLocationsHint')}</p>
+      </div>
       ${list('rpcs', 'settings.network.rpcs', 'rpc')}
       ${list('ipfsGateways', 'settings.network.ipfs', 'gateway')}
       ${list('arweaveGateways', 'settings.network.arweave', 'gateway')}
     </section>`;
+  }
+
+  /** What the reader session found: the pin's outcome, and the evidence behind it. */
+  #networkStatus() {
+    const t = this.translator.t.bind(this.translator);
+    const reader = this.reader.state.get();
+    const retry = (event: Event) => {
+      event.stopPropagation();
+      this.reader.retry();
+    };
+    const problem = (message: MessageId, values?: Record<string, string | number>) =>
+      html`<wa-callout variant="danger" class="efs-network-status">
+        <span slot="icon">${appIcon('circle-exclamation')}</span>
+        <div class="wa-stack wa-gap-xs">
+          <p>${t(message, values)}</p>
+          <div>
+            <wa-button size="s" @click=${retry}
+              ><span slot="start">${appIcon('rotate-right')}</span>${t('outcome.retry')}</wa-button
+            >
+          </div>
+        </div>
+      </wa-callout>`;
+    switch (reader.status) {
+      case 'OFF':
+        return nothing;
+      case 'OPENING':
+      case 'PINNING':
+        return html`<p class="efs-network-status wa-cluster wa-gap-xs" role="status">
+          <wa-spinner></wa-spinner>${t('settings.network.status.checking')}
+        </p>`;
+      case 'DEPLOYMENT_UNAVAILABLE':
+        return problem('settings.network.status.deploymentUnavailable');
+      case 'DEPLOYMENT_INVALID':
+        return problem('settings.network.status.deploymentInvalid');
+      case 'DEPLOYMENT_MISMATCH':
+        // Identifiers, passed as strings so they are never digit-grouped.
+        return problem(
+          reader.field === 'chainId'
+            ? 'settings.network.status.chainMismatch'
+            : 'settings.network.status.coreMismatch',
+          { expected: reader.expected, actual: reader.actual },
+        );
+      case 'LOAD_FAILED':
+        return problem('settings.network.status.loadFailed');
+      case 'PINNED': {
+        const { pin } = reader;
+        const outcome = html`<efs-outcome
+          .kind=${'pin'}
+          .code=${pin.status}
+          .translator=${this.translator}
+          retryable
+          @efs-retry=${retry}
+        ></efs-outcome>`;
+        if (pin.status === 'UNKNOWN') {
+          return html`<div class="wa-stack wa-gap-xs efs-network-status">
+            ${outcome}
+            <p class="efs-quiet">
+              ${t('settings.network.status.reason')}
+              <code translate="no" dir="ltr">${pin.reason.code}</code>
+            </p>
+          </div>`;
+        }
+        if (pin.status === 'MISMATCH') {
+          return html`<div class="wa-stack wa-gap-xs efs-network-status">
+            ${outcome}
+            <dl class="efs-facts">
+              ${pin.mismatches.map(
+                (m) => html`<dt translate="no" dir="ltr">${m.what}</dt>
+                  <dd>
+                    ${t('settings.network.status.expected')}
+                    <code translate="no" dir="ltr">${m.expected}</code>
+                    ${t('settings.network.status.found')}
+                    <code translate="no" dir="ltr">${m.actual}</code>
+                  </dd>`,
+              )}
+            </dl>
+          </div>`;
+        }
+        return html`<div class="wa-stack wa-gap-xs efs-network-status">
+          ${outcome}
+          <dl class="efs-facts">
+            <dt>${t('settings.network.status.chain')}</dt>
+            <dd translate="no">${pin.basis.chainId}</dd>
+            <dt>${t('settings.network.status.block')}</dt>
+            <dd translate="no">${pin.basis.blockNumber.toString()}</dd>
+            <dt>${t('settings.network.status.endpoint')}</dt>
+            <dd translate="no" dir="ltr">${pin.basis.endpoint}</dd>
+          </dl>
+        </div>`;
+      }
+      default:
+        return nothing;
+    }
   }
 
   #data() {

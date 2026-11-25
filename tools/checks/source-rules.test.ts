@@ -23,7 +23,14 @@ const NOT_EVALUATED = new Set(['boot/main.ts', 'ui/wa/define.ts']);
  * Third-party runtime packages, loaded before the traps go in: they are allowed to probe the
  * environment when they load (Lit reads `document`); the rules below are about our code.
  */
-const THIRD_PARTY = ['lit', '@lit-labs/signals', 'signal-polyfill', 'messageformat'];
+const THIRD_PARTY = [
+  'lit',
+  '@lit-labs/signals',
+  'signal-polyfill',
+  'messageformat',
+  '@efs/sdk',
+  '@efs/sdk/files',
+];
 
 function sources(dir = SRC): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

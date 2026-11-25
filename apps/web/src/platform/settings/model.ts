@@ -25,6 +25,11 @@ export interface NetworkDefinition {
   readonly id: string;
   readonly label: string;
   readonly chainId: number;
+  /**
+   * The deployment's ledger proxy address, lowercase: with chainId it identifies the realm in
+   * full-form links (`eip155:<chainId>/0x<ledger>`). Cross-checked against the deployment.
+   */
+  readonly core: string;
   /** Relative or absolute URLs of the contracts deployment and release manifests. */
   readonly deployment: string;
   readonly release: string;
@@ -49,6 +54,13 @@ export interface UserSettings {
     readonly selected?: string;
     readonly overrides: Readonly<Record<string, NetworkOverrides>>;
   };
+  readonly content: {
+    /**
+     * Also fetch file contents from a publisher's own https:// address (that host sees the
+     * reader's IP). Off by default; the Preview offers a one-time load per host instead.
+     */
+    readonly publisherLocations: boolean;
+  };
   /** Fields this version doesn't understand, kept verbatim. */
   readonly [unknownField: string]: unknown;
 }
@@ -64,6 +76,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   revision: 0,
   appearance: { mode: 'system', theme: 'cypher' },
   network: { overrides: {} },
+  content: { publisherLocations: false },
 };
 
 export const EMPTY_CONFIG: OperatorConfig = { schema: CONFIG_SCHEMA, networks: [] };
@@ -184,6 +197,7 @@ export function readSettings(raw: unknown): SettingsRead {
   const issues: string[] = [];
   const appearance = isRecord(raw.appearance) ? raw.appearance : {};
   const network = isRecord(raw.network) ? raw.network : {};
+  const content = isRecord(raw.content) ? raw.content : {};
   const mode = COLOR_MODES.find((m) => m === appearance.mode) ?? DEFAULT_SETTINGS.appearance.mode;
   const theme = THEMES.find((t) => t === appearance.theme) ?? DEFAULT_SETTINGS.appearance.theme;
   const settings: UserSettings = {
@@ -199,6 +213,8 @@ export function readSettings(raw: unknown): SettingsRead {
       ...(typeof network.selected === 'string' ? { selected: network.selected } : {}),
       overrides: readOverrides(network.overrides, issues),
     },
+    // Only an explicit true turns it on.
+    content: { ...content, publisherLocations: content.publisherLocations === true },
   };
   if (raw.schema !== SETTINGS_SCHEMA) {
     if (typeof raw.schema === 'string' && raw.schema.startsWith('efs-settings/')) {
@@ -234,6 +250,8 @@ export function readConfig(raw: unknown): ConfigRead {
       typeof item.chainId !== 'number' ||
       !Number.isSafeInteger(item.chainId) ||
       item.chainId <= 0 ||
+      typeof item.core !== 'string' ||
+      !/^0x[0-9a-fA-F]{40}$/.test(item.core) ||
       typeof item.deployment !== 'string' ||
       typeof item.release !== 'string'
     ) {
@@ -245,6 +263,7 @@ export function readConfig(raw: unknown): ConfigRead {
       id: item.id,
       label: item.label.slice(0, MAX_LABEL_LENGTH),
       chainId: item.chainId,
+      core: item.core.toLowerCase(),
       deployment: item.deployment,
       release: item.release,
       rpcs: readEndpoints(item.rpcs, 'rpc', issues, `${item.id}.rpcs`),
@@ -272,13 +291,37 @@ export interface EffectiveNetwork {
   readonly customized: { readonly rpcs: boolean; readonly gateways: boolean };
 }
 
-/** Combine the operator's networks with the user's choice and endpoint overrides. */
+/** The network a link's realm names: by id, or by chainId + ledger for the full form. */
+export function findNetwork(
+  config: OperatorConfig,
+  realm:
+    | { readonly kind: 'alias'; readonly id: string }
+    | { readonly kind: 'full'; readonly chainId: number; readonly ledger: string },
+): NetworkDefinition | undefined {
+  return realm.kind === 'alias'
+    ? config.networks.find((n) => n.id === realm.id)
+    : config.networks.find((n) => n.chainId === realm.chainId && n.core === realm.ledger);
+}
+
+/** The network used when no link names one: the user's default, else the site's. */
+export function defaultNetwork(
+  config: OperatorConfig,
+  settings: UserSettings,
+): NetworkDefinition | undefined {
+  const wanted = settings.network.selected ?? config.defaultNetwork ?? config.networks[0]?.id;
+  return config.networks.find((n) => n.id === wanted) ?? config.networks[0];
+}
+
+/**
+ * Combine one of the operator's networks (by default, the default network) with the user's
+ * endpoint overrides for it.
+ */
 export function effectiveNetwork(
   config: OperatorConfig,
   settings: UserSettings,
+  chosen: NetworkDefinition | undefined = defaultNetwork(config, settings),
 ): EffectiveNetwork | undefined {
-  const wanted = settings.network.selected ?? config.defaultNetwork ?? config.networks[0]?.id;
-  const definition = config.networks.find((n) => n.id === wanted) ?? config.networks[0];
+  const definition = chosen;
   if (!definition) return undefined;
   const overrides = settings.network.overrides[definition.id] ?? {};
   const enabled = (list: readonly Endpoint[]) => list.filter((e) => e.enabled);

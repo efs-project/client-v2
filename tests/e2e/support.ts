@@ -1,4 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
+import { createRpcReplay, type RpcReplay, type RpcTranscript } from '@efs/sdk/testing';
 import { expect, type Page } from '@playwright/test';
 
 const DIST = process.env.EFS_DIST ?? 'apps/web/dist';
@@ -129,7 +132,8 @@ export const TEST_CONFIG = {
     {
       id: 'testnet',
       label: 'Testnet',
-      chainId: 11155111,
+      chainId: 31337,
+      core: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
       deployment: 'deployments/testnet.json',
       release: 'deployments/testnet-release.json',
       rpcs: [{ url: 'https://rpc.example.net/', label: 'Example RPC' }],
@@ -138,6 +142,56 @@ export const TEST_CONFIG = {
     },
   ],
 };
+
+/** The SDK's recorded fixtures: a real chain's deployment document and JSON-RPC transcripts. */
+const SDK_FIXTURES = `${dirname(createRequire(import.meta.url).resolve('@efs/sdk/package.json'))}/fixtures/rpc/`;
+
+/** The deployment the SDK's transcripts were recorded against (chain 31337). */
+export const DEPLOYMENT = readFileSync(`${SDK_FIXTURES}deployment.json`, 'utf8');
+
+export type RpcCase =
+  | 'pin-verified'
+  | 'open-inline'
+  | 'open-absent'
+  | 'open-span'
+  | 'open-external-https';
+
+export function transcript(name: RpcCase): RpcTranscript {
+  return JSON.parse(readFileSync(`${SDK_FIXTURES}${name}.json`, 'utf8')) as RpcTranscript;
+}
+
+/**
+ * Answers the test RPC origin from recorded chain traffic, so the real SDK runs in the page with
+ * no chain. Assert `replay.misses` is empty at the end: a miss means the SDK asked something the
+ * recording doesn't cover.
+ */
+export async function replayRpc(page: Page, cases: readonly RpcCase[]): Promise<RpcReplay> {
+  const replay = createRpcReplay(cases.map(transcript));
+  await page.route(/^https:\/\/rpc\.example\.net\//, (route) =>
+    route.fulfill({ json: replay.answer(JSON.parse(route.request().postData() ?? 'null')) }),
+  );
+  return replay;
+}
+
+/** Serves the deployment document TEST_CONFIG names (or `body` in its place). */
+export async function serveDeployment(page: Page, body: string = DEPLOYMENT): Promise<void> {
+  await page.route(/\/deployments\/testnet\.json$/, (route) =>
+    route.fulfill({ contentType: 'application/json', body }),
+  );
+}
+
+/** Answers nothing on the test RPC origins: every request fails, as if the node were down. */
+export async function rpcDown(page: Page): Promise<URL[]> {
+  const seen: URL[] = [];
+  await page.route(
+    /^(https:\/\/rpc\.example\.net|http:\/\/127\.0\.0\.1:8545|https:\/\/node\.example\.org)\//,
+    (route) => {
+      seen.push(new URL(route.request().url()));
+      return route.abort();
+    },
+  );
+  return seen;
+}
 
 export async function serveConfig(page: Page, config: unknown = TEST_CONFIG): Promise<void> {
   await page.route(/\/efs\.config\.json$/, (route) =>
@@ -151,8 +205,7 @@ export const settingsButton = (page: Page) => page.locator('wa-button.efs-settin
 export async function openSettings(page: Page): Promise<void> {
   await settingsButton(page).click();
   await expect(page.locator('wa-drawer.efs-settings')).toHaveAttribute('open', '');
-  // The drawer moves focus to its first section once it has finished opening. Acting (or
-  // measuring contrast) earlier races its show animation.
+  // The drawer moves focus to its first section once it has finished opening.
   await expect(page.locator('[data-section="appearance"] h3')).toBeFocused();
 }
 

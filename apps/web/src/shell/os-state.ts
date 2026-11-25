@@ -46,7 +46,10 @@ export function createOsState(input: OsStateInput, scope: OwnerScope): OsState {
   const config = state(input.config);
   const route = state(input.route);
   const prefersDark = state(input.prefersDark);
-  const network = computed(() => networkState(config.get(), settings.get()));
+  const network = computed(() => {
+    const now = route.get();
+    return networkState(config.get(), settings.get(), now.kind === 'realm' ? now.realm : undefined);
+  });
   const appearance = computed<Appearance>(() => {
     const { mode, theme } = settings.get().appearance;
     return { mode, theme };
