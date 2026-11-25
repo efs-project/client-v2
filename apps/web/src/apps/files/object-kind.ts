@@ -1,11 +1,11 @@
 // What an object link (`~efs/o/<id>`) names: a folder or a file. Since sdk-v2 c8ed37a an id's kind
 // is fixed by the id (a folder is a record only its creator can publish; a file is a subject).
 //
-// The read order keeps a file link exactly as cheap as before: openFile first. PRESENT proves a
-// file (a folder has no HEAD), and the Preview reuses that result instead of opening again. Only
-// when it isn't PRESENT does openObject say what the id is: a folder, a file with no HEAD under
-// this Lens, or nothing at all. Until then nothing reads the id as a missing file, so a folder's
-// link never shows "Confirmed not present".
+// openObject decides, first and alone: the kind is a property of the id (a directory record is a
+// folder, whatever else exists), never inferred from whether a HEAD happens to read PRESENT. For
+// a file it also returns the file opened under the Lens (`open`), which the Preview reuses, so a
+// file link costs one batched read more than before and nothing else. Until it answers, nothing
+// reads the id as a missing file, so a folder's link never shows "Confirmed not present".
 
 import type { Efs, Lens, Reason } from '@efs/sdk';
 import type { FolderRef, OpenResult } from '@efs/sdk/files';
@@ -29,10 +29,7 @@ export type ObjectKind =
   | { readonly status: 'invalid'; readonly reason: Reason }
   | { readonly status: 'unknown'; readonly reason: Reason };
 
-const loadReads = async () => {
-  const { openFile, openObject } = await import('@efs/sdk/files');
-  return { openFile, openObject };
-};
+const loadOpenObject = async () => (await import('@efs/sdk/files')).openObject;
 
 export interface ObjectKindState {
   readonly kind: ReadonlySignal<ObjectKind>;
@@ -84,14 +81,8 @@ export function objectKindState(
     kind.set({ status: 'pending' });
     void (async () => {
       try {
-        const reads = await loadReads();
-        const opened = await reads.openFile(efs, { kind: 'file', subject }, o);
-        if (mine.signal.aborted) return;
-        if (opened.status === 'PRESENT') {
-          kind.set({ status: 'file', open: opened, lens });
-          return;
-        }
-        const object = await reads.openObject(efs, subject, o);
+        const openObject = await loadOpenObject();
+        const object = await openObject(efs, subject, o);
         if (mine.signal.aborted) return;
         if (object.status === 'FOLDER') folders.set(id, object.folder);
         kind.set(
