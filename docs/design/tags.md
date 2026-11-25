@@ -1,426 +1,394 @@
 # Tags, topics and homes in the File Browser: design note
 
-**Status:** draft design note, no code. Revised for James's ruling that addresses are places, the PM's answers of 2026-11-25, and the tag decision sheet (as of planning b6245f6). Nothing here is built. The file-operation flows (create, rename, move, remove, filter by Type) are a separate note, `file-operations.md`, because they need no contracts change and don't wait on anything below.
+**Status:** draft design note, no code. Rewritten for James's yes to the tag model (2026-11-25) and the working spec that applies it. Nothing here is built.
+
+**Build order:**
+- The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.
+- The file operations come first (`file-operations.md`).
 
 **Sources:**
-- planning `Designs/efsv2/owner-rulings.md`, 2026-11-25: T-1 to T-5, view-all, and "Homes follow the lens like any other place";
-- planning `Reviews/2026-11-25-tag-decision-sheet.md`: the one page for the tag model, with its defaults;
-- planning `Reviews/2026-11-25-tag-prior-art/README.md`: the evidence behind option 3;
-- SDK draft PR #36 (`docs/design/files-folders-tags-0.1.md`), for read shapes;
+- planning `Designs/efsv2/owner-rulings.md`, 2026-11-25:
+  - T-1 to T-5;
+  - view-all;
+  - homes follow the lens;
+  - "the shared tag" (planning `6c23a51`);
+  - depth;
+  - newest first.
+- planning `Reviews/2026-11-25-tag-model-spec.md` (the spec): §9 is this note's work order, and §7 its pitfalls. Section numbers below (§3.2, §7.5, …) are the spec's.
 - planning `Designs/clientv2/file-browser-requirements.md`: L1 to L8, A7, B4.
 
-Rounds 2 and 3 of the tag discussion are background only. Where this note still uses one of their mechanisms (the exact-word list, the zipper merge), it says so.
+**Background only:**
+- the decision sheet;
+- rounds 2 and 3 of the tag discussion;
+- the prior-art corpus.
 
-## What's ruled, and what this note can't assume
+**Design questions** go to the tag PM session, copying the integration owner.
 
-**Ruled (James, 2026-11-25):**
-- **Tag is system, folder is app (T-1).** A topic page shows everything tagged with it, of any Type, with a Type filter. A folder stays a Files directory.
-- **Topics are shared and unowned (T-2).** Words, not numbers, in links. The ruling makes the whole path the identity, so `/cars/tesla` and `/companies/tesla` are different tags.
-- **Every tag carries a signed number (T-4).** At or above 0, the tag applies; below 0, it means "not this".
-- **Homes (T-5).** Anyone can attach to any address. The address is the id; ENS is display only.
-- **An address is a place like any other.** Viewing one inserts that address into the lens after the reader and before "public". James's example: at vitalik's address, with a lens of *"me, vitalik, public"*, `pet.jpg` shows *"my image of a dog first"*, then vitalik's, then anyone's if public is on.
-- **View-all.** "Everything anyone has tagged" with a topic is a required view.
+## The model, as the client sees it
 
-**The PM's defaults, unless James objects** (decision sheet):
-- roll-up along a path is automatic, once measured;
-- lowercasing is done by apps, not the chain;
-- **no small depth limit** (James rejected 8 words):
-  - folder paths under an address have none;
-  - a topic path may be at least 64 words deep, and its real maximum is what one transaction can hold;
-- tag suggestions show counts across everyone;
-- **opening a folder from a link shows its creator's files,** even when the creator isn't in the reader's view (the owner-in-the-lens rule below);
-- **with public on, several same-named files in one place show as a list, newest first.** James: oldest first would make public views *"static and nearly useless"*;
-- **a bare path is a topic,** and folders and named files live under an address:
-  - `/cars/tesla` is always topic words;
-  - `/0x1234…/photos/cat.jpg` is a folder path;
-  - the realm's shared root folder gets no link of its own;
-  - first segments starting with `0x` or `~` are reserved.
+**Ruled by James:**
+- **A topic is a path of words** (`/cars/tesla`). `/cars/tesla` and `/people/tesla` are different topics: *"The path on tags in my mind was originally for disambiguation."*
+- **A word is shared across paths.** The topic `/tesla` is the word's page: every place the word is used, **grouped by place and never merged**.
+- **A tag is one author's statement:** "this thing is in this topic, with this number".
+  - At 0 or above it applies, and below 0 it means "not this".
+  - No statement means the author said nothing.
+- **A tag is listed under its topic, under every parent topic** (roll-up), **and under each of its words** (the word pages).
+- **An address is a place like any other.** Anyone can attach to it, and viewing it inserts the address into the lens after the reader.
+- **A folder is a Files Type** under an address or another folder. It can be tagged like anything else.
+- **Tag is system, folder is app (T-1).** A topic shows things of every Type, with a filter.
+- **Public lists are newest first:** *"Newest first is the only way that makes sense otherwise data views are static and nearly useless."*
+- **No small depth limit.** Topic paths go to at least 64 words, and folder paths have no limit.
 
-**Still open, so this note works with every answer:**
-- **What is the shared tag?** The decision sheet's options are:
-  1. **the path** (ruled 2026-11-25, before the research);
-  2. **the word;**
-  3. **both:** the word is the shared tag, and the path is where a thing was filed.
-- **The sentence waiting on James:** *"paths tell tags apart, and a word's page shows every place that word is used."* A yes rules out option 2.
-  - Options 1 and 3 then behave the same for a person: `/cars/tesla` and `/people/tesla` stay apart, and a word's page shows every place the word is used, grouped by place.
-  - The difference between them is plumbing, and the contracts dev's measurement settles it.
-- Until James answers, the PM holds topic id derivation, registration and listing (M1 brief, D6).
-- **Can wait:**
-  - who is in a newcomer's lens;
-  - whether a file's name is its own mechanism or the last word of a path. Until that's settled, no link addresses a named file through a topic, and files shown in a topic open by their permanent link.
-- **Also open:** whether a Graph-style index joins the stack.
+**Still open, for James, so this note doesn't assume them:**
+- the fold refinement (NFKC_Casefold, or NFC plus lowercase);
+- what a newcomer's default lens contains;
+- whether a file's name is its own mechanism or the last word of a path;
+- settings that inherit down a path.
 
-**The client never derives a topic id,** and never builds or parses a topic link (AGENTS.md rule 4). It shows what the SDK resolves, so a change in how ids are derived changes the SDK, not these screens. The screens still wait for their data: nothing can list a topic until its id is settled and the contracts can list it.
+**Engineering, invisible here:** whether a word page is one list per word or a directory of the paths that use it. A person sees the same either way.
+
+**The client never derives a topic id,** folds a word, or builds or parses a link (AGENTS.md rule 4). The SDK does all of that, from vectors shared with the contracts.
+
+## Links
+
+The spec's §5, as the client routes it. Every link goes through the SDK's `parseLink`, which says what kind of target it is.
+
+| Form | Opens |
+|---|---|
+| `#/r/<realm>/<word>/<word>/…` | a topic: the path view |
+| `#/r/<realm>/<word>` | that word's page: the word view |
+| `#/r/<realm>/0x<40 hex>/<name>/…` | an address, then folder and file names (which keep their case) |
+| `#/r/<realm>/~efs/…` | a permanent object or revision link (as built) |
+
+- **Canonical form.** A typed link is replaced by the SDK's canonical one, so `/Cars/Tesla` becomes `/cars/tesla`. Trailing slashes are ignored, and empty segments are refused, by the SDK.
+- **Object links stay the default for sharing.**
+  - Folder path links are shareable once addresses exist, labelled as lookups a rename can break.
+  - No link addresses a named file through a topic (still open), so files in a topic open by their permanent link.
+- **No depth limit in the client.** The router's 8,192-character limit is the only cap, and a longer route is refused visibly, never cut.
+  - Long paths and breadcrumbs collapse visually: the first word and the last two stay visible, and the middle folds into a "…" menu listing every word.
+- **`?lens=` works as on object links:** a shared topic link can carry the sharer's lens.
 
 ## Words used in the interface
 
-- **Copy says "tag" for the place and "tagged" for the act:** "Everything tagged /cars/tesla". People know tags from hashtags and photo apps. "Topic" stays an internal word, used in this note and in code, to keep the place apart from one person's statement. *(PM, 2026-11-25.)*
-- **"Remove my tag" and "Not this" are different acts, with different words.**
-  - "Remove my tag" takes the person's statement back to saying nothing.
-  - "Not this" records a negative number.
-  - The SDK sketch keeps these as separate verbs (untag and deny), and so does the copy.
-- **The vocabulary guard stays:** "remove" for taking something out of a place, never "hide" (requirement A7). "Hide" suggests privacy, and an entry that's removed is still on the public record.
+- **"Tag" in copy, "topic" only internally** (PM). For example, "Everything tagged /cars/tesla".
+- **"Remove my tag" and "Not this" are different acts** with different words. The first returns to saying nothing; the second records a negative number.
+- **"Remove", never "hide"** (requirement A7).
+- **A path segment's display name** (§3.5) is:
+  1. a path-level label from the lens;
+  2. else the word-level label in the reader's language;
+  3. else the word itself.
 
-## A topic link, under any of the three answers
+  The word is always one click away, because it's what the link holds.
 
-A topic link is a route like any other realm link, `#/r/<realm>/<topic link>[?lens=…]`. It's produced by the SDK's `link()` and read by its `parseLink()`, which tells the client what kind of target it is. The client picks a view by that kind.
+## Whose tags: three views, and the default for topics
 
-| | 1. The path is the tag (ruled) | 2. The word is the tag | 3. Both (PM recommends) |
-|---|---|---|---|
-| `/cars/tesla` (the path view) | what was tagged exactly `/cars/tesla`, and below it once roll-up is built | things tagged both `cars` and `tesla` (a narrowing query) | what was filed at `/cars/tesla` and below it |
-| Sub-entries to browse into | topics registered under it | none built in; "tesla is under cars" is a lens statement | paths filed under it |
-| `tesla` (the word view) | every place that uses the word, grouped by place (from a directory of the paths that use it) | one pool, mixed together | every place that uses the word, grouped by place (from one list per word) |
-| Permanent? | yes (nobody can rename it) | yes | yes |
+**One lens, ending in public** (§1.9). From first to last:
+1. **you,** the connected account;
+2. **the place's owner,** inserted (an address, or a folder's creator; a topic has none);
+3. **the people the lens names** (the link's `?lens=`, else the deployment's default lens);
+4. **public.**
 
-**Two views cover all three columns:** the path view (next section) and the word view (the section after).
-- **Only what fills a view differs.** The screens stay the same.
-- **Options 1 and 3 look identical to a person** (decision sheet). The client reads whatever the SDK returns for the word.
-- **Under option 2,** which a yes to the sentence above rules out, the word view would have no places to group by, so the list would be flat.
+For each (topic, thing), the first of these with a stance decides (§3.1). An UNKNOWN read never counts as "said nothing".
 
-**What the client asks of either form:**
-1. **Readable words in the URL**, as James asked. No numeric id in the address bar for topics.
-2. **No collisions.** The decision sheet's default settles this.
-   - A bare path is a topic.
-   - A first segment starting with `0x` is an address, and folders and named files live under it.
-   - A first segment starting with `~` is the system's (`~efs` object and revision links).
-   - The realm's shared root folder gets no link of its own, so folder links wait for addresses (homes, C8).
-   - **Object links stay the default for sharing.** Once addresses exist, a folder path link can be shared too, labelled as a lookup that a rename can break.
-   - **No link addresses a named file through a topic,** because whether a file's name is its own mechanism or a path's last word is still open. Files in a topic view open by their permanent object link.
-3. **A canonical form.** The client replaces a typed link with the SDK's canonical one, as it does for object links today. So `/Cars/Tesla` becomes `/cars/tesla`, using the SDK's fold rule.
-4. **No small depth limit** (James, 2026-11-25).
-   - A topic path allows at least 64 words, and folder paths under an address have no limit.
-   - The router's 8,192-character limit is the only cap the client adds, and a longer route is refused visibly, never cut.
-   - Long paths and breadcrumbs collapse visually: the first word and the last two stay visible, and the middle folds into a "…" menu that lists every word. Nothing is ever truncated by depth.
-5. **`?lens=` works as it does on object links.** A shared topic link can carry the sharer's lens.
+**The three views are one control,** not two switches:
 
-## The path view (a topic page)
+| View | Copy *(proposed)* | Shows |
+|---|---|---|
+| Mine | People I trust | the lens without public |
+| Everyone | Everyone | the lens, then public; hidden: what lens authors marked "not this" |
+| Raw | Unfiltered | everything, with "not this" marks shown greyed, with who made them |
 
-It opens in the File Browser, the only app that handles realm links today. The File Browser's panes are keyed on "entries of X" (`shell.md`, Apps and views), so they take a topic as their X with no new layout:
-- **Overview:** the tag's name, its counts and, later, its description.
-- **Entries:** the list.
-- **Preview:** the selected item.
+**The public tier is labelled clearly** (pitfall §7.7: newest-first public views reward whoever posted last).
+- Lens results come first, in their own section.
+- Public results follow under "From everyone else · not checked by anyone you trust · newest first".
+- Rows reached only through public open the Preview behind the media gate (below).
 
-A later Topics system app could reuse the same view. *(My call: no second app before there's a second app's worth of work.)*
+**Recommended default for topics: Everyone.**
+- **View-all is a ruled requirement,** and James called it *"important for censorship resistance and UX"*.
+- **Newcomers have no curators yet** (§7.10). Who's in a newcomer's lens is still open, so Mine would be empty or nearly so. A page saying "nothing here" over thousands of tags is the missing-answer-as-none bug at product scale.
+- **Everyone is also the cheaper read.** It's one all-authors list per topic. Mine with roll-up is the expensive view (§7.1).
+- **Its risks are spam and the latest poster coming first.** They're answered by:
+  - the lens tier on top;
+  - the labelled public tier;
+  - the media gate;
+  - junk children hidden by default;
+  - two counts in suggestions.
+- **Revisit once a newcomer's default lens exists.** Then Mine may be the better default.
+- **Not adaptive.** Mine-when-the-lens-has-something, else Everyone, is rejected: the same link would change for the same person as their lens grew, with no visible cause.
 
-```text
-Everything tagged /cars/tesla                              Type: [ All ▾ ]
-Showing: you · 2 people · everyone [on]
-4,210 tags by everyone · 12 tags under this one
-───────────────────────────────────────────────────────────────────────────
-▸ /cars/tesla/model_y         tag · 310 tags
-▸ /cars/tesla/roadster        tag · 42 tags
-From you and the people in your lens
-  cat.jpg                     Image · tagged by alice.eth
-  notes.txt                   Text  · tagged by you
-From everyone else
-  cat.jpg                     Image · tagged by 0x44…7c
-  e4                          Chess move · tagged by 0x9f…01
-                              [ Show more ]
-```
+**Until the view-all lists exist** (the contracts release), Everyone and Unfiltered are shown disabled: "Everyone's tags aren't readable on this network yet." So the first build shows Mine whatever the default is.
 
-**Rows:**
-- **Sub-entries have their own section above the items,** capped at a few rows with "Show all 12".
-  - They follow the same lens order as the items (the lens's first, then public's), and the section is capped. So a flood of spam sub-topics can't push the items off the page.
-  - Who may list a topic under another is still open in the contracts tag work.
-- **Items come in lens order, then newest first.**
-  - Tags from the people the lens names come first, under "From you and the people in your lens".
-  - Then, with public on, everyone else's come under "From everyone else".
-  - Within each section the newest come first. Lists are in insertion order, which is time order, so that means reading from the end.
-  - Spam lands below everything the person trusts.
-- **For now a row is one tag, and it names who tagged it** (PM, 2026-11-25). So an item tagged by three people can appear three times: "cat.jpg · tagged by alice.eth".
-  - One row per item ("tagged by 3 people") would mean merging an item's tags across pages. That's page-walking, which belongs to the SDK (AGENTS.md rule 4), so it waits on SDK ask 2.
-- **Items of a Type the File Browser can't show get a row anyway:** the Type's name if one is known, else its short id, plus who tagged it. Opening such a row shows details (Type, author, links), never a guess at the contents. A chess move is a legitimate member of `/cars/tesla`.
-- **Opening a row:**
-  - a file opens in the Preview by its permanent link (decision sheet), through the File Browser's `linkView`, which is also what a phone shows first;
-  - a folder opens its listing, also by its permanent link;
-  - a sub-entry opens its own path view.
+**The choice is remembered** in the settings record. On a shared IPFS path gateway it lasts for the tab.
 
-**The Type filter:**
-- The SDK filters on each row's header Type id, which the chain enforced and nobody can spoof. The SDK sketch reports how many rows a filter skipped.
-- The menu lists the Files Types (Folder, File) plus every Type seen on the pages read so far.
-- **A filtered page never reads as empty.** A page that's PARTIAL, or had all its rows filtered out, says "No images in the first 200 tags. [Keep looking]". It never says "No images". This is the "missing answer read as none" bug shape, applied to filters.
-
-**Counts:**
-- **The header shows the total by everyone, labelled as such** ("4,210 tags by everyone"). That's one read of the list's length.
-- **Other views get no count until the SDK offers one.**
-  - With public off, a count would take a read per person in the lens (up to 64). So the view shows none until the SDK offers it, rather than a wrong one.
-  - A count after the "not this" filter would need a scan, so it isn't shown.
-- **It counts statements, not distinct items.** One photo tagged by a hundred people is a hundred tags, so the copy says "4,210 tags" and not "4,210 items".
-- **The SDK defines exactly what a count includes,** for example whether negative tags are counted. The copy follows that definition.
-
-**Honesty rules carried over from reads (`reads.md`):**
-- an UNKNOWN or unreachable read shows why, with Try again, never an empty list;
-- a page cut short says so and offers more;
-- the pin must be VERIFIED before anything is listed.
-
-## The word view
-
-It's for "what does anyone mean by `tesla`?". People reach it from the search box (Enter on a single word), from a word in a path's breadcrumb, and, under option 3, from a word link.
-
-```text
-Everything tagged with the word "tesla"                    Type: [ All ▾ ]
-Showing: you · 2 people · everyone [on]       Group: [ By place ▾ ]
-3 places · 4,262 tags by everyone
-───────────────────────────────────────────────────────────────────────────
-/cars/tesla                    4,210 tags                     [ Open ]
-  cat.jpg            Image · tagged by alice.eth
-  model-y.pdf        File  · tagged by 0x12…ab
-  …and 4,208 more
-/companies/tesla                  48 tags                     [ Open ]
-  q3-report.pdf      File  · tagged by bob.eth
-  …and 47 more
-/people/nikola_tesla               4 tags                     [ Open ]
-Also: "tesla" in your lens is the same as "テスラ" (said by carol.eth) · [ Include ]
-```
-
-**Groups:**
-- **Groups are places, largest first.** Each group is a path that uses the word, with its own count, its newest few items, and Open, which goes to that path view.
-  - Largest-first comes from counts, which are one read each. *(My call: the order a newcomer needs, because the commons is usually the biggest place.)*
-  - The order changes as counts change. That's fine, because grouping is a view and not a link.
-- **Grouping by place is the default.** The prior-art verdict names its own weakness: a bare word mixes the company, the inventor and the unit. Grouping by place is its answer.
-- **A word in the middle of a path** (`tesla` in `/cars/tesla/model_y`) is grouped at the place where the word sits, `/cars/tesla`. So everything filed at `/cars/tesla` and below it stays in one group, which matches the path view under options 1 (with roll-up) and 3. *(My call.)*
-- **"Group: All in one list"** merges the groups into one list in lens order, then newest first. Round 3's zipper merge (background) does this in time order with no Graph. Each row then shows its place and its tagger: "cat.jpg · /cars/tesla · tagged by alice.eth".
-
-**Under each answer:**
-- **Options 1 and 3 look the same here.** Every place that uses the word, wherever it sits in the path, is a group.
-  - **Option 1** gathers them from a directory of the paths that use the word, one read per place. For a handful of places the SDK merges them. Past a stated limit, the groups show only their counts, with Open.
-  - **Option 3** reads one list per word, which the SDK returns already grouped.
-  - Either way, nothing is merged on the client.
-- **Option 2** would be one list shown flat. A yes to the decision sheet's sentence rules it out.
-
-**Synonyms, translations and "moved to":**
-- These are optional lens statements, and the system works with none of them.
-- **They come at two levels** (decision sheet):
-  - a word-level one (`car` = `cars`, `汽车` = `cars`) fixes every path that uses the word;
-  - a path-level one (`/cars/tesla` = `/companies/tesla_motors`) joins two specific places.
-- When the person's lens says another word or place is the same as this one, the view says so in one line, with who said it, and offers **Include**. Include adds that word's (or that place's) groups, marked with where they came from.
-- Include is never automatic. A synonym is somebody's opinion (D-A still holds for opinions), and each included word costs another read. The SDK bounds how many words can be followed.
-- **"Moved to" works the same way.** "/cars/tesla says it moved to /vehicles/tesla (said by alice.eth) · [ Go there ]". The old place keeps its items, because a topic's contents never move.
-
-**Counts and honesty:** the header counts places and tags, never distinct items (the same rule as the path view). If any place's read is UNKNOWN or PARTIAL, its group says so ("4,210 tags · couldn't read the newest"), and the header doesn't add it into a total as if it were known.
-
-## Whose entries: one lens, with "public" last
-
-**The views are one ordered lens, not three modes** (PM, 2026-11-25, following James's example *"me, vitalik, public"*). From first to last:
-1. **You:** the connected account, when there is one.
-2. **The place's owner,** inserted by the client:
-   - for an address, that address (the ruling);
-   - for a folder, its creator (decision-sheet default);
-   - a topic has no owner, so nothing is inserted.
-3. **The people the lens names:** the link's `?lens=` when it carries one, otherwise the deployment's default lens (`defaultLensPrincipals`). Who's in a newcomer's lens can wait.
-4. **Public,** meaning anyone, when it's on.
-
-The first of these with a stance on an entry decides it (the lens law). A "not this" from anyone named in 1–3 hides that item, even when public has it.
+**Denials** (§3.2):
+- **Only lens authors can hide things.** A stranger's "not this" never hides anything from anyone else. In Everyone it shows only as a count ("1 says not this").
+- **A denial is about one place.** "Not this" at `/cars/tesla` hides the thing there and at the place it was filed. It doesn't travel down to children, and says nothing about `/cars`.
 
 **Where the owner goes** (our reading of the ruling, agreed with the PM; James can correct it in one line):
 - James: *"automatically add vitalik to our lens list automatically in the middle because we should see that address' data unless we overrode it."*
-- **Only the reader overrides,** so the owner goes right after "you", ahead of the people the lens names. At vitalik's address, vitalik's `pet.jpg` beats one from someone in your lens.
-- **The reader can switch the inserted owner off for a view,** which is his "unless we overrode it" escape (below).
+- Only the reader overrides it, so the owner goes right after "you".
+- The reader can take the owner out for a view: "Don't put 0x12…ab first".
 
-**What the person sees and can change:**
-- **The lens line:** "Showing: you · 0x12…ab · 2 people · everyone [on]". It's always visible on path, word and address views, because there it changes the answer by design (requirement L1 keeps lens chrome hidden only until it does).
-- **The "everyone" switch is public on or off.**
-  - Public on is copied "Everyone"; public off is copied "People I trust".
-  - **The default is on,** because this is a test chain (PM, 2026-11-25).
-  - It's remembered in the settings record. On a shared IPFS path gateway it lasts for the tab, as every setting does there.
-- **Taking the owner out:** "Don't put 0x12…ab first" removes the inserted owner for this view, which is James's *"unless we overrode it"*.
-- **"Show what's marked 'not this'"** reveals hidden items, greyed, with who marked them. It's the old "Raw" view as one switch (requirement L5: hiding is inspectable). Raw stays available from the chain, which is what makes the design censorship-resistant. James called view-all *"important for censorship resistance and UX"*.
-- **Public can't be on until the all-authors lists exist** (the view-all contracts work). Until then the switch is shown off and disabled: "Everyone's tags aren't readable on this network yet."
+**"You" first when a wallet is connected** (PM: yes; it's James's example). It holds with three conditions, recorded in `writes.md`:
+1. an unsaved edit keeps its base;
+2. a reorder is never silent;
+3. the order changes only on an identity change or a lens change the person makes.
 
-**"You" first when a wallet is connected** (PM, 2026-11-25: yes; it's James's own example). Three conditions:
-1. **An unsaved edit keeps its base** when connecting or disconnecting reorders the view (slice H's rule). A test covers it: start an edit on the owner's version as a guest, connect a wallet that has its own version, and the edit still targets the owner's version.
-2. **A reorder is never silent.** When connecting changes what's shown, the row or the Preview says so: "Showing your version · also: …".
-3. **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.**
-   - "The view never switches by itself" stays true otherwise.
-   - The review's "this view shows <author>'s version first" is computed from the lens at review time.
+**Media gate** (PM: yes):
+- Lists load no file bytes; there are no thumbnails in the first build.
+- An item reached only through public opens on its Type, size and author, with "Show preview". "Show previews on this page" lifts the gate for the page.
 
-`writes.md` takes this change in its own commit, reviewed by the PM first, because it touches the save path's copy.
+## Every row says whose it is
 
-**Media gate** (PM, 2026-11-25: yes):
-- The list loads no file bytes; there are no thumbnails in the first build.
-- An item reached only through public (its author isn't you, the owner, or anyone the lens names) opens in the Preview on its Type, size and author, with "Show preview". A phone, which shows the Preview first, shows that too.
-- "Show previews on this page" lifts the gate for the page.
-- It's the same pattern as "Load from <host>" for publisher web addresses (PM ruling, 2026-11-24).
+**Every row that isn't the place owner's says whose it is** (§4). Without that, a reader's own `pet.jpg` at someone else's address looks like the owner's.
+- **At an address or in a folder:**
+  - the owner's rows carry no label;
+  - every other row does, the reader's own included ("yours", "alice.eth's", "0x9f…01's");
+  - with public on, the label also says the row is from public.
+- **In a topic view** there's no owner, so every row says who tagged it.
+- **The L1 rule** ("no lens chrome until it changes an answer") yields to this. At a place, authorship always changes the answer.
+
+## The path view (a topic)
+
+It opens in the File Browser's panes, which are keyed on "entries of X":
+- the Overview: the tag's display name, its counts, and later its definition;
+- the Entries: the list;
+- the Preview: the selected thing.
+
+```text
+Everything tagged /cars/tesla              View: [ Everyone ▾ ]  Type: [ All ▾ ]
+About 4,210 tags · 12 your lens            Scope: (•) Here and below  ( ) Only here
+───────────────────────────────────────────────────────────────────────────────
+Tags under this one
+▸ /cars/tesla/model_y      ★ listed first by alice.eth    310 tags
+▸ /cars/tesla/roadster                                     42 tags
+  Show all 12
+From you and the people you trust
+  cat.jpg                  Image · tagged by alice.eth
+  notes.txt                Text  · tagged by you · filed at /cars/tesla/model_y
+From everyone else · not checked by anyone you trust · newest first
+  cat.jpg                  Image · tagged by 0x44…7c
+  e4                       Chess move · tagged by 0x9f…01
+                           [ Show more ]
+```
+
+**Scope: here and below, or only here** (§2.3, roll-up).
+- "Here and below" is the default, because it's what browsing a topic means.
+- In it, each row filed deeper says where ("filed at /cars/tesla/model_y").
+- "Only here" lists exactly this topic.
+
+**Rows:**
+- **For now a row is one tag, and it names who tagged it** (PM). An item tagged by three people, or filed under two children, can appear more than once.
+  - One row per item is the SDK's job (§3.3: duplicates removed by thing, across pages). It comes when the SDK's reads do it, never by the client walking pages.
+- **Things of any Type get a row.** A Type the File Browser can't show gets its name if one is known, else its short id. Opening it shows details, never a guess at the contents.
+- **Opening a row:** a file opens in the Preview by its permanent link; a folder opens its listing; a sub-entry opens its own path view.
+- **The display name of a thing** comes from the SDK in §3.7's order:
+  1. the name its tagger gave it in their own home or folders;
+  2. else the name its creator gave it;
+  3. else the first name from the lens;
+  4. else its media type and a short id.
+
+  The client never invents one.
+
+**Tags under this one: junk hidden by default** (§3.6, §7.11).
+- **Curated children come first.** A child shows by default when someone in the lens has listed it with a number of 0 or more. A higher number ranks it higher, marked with who listed it.
+- **Then the top children by count,** up to 8 rows in all. Children with fewer than 2 tags never fill those slots. *(My call on both numbers.)*
+- **A child the lens marked "not this" is hidden,** and appears greyed only in Unfiltered.
+- **Everything else is behind "Show all N",** in count order.
+- **Curating is tagging.** A child row's menu offers "List first under /cars/tesla" (a tag of the child into its parent, with a number) and "Don't list under /cars/tesla" (a negative number). Both are ordinary tags, reviewed and signed like any other.
+
+**The Type filter:**
+- The SDK filters on each row's header Type id.
+- A PARTIAL or fully filtered page says "No images in the first 200 tags. [Keep looking]", never "No images".
+
+**Counts are "about"** (§2.3).
+- A list's length counts every statement ever made, including removed and negative ones, so the copy says "About 4,210 tags", never "4,210 items".
+- Beside it is the lens's count ("12 your lens"), where the SDK gives it cheaply. Global counts can be inflated at about one tag's gas each (§7.6).
+
+**Honesty rules:**
+- an UNKNOWN read shows why, with Try again, never an empty list;
+- a page cut short says so and offers more;
+- nothing is listed before the pin is VERIFIED.
+
+## The word view (`/tesla`)
+
+It's for "what does anyone mean by `tesla`?". **It's grouped by place, never one mixed list** (§3.4).
+
+```text
+Everything tagged with the word "tesla"    View: [ Everyone ▾ ]  Type: [ All ▾ ]
+4 places
+───────────────────────────────────────────────────────────────────────────────
+/cars/tesla                about 4,210 tags · 12 your lens          [ Open ]
+  cat.jpg            Image · tagged by alice.eth
+  model-y.pdf        File  · tagged by 0x12…ab
+/companies/tesla           about 48 tags                            [ Open ]
+  q3-report.pdf      File  · tagged by bob.eth
+/people/nikola_tesla       about 4 tags                             [ Open ]
+/tesla (just the word)     about 9 tags                             [ Open ]
+Also: "テスラ" is the same as "tesla" (said by carol.eth) · [ Include ]
+```
+
+**Groups:**
+- **Each group is a place that uses the word,** wherever the word sits in it, with its counts, its newest few items, and Open.
+  - The plain one-word topic is a group too: "/tesla (just the word)".
+  - A word in the middle of a path (`tesla` in `/cars/tesla/model_y`) is grouped at the place where the word sits, `/cars/tesla`. *(My call.)*
+- **Order:**
+  - places the lens has used come first;
+  - then the rest by global count, largest first, so one spammer's count can't jump the lens's places;
+  - within a group, the lens tier comes first, then public, newest first.
+- **There's no "all in one list" option.** A bare word mixes the company, the inventor and the unit, and the place is what tells them apart.
+
+**Synonyms, translations and "moved to"** (§3.5):
+- They're optional lens statements, at two levels:
+  - word level (`car` = `cars`, `汽车` = `cars`);
+  - path level (`/cars/tesla` = `/companies/tesla_motors`).
+- **Each one is shown as one line with who said it,** plus Include, which adds its places as more groups, marked with where they came from.
+- **Include is never automatic.** The SDK bounds it at 4 hops and 16 lists per view, and says when the bound stopped it.
+- **"Moved to"** reads "/cars/tesla says it moved to /vehicles/tesla (said by alice.eth) · [ Go there ]". The old place keeps its items.
+
+**Counts and honesty** are the path view's rules. A group whose read is UNKNOWN or PARTIAL says so, and isn't added into a total as if known.
 
 ## Addresses are places
 
-James ruled that an address works like any other folder or tag. So there's no special home page: an address opens the ordinary place view, the folder listing of `file-operations.md`, with the address inserted into the lens.
+An address opens the ordinary place view (the folder listing in `file-operations.md`), with the address inserted after "you".
 
 ```text
-0x12…ab  vitalik.eth                                        Type: [ All ▾ ]
-Showing: you · 0x12…ab · 2 people · everyone [on]
-───────────────────────────────────────────────────────────────────────────
+0x12…ab  vitalik.eth                       View: [ Everyone ▾ ]  Type: [ All ▾ ]
+───────────────────────────────────────────────────────────────────────────────
   pet.jpg        Image · yours                  also: 0x12…ab's, 3 others
-  talk.pdf       File  · 0x12…ab
+  talk.pdf       File
   ▾ dog.png      2 versions from everyone, newest first
-      dog.png    Image · 0x44…7c · 20 Nov
-      dog.png    Image · 0x9f…01 · 2 Oct
+      dog.png    Image · 0x44…7c's, from everyone · 20 Nov
+      dog.png    Image · 0x9f…01's, from everyone · 2 Oct
 ```
 
-- **Each name shows its first answer in lens order,** which is James's pet.jpg example: yours, else the address's, else others'.
-  - "also: …" marks a name that others in the lens or public also have (requirement L2: a marker, never a merge). It opens the list of versions.
-- **With public on, several versions from everyone** of the same name, none from the lens, show as a list, newest first (decision sheet; James: oldest first would make public views static).
-- **The address is what's shown and what's checked.** An ENS name, when one is shown, is display only, looked up at view time, and held behind the PM's ENS privacy question.
-- **Your own address:** "you" and the owner are the same entry in the lens line, shown once. New file and New folder work there once homes and the folder operations land.
-- **An address with nothing of its own** shows whatever the lens finds, plus the line "0x12…ab hasn't put anything here." UNKNOWN stays UNKNOWN.
-- **Attaching to someone else's address** says what it means before the review:
-  - "Your entry appears at 0x12…ab for you, for anyone whose lens names you, and for everyone with public on."
-  - "Where 0x12…ab has its own entry with this name, people viewing the address see theirs first, unless it's you."
-  - This follows the ordering above.
-- **Links:** the SDK makes an address link (first segment `0x…`), and homes wait on contracts (C8).
+- **Each name shows its first answer in lens order:** yours, else the address's, else others'. That's James's `pet.jpg` example.
+  - "also: …" marks the other versions (requirement L2: a marker, never a merge).
+- **Only the address's own rows are unlabelled.** "talk.pdf" above is 0x12…ab's.
+- **Several versions from public** of one name are shown as a list, newest first.
+- **The address is what's shown and what's checked.** ENS is display only, held behind the PM's ENS privacy question.
+- **An address with nothing of its own** says "0x12…ab hasn't put anything here", besides whatever the lens finds.
+- **Attaching to someone else's address** says first: "Your entry appears at 0x12…ab for you, for anyone whose lens names you, and for everyone with public on. Where 0x12…ab has its own entry with this name, people viewing the address see theirs first, unless it's you."
+- **An address can be tagged** (§2.2), for example "this address is a phishing site", even one that has never transacted. The address view has "Tag this address".
 
-## Tagging, the number, and suggestions
+## Tagging
 
-**Where tagging starts:**
-- A **Tag** action on a file's Preview and on an entry's menu.
-- Several entries at once comes with multi-select in the folder operations.
+**Where it starts:**
+- **Tag** on a file's Preview, on an entry's menu, and on an address view;
+- for several entries at once, multi-select in the folder operations.
 
 **The dialog:**
-- A path field. Typing `cars/tesla` or `/cars/tesla` both work, and the SDK folds and checks it.
-- Chosen tags are shown as chips, and the whole set goes through one review and one prompt (D4: one prompt per save; the SDK splits by gas).
 
 ```text
 Tag "cat.jpg"
- [ /cars/tes|                                    ]
-   /cars/tesla           4,210 tags   ← exact match first
-   /cars/tesla/model_y     310 tags
-   /cars/tesla_roadster      2 tags
-   Create /cars/tes — new, nobody has used it yet
+ [ tesla|                                                 ]
+   Places that use "tesla":
+   /cars/tesla             about 4,210 everyone · 12 your lens
+   /companies/tesla        about 48 everyone
+   /people/nikola_tesla    about 4 everyone
+   /tesla                  about 9 everyone
+   Use a new place: /tesla/…   (type a path)
  Chosen:  (/cars/tesla ×)  (/nsfw  Not this ×)
- ▸ More options: number for each tag (default 0)
-                                    [ Cancel ]  [ Review ]
+ ▸ More options: a number for each tag · tag only this version
+                                                  [ Cancel ]  [ Review ]
 ```
 
-**The number:**
-- **The default is 0, which means "applies".** A chip's "Not this" sets −1. That covers everything the File Browser itself needs.
-- **Any whole number can be entered under "More options",** within the width the SDK defines. James wants apps to decide what the size means (an adult app grading 3 against 99). The File Browser reads only the sign.
-- **The display follows the sign:** a number at 0 or above shows as tagged, and a number below 0 shows as "Not this". Details show the exact number and who gave it.
-- **The File Browser never sorts by the number.** An app may.
-- **Many people, many numbers.** A row is one person's tag, so it shows that person's sign. When the SDK can page by item, the row will sum the signs by counts instead ("3 people · 1 says not this"). Details always lists each person's number.
+**Suggestions are the main defence against fragmentation** (§7.5).
+- **Typing a word lists the existing places that use it,** each with two counts:
+  - across everyone, because a shared vocabulary forms only when people see everyone's choices (Centola and Baronchelli);
+  - from the reader's lens, because global counts can be gamed (§7.6).
+- **Places the lens has used come first,** then the rest by the global count.
+- **Typing a path** narrows the suggestions to places under it.
+- **Only exact words come from the chain.** Type-ahead on partial words covers topics seen in this tab only, until a local cache or an index service is decided (see the search box).
+- **A new place is shown as new** ("nobody has used /cars/teslaa yet"), so a typo is visible before it becomes permanent (§7.8: a typo is forever, and "moved to" is the only repair).
+- **Mixed-script look-alikes** get a warning, from the SDK's fold result.
 
-**Suggestions with counts:**
-- **What's suggested, in this order:**
-  1. the exact match from the chain, with its count;
-  2. topics seen in this tab that start with what was typed, each with a count;
-  3. under option 3, the word view and the paths that use the word.
-- **Counts are across everyone, not limited to the lens** (decision-sheet default). The prior-art evidence (Centola and Baronchelli) says a shared vocabulary forms only when people can see everyone's choices.
-- **A new tag is shown as new** ("nobody has used it yet") so a typo is visible before it's made permanent. A topic can't be renamed, and a misspelling is forever.
-- **Mixed-script look-alikes** (Cyrillic `а` in `tesla`) get a warning. This needs a flag from the SDK's fold result (see the asks below); the client doesn't do Unicode script detection itself.
-- **Later (English-only):** a hint when a simple variant (`car` vs `cars`) has many more tags. It's a UI heuristic that asks the SDK for each candidate's count, not a protocol rule.
-- **A seeded starter tree** would feed the suggestions. Who seeds it is the default-lens question.
+**The number** (§2.2):
+- **The default is 0, "applies".** A chip's "Not this" sets −1.
+- **An optional size goes under "More options":** a whole number within the width the SDK reports (8 bits at least). The File Browser reads only the sign; apps define the size.
+- **Display follows the sign.** Details list each person's number.
+- **The File Browser never sorts by the number,** except a child topic's listing rank (above).
+
+**What a tag points at** (§2.2, §7.9):
+- **By default, the file,** so the tag outlives edits.
+- **"Tag only this version"** points at the revision. It's meant for claims about content, such as safety tags, that an edit could change.
+
+**The review:**
+- **New topics.** A first use of a path registers each missing topic and word page in the same publication, with no extra prompt. The review says how many it creates ("Creates 2 new tags: /cars/teslaa, /teslaa").
+- **Parts.** A first use of a deep new path may need more than one part (§7.2). The review says how many approvals, as edits do.
+- **The price** is in plain figures (T-3).
+- **It says the tags are public:** "Tags are public and permanent: anyone can see that you tagged cat.jpg /cars/tesla." (§7.13). Private tags would stay on this device, and aren't in this version.
+- **"Not this"** says its reach: "Hides cat.jpg at /cars/tesla for you and for anyone whose lens puts you first. It says nothing about /cars."
 
 ## The search box
 
-- **It sits in the File Browser's location bar.** It accepts a path, a word or a link.
-- **The chain answers exact words only.** Typing `tesla` and pressing Enter opens the word view for `tesla`, with every place that uses it and their counts. Typing a path (`cars/tesla`) opens that path view.
-- **Folding is shown when it changes the text:** "Searching for `tesla` (you typed `Tesla`)".
-- **Type-ahead on partial words can't come from the chain.** For now it covers only topics seen in this tab, in memory. Two later sources each need a decision first:
-  - **A local cache of topics across visits** is new storage beyond the settings record and the save journal, which AGENTS.md defers.
-  - **A Graph-style index** is a new remote service, so it would go in Settings like the RPC list, off by default. Every query would tell that service what the person is interested in.
-- **The copy states the limit:** "Exact matches only. Searching partial words needs an index service, which isn't set up."
-- **File-name search is a different feature,** and out of scope here.
+- **It sits in the File Browser's location bar,** and accepts a path, a word or a link.
+- **The chain answers exact words only.**
+  - A single word opens its word view.
+  - A path opens its path view.
+  - Folding is shown when it changes the text: "Showing `tesla` (you typed `Tesla`)".
+- **Type-ahead on partial words covers topics seen in this tab only** (PM). A local cache would be new storage, and an index service a new remote party, so each needs a decision and would be off by default.
+- **The copy says so:** "Exact matches only. Searching partial words needs an index service, which isn't set up."
 
 ## Naming: a named spot first, tags on top
 
-A file is created with a name in a place: under its author's address, or in a folder there. Tags go on top (the Gmail "All Mail plus labels" model; round 2, background).
-- **Creating a file always gives it a named spot.**
-  - **Once addresses are places (C8),** the default spot is the person's own address or a folder under it. Its folder path is `/0x…/photos/cat.jpg`, and the name keeps its capitals.
-  - **Until then,** it's a folder they choose, under the realm's shared root, which works today but gets no link of its own. Such folders and files are shared only by their permanent object links. *(My call; the sources don't cover the time before addresses.)*
-  - **Those earlier files get no spot under the person's address automatically.** When addresses land, "File it under my address" adds one: one more named link, and the old one stays. It's offered on the person's files that have none.
-  - Tags go on top, in the same review where possible.
-- **A file can be named in more places later.** The name a view shows first is the one its author gave it.
-- **"New file here" on a path view** creates the file under the person's address (or in a chosen folder) and tags it with this topic, in one review.
-- **What name a path or word view shows for an item:**
-  1. the name its author gave it, in their named spot;
-  2. else the name in the tagger's named spot;
-  3. else its Type and short id.
-
-  The client never invents a name. Tagging someone else's file doesn't name it.
-- **Renaming a file changes its name everywhere it's shown,** because its tags point at the file and not at the name. That's the point of keeping the name off the tag.
+- **A new file always gets a named spot.** That's under the person's own address (or a folder there) once addresses are places; until then, a folder they choose under the realm's shared root, shared only by its permanent link. *(My call for the time before addresses.)*
+- **Tags go on top,** in the same review where possible. "New file here" on a path view creates the file under the person's address and tags it with this topic, in one review.
+- **Renaming a file changes its name everywhere,** because tags point at the file, not at the name.
 
 ## What the client needs from the SDK
 
-Each ask names the shape, not the implementation. The SDK sketch (#36) already covers most of them.
-
-1. **Link kinds:**
-   - `parseLink` returns a topic kind (and a word kind, under option 3), an address kind, and folder paths under an address.
-   - Each carries the display words, the canonical link, and the lens.
-2. **A path view read:**
-   - pages of rows, each with item, tagger, number, Type and tagged-at;
-   - the lens with public on or off, plus whether hidden items are included, `types`, `cursor` and `limit`;
-   - rows marked as coming from the named lens or from public, so the two sections can be drawn;
-   - coverage COMPLETE or PARTIAL, plus skipped counts (denied, filtered).
-3. **Sub-entries of a topic,** paged the same way.
-4. **Counts,** with what each count includes.
-5. **The word view's data:**
-   - **Option 1:** exact-word lookup (every topic with this last word, each with its count) plus a bounded merge of their lists in time order.
-   - **Option 2:** the word's own list.
-   - **Option 3:** the word's own list, grouped by place, with a count per place.
-   - **Either way:** the lens's same-as and moved-to statements about the word or place, each with its author, and a bound on how many words a merge follows.
-6. **A fold result:** the canonical words, whether folding changed them, and a mixed-script flag.
-7. **An item's display name:** its author's named spot and the tagger's, without the client walking anything.
-8. **Planners** for tag, remove my tag, and "not this", with the number, and attach to an address. Each returns the usual `PLANNED { parts, review }`, with the gas figure in the review (T-3).
-9. **Place reads with the owner inserted:**
-   - a lens helper that inserts an address, or a folder's creator, after the reader;
-   - a name read that, with public on and nobody in the lens answering, returns every version in one place, newest first.
-
-   The client never assembles a lens order or walks authors itself.
-
-## What waits for what
-
-| Piece | Waits on |
-|---|---|
-| Path view, sub-entries, counts, exact-word search | James's answer to the one real choice, then the contracts release; then SDK asks 1–6. A first version with public off needs no view-all list (lens lists work as built), but still waits for topic ids |
-| Word view | option 1: the exact-word list. Option 3: the per-word lists, plus the contracts measurement of their cost and abuse. Option 2: the word's list |
-| Synonyms, "moved to" and display names per language | the topic statements in the contracts tag work; SDK ask 5. Until then a view shows the path's own words |
-| Tagging, "Not this", the number | the contracts release (the signed number, T-4); SDK ask 8 |
-| Address views, attaching to an address | homes (C8) in that release; SDK asks 8–9 |
-| Public on (the default) | the all-authors lists (view-all) in that release. Until then the switch is off and disabled |
-| Item names in path and word views | SDK ask 7; folder operations (named spots) |
-| Type-ahead beyond the tab | a decision on a local cache or an index service |
-| Hiding another author's entry | the contracts release (a lone negative, or C3) |
-
-None of this starts before its row is clear. The folder operations proceed now (`file-operations.md`).
-
-## Approaches considered
-
-1. **Whose entries.** Decided by the PM: one lens ending in public, with public on by default on this test chain.
-   - The earlier draft proposed three separate modes (Mine, Everyone, Raw). They're now the public switch plus a "show what's marked 'not this'" switch.
-   - **Adaptive** (public off when the lens is non-empty, else on): rejected. The same link would show different things to the same person as their lens grows, with no visible cause.
-2. **Where the topic view lives.**
-   - **The File Browser's panes** (recommended). It's the only app, and its panes already speak "entries of X".
-   - **A separate Topics app now:** rejected. It would be a second app with one view and no second consumer.
-3. **Type-ahead.**
-   - **This tab's memory** (recommended for now): no new storage, no new service.
-   - **A persistent local cache:** new storage, so it needs a decision.
-   - **An index service:** a new remote party, so it needs a decision and a Settings entry.
+Matching the spec's SDK work order (§9):
+1. **Fold and the link grammar,** with vectors: topic, word page, address with names, and `~efs` kinds. The fold result carries the canonical words, whether folding changed them, and a mixed-script flag.
+2. **`planTag`, `planUntag` and `planDeny`.**
+   - Registration is planned automatically and split when deep.
+   - The review shows the price, the number of parts, and the new topics it creates.
+   - It targets a file or a revision.
+3. **Reads for the three views:**
+   - the lens rule;
+   - here and below, or only here;
+   - duplicates removed by thing, when it can;
+   - each row's tagger, number, Type, where it was filed, and whether it came from the lens or from public;
+   - counts (global, and the lens's where cheap);
+   - word pages grouped by place;
+   - the synonym merge, within its bounds;
+   - the display-name order of §3.7.
+4. **Children of a topic** with the lens's listing statements, so the curated, counted and hidden split can be drawn.
+5. **A place view with the owner inserted** (the pure lens helper), and the owner's rows marked so "whose" labels need no extra read.
 
 ## Testing, when this is built
 
-- **Recorded transcripts** from the SDK's fixture chain, as for edits. Never edited by hand.
-- **Each honesty rule gets a test that fails when the rule is broken:**
-  - PARTIAL or filtered never reads as empty;
-  - UNKNOWN never reads as empty;
-  - "Not this" is never shown as "Remove my tag";
-  - media reached only through public isn't loaded until asked;
-  - an address view shows yours, then the address's, then public's, for one name (James's pet.jpg example, as a test).
-- **At 320 px,** keyboard and axe in light and dark, as the other slices do.
+Recorded transcripts from the SDK's fixture chain, never edited by hand. Each rule gets a test that fails when the rule is broken:
+- a word page is grouped by place; a test asserts there's no single mixed list;
+- every row at a place that isn't the owner's says whose it is, "yours" included;
+- PARTIAL, filtered and UNKNOWN never read as empty;
+- "Not this" is never shown as "Remove my tag", and its review states its reach;
+- a stranger's "not this" hides nothing in Everyone;
+- junk children stay behind "Show all", and a lens "not this" hides a child;
+- media reached only through public isn't loaded until asked;
+- James's `pet.jpg` example: yours, then the address's, then public's;
+- suggestions show both counts, lens places first;
+- a new path's review names the topics it creates.
+
+Plus 320 px, keyboard, and axe in light and dark.
 
 ## Decided (2026-11-25)
 
-By the PM, or by James where marked:
-1. **The bare path is a topic.** Folders and named files live under an address (decision-sheet default). Object links stay the default for sharing. Folder path links come once addresses exist, labelled as lookups a rename can break.
-2. **Whose entries:** one lens ending in public, with public on by default (this is a test chain).
-3. **The owner's place in the lens:** right after the reader, ahead of the named lens. The reader can switch it off for a view.
-4. **"You" first when connected,** with the three conditions above.
-5. **The media gate:** yes, for items reached only through public.
-6. **Rows are tags for now,** so an item can appear more than once, provided each row names who tagged it.
-7. **Copy:** "tag" in the interface, "topic" only internally.
-8. **Type-ahead:** from this tab only.
-9. **(James) Public lists are newest first,** and there are no small depth limits.
+**By James:**
+1. The tag model: paths tell tags apart, and a word's page shows every place, grouped by place.
+2. No small depth limit.
+3. Public lists are newest first.
 
-## Open
+**By the PM:**
+1. The bare path is a topic. Folders and named files live under an address, and object links are the default for sharing.
+2. One lens ending in public, with the owner right after the reader.
+3. "You" first when connected, with three conditions.
+4. The media gate.
+5. Rows are tags for now, each naming who tagged it.
+6. "Tag" in copy.
+7. Type-ahead from this tab only.
 
-- **James's yes on the sentence** *"paths tell tags apart, and a word's page shows every place that word is used"*, or a different pick.
-- **Whether a file's name is its own mechanism** or a path's last word. Until then, no link addresses a named file through a topic.
-- **Who is in a newcomer's lens.** It can wait.
+## For the PM
+
+1. **The default view for topics:** Everyone (recommended, above) or Mine. If it's a product call, it's James's.
+2. **The junk-children numbers:** up to 8 rows by default, and a minimum of 2 tags to fill a slot. Is there a better default, or should it be left to the SDK's children read?

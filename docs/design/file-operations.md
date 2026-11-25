@@ -47,7 +47,7 @@
 ▸ trips            Folder
   cat.jpg          Image · 48 KB                              ⋯
   notes.txt        Text · 2 KB · Saving                       ⋯
-  draft.md         Text · 0x9f…01                     (not yours, actions off)
+  draft.md         Text · 0x9f…01's                   (not yours, actions off)
                                                       [ Show more ]
 ```
 
@@ -81,7 +81,7 @@
   - A `conflict` shows the existing "Authors in your lens disagree".
 - **Rows** (`listFolder`, 50 a page). There's one row per name, by the lens law.
   - Folders come first, then files, each in the SDK's order, plus Type and size.
-  - The author is shown only when it isn't the person (lens requirement L1: no lens chrome until it changes an answer).
+  - **Every row that isn't the folder owner's says whose it is,** the person's own included ("yours"). That's tag spec §4; without it, the person's own `pet.jpg` in someone else's folder looks like the owner's. The owner's rows carry no label. This overrides lens requirement L1 here, because at a place authorship always changes the answer.
   - **An entry of kind `invalid`** gets a row saying "This entry can't be read." It's never hidden, and never shown as a file.
   - **Skipped rows are counted:** `skipped.hidden` says "3 hidden by a block in your lens", and `skipped.filtered` is the kind filter's count (below).
 - **Opening.**
