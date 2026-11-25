@@ -23,7 +23,8 @@ export class EfsPaneHost extends EfsElement {
 
   #scope: OwnerScope | undefined;
   #elements = new Map<string, HTMLElement>();
-  #wide = state(true);
+  /** Narrow (tabs) until measured: a first paint wider than a phone would scroll sideways. */
+  #wide = state(false);
   #active = state(0);
   #observer: ResizeObserver | undefined;
 
@@ -34,10 +35,14 @@ export class EfsPaneHost extends EfsElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.#scope = createScope();
-    this.#observer = new ResizeObserver(([entry]) => {
-      if (!entry) return;
+    const fits = (width: number) => {
       const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      this.#wide.set(entry.contentRect.width >= this.panes.length * MIN_PANE_REM * rem);
+      return width >= (this.panes?.length ?? 1) * MIN_PANE_REM * rem;
+    };
+    // Decide before the first render when the width is already known (it usually is).
+    this.#wide.set(fits(this.clientWidth));
+    this.#observer = new ResizeObserver(([entry]) => {
+      if (entry) this.#wide.set(fits(entry.contentRect.width));
     });
     this.#observer.observe(this);
   }
