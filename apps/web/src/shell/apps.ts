@@ -103,10 +103,11 @@ export interface AppMount {
   /** Slotted into the shell's navigation region (the File Browser's tree goes here). */
   readonly navigation?: HTMLElement;
   /**
-   * The view that shows what a realm link names (the File Browser's Preview). Where panes are
-   * tabs (narrow screens), arriving by a link brings this view to the front.
+   * The view that shows what a realm link names (the File Browser's Preview, or its Entries for a
+   * folder link). Where panes are tabs (narrow screens), arriving by a link brings this view to
+   * the front, once: a signal lets the app say which view only after it knows (undefined: not yet).
    */
-  readonly linkView?: string;
+  readonly linkView?: string | ReadonlySignal<string | undefined>;
 }
 
 export interface AppEntry {

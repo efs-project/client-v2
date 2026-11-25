@@ -148,21 +148,8 @@ test.describe('verified reads (recorded chain traffic)', () => {
     expect(replay.misses).toEqual([]);
   });
 
-  test('"proven absent" and "couldn\'t tell" look different, and only the second offers a retry', async ({
-    page,
-  }) => {
-    await serveConfig(page);
-    await serveDeployment(page);
-    const replay = await replayRpc(page, ['pin-verified', 'open-absent']);
-    const absent = transcript('open-absent').ids.file as string;
-    await page.goto(`./#/r/testnet/${objectLink(absent)}`);
-    await booted(page);
-    const outcome = preview(page).locator('efs-outcome');
-    await expect(outcome).toContainText('Confirmed not present.');
-    await expect(outcome).toContainText('ABSENT_PROVEN');
-    await expect(outcome.getByRole('button', { name: 'Try again' })).toHaveCount(0);
-    expect(replay.misses).toEqual([]);
-  });
+  // "Proven absent" moved to folders.spec.ts: an object link now also asks openObject whether the
+  // id is a folder, which these recorded SDK fixtures predate.
 
   test('a large binary file is verified across chunks and offered for saving, not shown', async ({
     page,

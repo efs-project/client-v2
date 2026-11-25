@@ -18,15 +18,19 @@ export type LinkState =
       readonly canonical: string;
     }
   | { readonly status: 'invalid'; readonly rule: string }
-  /** A path link: waits for the folder model, never guessed. */
-  | { readonly status: 'path' };
+  /**
+   * An address (home) or topic link: readable once homes and tags land in a contracts release,
+   * never guessed before then.
+   */
+  | { readonly status: 'path'; readonly kind: 'home' | 'topic' };
 
 export function linkState(location: AppLocation): LinkState {
   if (location.kind !== 'realm' || location.link === '') return { status: 'none' };
   const parsed = parseLink(location.link);
   if (parsed.status === 'INVALID') return { status: 'invalid', rule: parsed.rule };
-  if (parsed.status === 'UNSUPPORTED') return { status: 'path' };
   const { target, canonical } = parsed;
+  if (target.kind === 'home' || target.kind === 'topic')
+    return { status: 'path', kind: target.kind };
   if (target.kind === 'revision') {
     return { status: 'target', target: { kind: 'revision', recordId: target.recordId }, canonical };
   }

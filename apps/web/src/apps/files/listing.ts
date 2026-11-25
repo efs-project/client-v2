@@ -36,6 +36,7 @@ import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
+import type { ObjectKindState } from './object-kind.ts';
 
 const loadReads = async (): Promise<FolderReads> => {
   const { listFolder } = await import('@efs/sdk/files');
@@ -67,27 +68,27 @@ type PaneState = ListingState | { readonly phase: 'load-failed' };
 /** The realm's shared root folder, from the pinned deployment: the stand-in start. */
 export function rootFolder(efs: Efs): FolderRef {
   const root = efs.deployment.root;
-  return {
-    kind: 'folder',
-    directory: root.directoryRecordId,
-    subject: root.subjectId,
-    owner: root.principalId,
-  };
+  return { kind: 'folder', directory: root.directoryRecordId, owner: root.principalId };
 }
 
 export class EfsFilesListing extends EfsElement {
   static override properties = {
     host: { attribute: false },
     nav: { attribute: false },
+    object: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
+  /** What the route's object link names (a folder lists here). */
+  declare object: ObjectKindState;
 
   #state = state<PaneState | undefined>(undefined);
   #kind = state<KindFilter>('all');
   #scope: OwnerScope | undefined;
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
+  /** The route's link when last seen, to tell arriving at the root from being there. */
+  #routeLink: string | undefined;
   #efs: Efs | undefined;
   /** How far each save touching the folder on screen has been listed again for. */
   #synced = new Map<string, 'committed' | 'final'>();
@@ -114,12 +115,26 @@ export class EfsFilesListing extends EfsElement {
         this.#efs = efs;
         queueMicrotask(() => this.nav.back(0));
       }
-      // Lists only while the person browses: at the realm's root, or once they have opened it in
-      // this tab. A file link opened fresh reads nothing here (its Preview is what was asked for).
+      // Lists only while the person browses: at the realm's root, at a folder's link, or once they
+      // have done either in this tab. A file link opened fresh reads nothing here.
       const location = this.host.location.get();
       const atRoot = location.kind === 'realm' && location.link === '';
+      const named = this.object.kind.get();
+      // Arriving at the root (Back, a link, the breadcrumb) ends the trail. Only on arrival: a row
+      // click extends the trail a moment before its folder's link reaches the URL.
+      const routeLink = location.kind === 'realm' ? location.link : undefined;
+      if (atRoot && this.#routeLink !== undefined && this.#routeLink !== '') {
+        queueMicrotask(() => this.nav.back(0));
+      }
+      this.#routeLink = routeLink;
+      if (named.status === 'folder') {
+        const top = this.nav.path.get().at(-1)?.folder;
+        if (top?.directory.toLowerCase() !== named.folder.directory.toLowerCase()) {
+          queueMicrotask(() => this.nav.resetTo({ folder: named.folder, name: '' }));
+        }
+      }
       if (atRoot && !this.nav.browsing.get()) queueMicrotask(() => this.nav.startBrowsing());
-      const browsing = atRoot || this.nav.browsing.get();
+      const browsing = atRoot || named.status === 'folder' || this.nav.browsing.get();
       const folder = browsing ? this.#folder(efs) : undefined;
       const kind = this.#kind.get();
       const reader = this.#reader();
@@ -373,7 +388,11 @@ export class EfsFilesListing extends EfsElement {
       open = html`<button
         type="button"
         class="efs-entry-open"
-        @click=${() => this.nav.open({ folder: target, name: row.name })}
+        @click=${() => {
+          // The trail first (so the breadcrumb names it), then the folder's own link in the URL.
+          this.nav.open({ folder: target, name: row.name });
+          this.host.openLink(link({ kind: 'object', subject: target.directory as never }));
+        }}
       >
         ${appIcon('folder')} ${name}
       </button>`;

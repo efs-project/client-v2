@@ -11,11 +11,7 @@ import {
 
 const efs = {} as Efs;
 const folder: FolderRef = { kind: 'folder', directory: `0x${'d1'.repeat(32)}` as never };
-const listed: FolderRef = {
-  ...folder,
-  subject: `0x${'5a'.repeat(32)}` as never,
-  owner: `0x${'0a'.repeat(32)}` as never,
-};
+const listed: FolderRef = { ...folder, owner: `0x${'0a'.repeat(32)}` as never };
 const row = (name: string): FolderRow =>
   ({
     name,

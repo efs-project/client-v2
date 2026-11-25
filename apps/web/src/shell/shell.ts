@@ -319,12 +319,14 @@ export class EfsShell extends EfsElement {
     // Arriving by a link (a shared file link, say) shows what it names, even where panes are tabs.
     const route = this.os.route.get();
     const link = route.kind === 'realm' && route.link !== '' ? route.link : undefined;
+    const linkView = slot.mount.linkView;
+    const view = typeof linkView === 'string' || !linkView ? linkView : linkView.get();
     return html`<efs-pane-host
       .panes=${resolveLayout(slot.mount.defaultLayout, slot.mount.views)}
       .views=${slot.mount.views}
       .translator=${this.translator}
-      .frontView=${slot.mount.linkView}
-      .frontKey=${link}
+      .frontView=${view}
+      .frontKey=${link === undefined ? undefined : `${link}|${view ?? ''}`}
     ></efs-pane-host>`;
   }
 

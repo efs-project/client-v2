@@ -31,7 +31,7 @@ async function withNotes(chain: TestChain): Promise<void> {
         lens,
       }),
     );
-    return { notes: made.created.subject as string };
+    return { notes: made.created.directory as string };
   });
   // The test wallet's account (anvil #6), which isn't in the default Lens.
   await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save }) => {
@@ -77,12 +77,14 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
     await expect(row(page, 'notes').locator('.efs-entry-whose')).toHaveCount(0);
     chain.step('Connect as #6: the place Lens is #6, then the root owner, then the default');
 
-    // Into the folder: the URL stays at the root (folders stay in this tab's memory).
+    // Into the folder: the URL is the folder's own object link (routed through openObject).
     await row(page, 'notes').getByRole('button').click();
     await expect(row(page, 'todo.txt')).toContainText('File');
     await expect(crumbs(page)).toHaveCount(2);
     await expect(crumbs(page).last()).toContainText('notes');
-    expect(new URL(page.url()).hash).toBe('#/r/testnet/');
+    await expect
+      .poll(() => new URL(page.url()).hash)
+      .toBe(`#/r/testnet/${objectLink(chain.ids.notes as string)}`);
 
     // A file opens by its permanent link, in the Preview; the listing stays where it was.
     await row(page, 'todo.txt').getByRole('link').click();
@@ -108,7 +110,7 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
   }
 });
 
-test('a file link opened fresh lists nothing until the person asks to browse; a reload goes back to the root', async ({
+test('a file link opened fresh lists nothing until asked; a folder link survives a reload and is never "not present"', async ({
   page,
 }) => {
   const chain = await testChain(
@@ -128,13 +130,38 @@ test('a file link opened fresh lists nothing until the person asks to browse; a 
     await row(page, 'notes').getByRole('button').click();
     await expect(row(page, 'todo.txt')).toBeVisible();
 
-    // Folders aren't in the URL until the SDK can tell a folder from a file by its link alone:
-    // a reload is back at the root, never a folder read as "Confirmed not present".
+    // A folder's link is in the URL now, and survives a reload: openObject says it's a folder,
+    // so it lists again, and is never read as a file ("Confirmed not present").
+    await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await page.reload();
     await booted(page);
-    await expect(row(page, 'notes')).toBeVisible();
+    await expect(row(page, 'todo.txt')).toBeVisible();
     await expect(page.getByText('Confirmed not present')).toHaveCount(0);
-    chain.step('Browse, open notes/, reload: back at the root');
+    await expect(preview(page)).toContainText('This link is a folder');
+    // With no trail after a reload, the breadcrumb names it by its short id; Root goes home.
+    await expect(crumbs(page)).toHaveCount(2);
+    await crumbs(page).first().click();
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
+    await expect(row(page, 'notes')).toBeVisible();
+    chain.step('Browse, open notes/, reload: still notes/; Root goes back to the root');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('an object link to nothing is proven absent (openFile, then openObject): no retry, never a folder', async ({
+  page,
+}) => {
+  const chain = await testChain('client-object-absent', 'An object link whose id nothing has.');
+  try {
+    const nothingHere = `0x${'5e'.repeat(32)}`;
+    await open(page, chain, `./#/r/testnet/${objectLink(nothingHere)}`);
+    const outcome = preview(page).locator('efs-outcome');
+    await expect(outcome).toContainText('Confirmed not present.');
+    await expect(outcome).toContainText('ABSENT_PROVEN');
+    await expect(outcome.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    await expect(entries(page).locator('.efs-entry')).toHaveCount(0);
+    chain.step('openFile: no HEAD; openObject: no folder record, no subject');
   } finally {
     await chain.finish();
   }
