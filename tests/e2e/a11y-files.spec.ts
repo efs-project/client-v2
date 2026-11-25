@@ -200,7 +200,11 @@ test('Remove and Restore by keyboard: Keep it takes focus, Escape keeps; Remove,
 
     await activate(page, remove);
     await expect(dialog(page).locator('wa-button.efs-folder-keep')).toBeFocused();
-    await activate(page, send(page));
+    // To Remove by the person's own key: a focus moved there without input isn't their choice,
+    // and Keep it takes it back once the dialog has shown (so `activate` could keep instead).
+    await page.keyboard.press('Tab');
+    await expect(send(page)).toBeFocused();
+    await page.keyboard.press('Enter');
     const notice = entries(page).locator('.efs-entries-removed');
     await expect(notice).toContainText(/removed\W+shared\.txt/);
     await expect(notice).toHaveAttribute('role', 'status');
