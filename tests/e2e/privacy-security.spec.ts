@@ -166,6 +166,7 @@ test('only the expected custom elements are registered', async ({ page }) => {
     'efs-files-topic',
     'efs-files-tree',
     'efs-files-view',
+    'efs-files-word',
     'efs-network-indicator',
     'efs-outcome',
     'efs-pane-host',
