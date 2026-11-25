@@ -103,7 +103,7 @@ For each (topic, thing), the first of these with a stance decides (§3.1). An UN
 - Public results follow under "From everyone else · not checked by anyone you trust · newest first".
 - Rows reached only through public open the Preview behind the media gate (below).
 
-**Recommended default for topics: Everyone.**
+**Default for topics: Everyone** (PM working default D11, reversible; recommended here).
 - **View-all is a ruled requirement,** and James called it *"important for censorship resistance and UX"*.
 - **Newcomers have no curators yet** (§7.10). Who's in a newcomer's lens is still open, so Mine would be empty or nearly so. A page saying "nothing here" over thousands of tags is the missing-answer-as-none bug at product scale.
 - **Everyone is also the cheaper read.** It's one all-authors list per topic. Mine with roll-up is the expensive view (§7.1).
@@ -380,15 +380,17 @@ Plus 320 px, keyboard, and axe in light and dark.
 3. Public lists are newest first.
 
 **By the PM:**
-1. The bare path is a topic. Folders and named files live under an address, and object links are the default for sharing.
-2. One lens ending in public, with the owner right after the reader.
-3. "You" first when connected, with three conditions.
-4. The media gate.
-5. Rows are tags for now, each naming who tagged it.
-6. "Tag" in copy.
-7. Type-ahead from this tab only.
+1. **The default view for topics is Everyone** (PM working default D11, reversible). It's listed for James as a default he can flip in one line. It follows his *"a lot of people are going to want to… just 'view all'"*. The first build shows Mine until view-all ships.
+2. The bare path is a topic. Folders and named files live under an address, and object links are the default for sharing.
+3. One lens ending in public, with the owner right after the reader.
+4. "You" first when connected, with three conditions.
+5. The media gate.
+6. Rows are tags for now, each naming who tagged it.
+7. "Tag" in copy.
+8. Type-ahead from this tab only.
 
-## For the PM
+## Open with the tag PM session
 
-1. **The default view for topics:** Everyone (recommended, above) or Mine. If it's a product call, it's James's.
-2. **The junk-children numbers:** up to 8 rows by default, and a minimum of 2 tags to fill a slot. Is there a better default, or should it be left to the SDK's children read?
+- **The junk-children numbers:** up to 8 rows by default, and a minimum of 2 tags to fill a slot. Or should the SDK's children read own the threshold?
+- **Grouping a mid-path word** at the place where it sits.
+- **The word page's group order:** lens-used places first.
