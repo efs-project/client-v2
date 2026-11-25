@@ -331,3 +331,48 @@ test('A selection by keyboard: Space selects rows, the bar is reachable, its Rem
     await chain.finish();
   }
 });
+
+test('a removal opens on Keep it unless the person moves: focus put elsewhere without their input goes back to Keep it, so Enter keeps', async ({
+  page,
+}) => {
+  const chain = await testChain('client-a11y-keep-default', 'mine.txt by anvil #6 at the root.');
+  try {
+    await fileAtRoot(chain, 6, 'mine.txt', 'mine\n');
+    await start(page, chain);
+    // A slow show, so the review is on screen well before the dialog's own after-show step.
+    // (Set on the element: the app's CSP refuses an injected style sheet.)
+    await page
+      .locator('wa-dialog.efs-folder-save')
+      .evaluate((el) => (el as HTMLElement).style.setProperty('--show-duration', '1500ms'));
+    const keep = dialog(page).locator('wa-button.efs-folder-keep');
+    const remove = row(page, 'mine.txt').locator('wa-button.efs-entry-remove');
+
+    await remove.click();
+    await expect(keep).toBeFocused();
+    // Focus placed on Remove by something other than the person (as an autofocus would be): not
+    // a choice. Once the dialog has shown, Keep it has focus again, and Enter keeps the entry.
+    await send(page).evaluate((el) => (el as HTMLElement).focus());
+    await expect(send(page)).toBeFocused();
+    await expect(keep).toBeFocused({ timeout: 5000 });
+    await page.keyboard.press('Enter');
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'mine.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Remove, focus put on Remove without input: back on Keep it; Enter keeps');
+
+    // The person's own move is theirs: Tab to Remove while the dialog is still showing stays.
+    await remove.click();
+    await expect(keep).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(send(page)).toBeFocused();
+    await page.waitForTimeout(1800);
+    await expect(send(page)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(500);
+    chain.step('Remove, the person tabs to Remove while it shows: their focus stays; Escape keeps');
+  } finally {
+    await chain.finish();
+  }
+});

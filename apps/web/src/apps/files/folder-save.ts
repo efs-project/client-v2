@@ -176,6 +176,11 @@ export class EfsFolderSave extends EfsElement {
   /** Plans made since this opening (shown as data-plans; see #plan). */
   #plans = 0;
   /**
+   * The person pressed a key or a pointer inside the dialog since it opened: only then can a
+   * focus elsewhere be theirs (never the browser's or Web Awesome's own focus on open).
+   */
+  #personInput = false;
+  /**
    * "New text file", named: handed to the editor once the dialog has closed. The dialog gives
    * focus back to its trigger as it closes, so the editor opening any sooner would lose its
    * focus (and the first keystrokes) to the toolbar.
@@ -209,6 +214,10 @@ export class EfsFolderSave extends EfsElement {
     void this.updateComplete.then(() => this.#focusKeep());
   }
 
+  #onInput = (): void => {
+    this.#personInput = true;
+  };
+
   #focusKeep(): void {
     // A freshly rendered <wa-button> ignores focus() until its own first render is done (its inner
     // button isn't there yet): wait for it, not just for this dialog's update. Firefox showed it.
@@ -224,6 +233,7 @@ export class EfsFolderSave extends EfsElement {
     this.#controller = new AbortController();
     this.#plans = 0;
     this.dataset.plans = '0';
+    this.#personInput = false;
     this.#ask.set(ask);
     const named =
       ask.kind === 'createFolder' ||
@@ -1056,14 +1066,23 @@ export class EfsFolderSave extends EfsElement {
       @wa-after-show=${(event: Event) => {
         // The dialog's own show focus runs last: a removal's review still opens on Keep it. But
         // never over a choice the person already made: if they moved to another control in the
-        // review while it was still showing, focus stays where they put it.
+        // review while it was still showing (by key or pointer), focus stays where they put it.
         if (event.target !== event.currentTarget) return;
         const phase = this.#phase.get().phase;
         if (this.#ask.get()?.kind !== 'remove' || phase !== 'review') return;
+        // Theirs only after their own key or pointer inside the dialog: a focus the browser or
+        // Web Awesome placed on open (even on Remove) is never a choice, and Keep it takes it.
         const active = document.activeElement;
-        const moved = active !== null && active !== event.currentTarget && this.contains(active);
-        if (!moved || active?.matches('wa-button.efs-folder-keep')) this.#focusKeep();
+        const chose =
+          this.#personInput &&
+          active !== null &&
+          active !== event.currentTarget &&
+          this.contains(active) &&
+          !active.matches('wa-button.efs-folder-keep');
+        if (!chose) this.#focusKeep();
       }}
+      @keydown=${this.#onInput}
+      @pointerdown=${this.#onInput}
       @wa-hide=${(event: Event) => {
         if (event.target !== event.currentTarget) return;
         if (this.#phase.get().phase === 'sending') event.preventDefault();

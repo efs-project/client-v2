@@ -213,6 +213,9 @@ Remove "pet.jpg" from 0x12…ab?
   - It's labelled "Remove and block this name", with the line "Other people's files called <name> won't show here either, for anyone whose view puts you first".
   - The word "hide" is still never used (A7).
 - **Keep it is focused first,** as in the discard dialog, so Enter or Escape keeps the entry.
+  Focus leaves it only by the person's own key or pointer inside the dialog: a focus the browser or
+  Web Awesome places on open (even on Remove) is not a choice, and Keep it takes focus back once the
+  dialog has shown.
 - **Removing a folder:**
   - It removes the folder's entry from its parent. Its contents stay inside it, still reachable by its link.
   - The dialog adds: "Items inside it stay inside it."
