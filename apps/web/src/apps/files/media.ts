@@ -3,8 +3,8 @@
 //
 // The bytes decide, not a name or a declared type: a file's media type is a separate fact from
 // its content (system constitution), and a wrong declared type must not make the browser parse
-// bytes as something they aren't. When the SDK exposes the declared files-content/1 media type,
-// it becomes a hint that must agree with this (see `agrees`).
+// bytes as something they aren't. The file's declared media type (`OpenedFile.mediaType`, from
+// its descriptor) is only a hint: it must agree with this before anything is shown (`agrees`).
 //
 // SVG is an image here and only ever an image: shown through <img>, where scripts don't run
 // and nothing external loads; never inline in the page, never as a document.
@@ -109,8 +109,9 @@ export function sniffMedia(b: Uint8Array): MediaKind | undefined {
 }
 
 /**
- * Whether a declared media type (the SDK's files-content/1 media, when it exposes one) agrees with
- * what the bytes are. A disagreement means "can't preview this type", never trusting either.
+ * Whether a declared media type (`OpenedFile.mediaType`) agrees with what the bytes are, by its
+ * top-level type. No declared type (absent or "") agrees. A disagreement means "can't preview
+ * this", never trusting either.
  */
 export function agrees(declared: string | undefined, sniffed: MediaKind): boolean {
   if (!declared) return true;

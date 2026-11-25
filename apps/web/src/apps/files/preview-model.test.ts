@@ -183,6 +183,27 @@ describe('classifyContent', () => {
     expect(classifyContent(new Uint8Array([0x68, 0x00, 0x69]))).toEqual({ kind: 'binary' });
     expect(classifyContent(new Uint8Array([0xff, 0xfe, 0x41]))).toEqual({ kind: 'binary' });
   });
+  it('uses the declared media type only as a hint the bytes must agree with', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const image = { kind: 'image', mime: 'image/png' };
+    // Agreeing (any image subtype), absent, or cleared: shown by the bytes' own signature.
+    expect(classifyContent(png, 'image/jpeg')).toEqual({ kind: 'media', media: image });
+    expect(classifyContent(png, undefined)).toEqual({ kind: 'media', media: image });
+    expect(classifyContent(png, '')).toEqual({ kind: 'media', media: image });
+    // Disagreeing: neither is trusted, so nothing is shown.
+    expect(classifyContent(png, 'video/mp4')).toEqual({
+      kind: 'mismatch',
+      declared: 'video/mp4',
+      media: image,
+    });
+    expect(classifyContent(png, 'text/plain')).toMatchObject({ kind: 'mismatch' });
+    // A declared type never makes bytes count as media: text stays text.
+    expect(classifyContent(utf8('hello'), 'image/png')).toEqual({
+      kind: 'text',
+      text: 'hello',
+      truncated: false,
+    });
+  });
   it('cuts very long text for display and says so', () => {
     const content = classifyContent(utf8('a'.repeat(PREVIEW_MAX_CHARS + 5)));
     expect(content).toMatchObject({ kind: 'text', truncated: true });

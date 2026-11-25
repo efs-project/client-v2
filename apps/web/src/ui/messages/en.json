@@ -149,6 +149,7 @@
   "files.preview.tooLarge": "This file is {$size :number} bytes. Files up to 1 MiB load automatically.",
   "files.preview.load": "Load it",
   "files.preview.binary": "This version can't preview this kind of file. Save a copy to open it.",
+  "files.preview.mismatch": "This file says it's {$declared}, but its contents are a different kind of file, so it isn't shown. Save a copy to open it.",
   "files.preview.save": "Save a copy",
   "files.preview.truncated": "Only the beginning is shown. Save a copy to get all of it.",
   "files.preview.attempts": "Sources tried",

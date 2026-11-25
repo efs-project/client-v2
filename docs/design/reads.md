@@ -31,7 +31,12 @@ user endpoint overrides ────┘    (os-state)          (lazy SDK)       
 - **Proven absent ≠ couldn't tell.** ABSENT_PROVEN shows "Confirmed not present" with no retry; UNKNOWN shows "Couldn't be confirmed right now" with Try again.
 - Files over 1 MiB wait for an explicit "Load it"; on-screen text is cut at 200,000 characters (saving is never cut).
 - **Images, audio and video (slice G)** render in the browser's native `<img>`, `<audio>` and `<video>` elements. They come from a `blob:` URL made only from VERIFIED bytes, and the bytes' own signature decides the element (`apps/files/media.ts`): PNG, JPEG, GIF, WebP, AVIF; WAV, FLAC, Ogg, MP3, M4A; WebM, MP4, QuickTime.
-  - **No declared type or file name decides.** The contracts don't yet define the descriptor's media word (C4 will add a MIME string). When the SDK exposes it, it will be a hint that must agree with the signature (`agrees`).
+  - **No declared type or file name decides.** Since contracts C4, a file's descriptor can declare a media type (`OpenedFile.mediaType`, for example `image/png`), but it's only a hint.
+    - Media is shown only when the declared type's top level agrees with what the signature found (`agrees`): `image/jpeg` agrees with PNG bytes, and `video/mp4` doesn't.
+    - On a disagreement nothing is shown. The Preview says "This file says it's video/mp4, but its contents are a different kind of file", with Save a copy. Neither the declaration nor the guess is trusted.
+    - A declared type never makes bytes count as media, so text stays text.
+    - No declared type (absent, or cleared with `""`) leaves the signature to decide alone.
+    - Edits keep the file's declared type, because the editor passes none. A small typed file is stored as one chunk so it can carry the type, and the review's layout says `chunk`.
   - **SVG is only ever an image:** shown through `<img>`, where its scripts don't run and nothing external loads, never inline, never as a document. Its URL is a `data:` URL (cap 5 MiB), never `blob:`: a `blob:` URL carries the app's origin, so "Open image in new tab" would make the SVG a document on our origin. A `data:` URL can't be opened top-level and would have an opaque origin anyway.
   - **Caps:** 25 MiB for images and 100 MiB for audio and video. Larger files, types this version doesn't show, and media the browser can't decode each say so and offer Save a copy.
   - **No streaming:** a span file is read whole and verified before it is shown; there is no streaming playback yet.
