@@ -40,7 +40,11 @@ saves session <── journal (non-creating check) <── every verified sessio
     - **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.** Otherwise "the view never switches by itself" still holds.
     - **The review's "this view shows <author>'s version first" is computed from the lens at review time.** With "you" first, it appears only when the person put someone else first, or opened a link that carries its own lens.
     - **Test, when built:** start an edit on the owner's version as a guest, then connect a wallet that has its own version of the file. The editor stays on the owner's text, and Review plans from the owner's revision as its base. It never saves over the person's own version, or the owner's, unasked.
-    - **Open, for when it's built:** if the SDK answers that plan with BASE_CHANGED because the view now shows the person's own version first, "This file has changed since you started it" would be wrong: nothing changed, the view reordered. That case needs its own copy, such as "You connected, and this view now shows your own version first. Save over it, or keep editing the version you started from?". It's to be worded with the SDK's answer.
+    - **A reorder isn't a change.** The SDK's base check is "the file's HEAD under the lens must still be `base`". With "you" first, that plan answers BASE_CHANGED with `head` set to the person's own version (SDK, via the PM, 2026-11-25).
+      - The editor tells this apart from a real change: it's a reorder when `head` is the connected account's own revision, and nothing new was saved since the edit began.
+      - A reorder gets its own copy, never "This file has changed since you started it": "You connected, and this view now shows your own version first. Save over it, or keep editing the version you started from?" (draft, PM-accepted).
+      - Saving over keeps the person's older version in history.
+      - **Needs from the SDK:** `RevisionRef` is `{ kind, recordId, file? }`, with no author, so the editor can't yet tell whose revision `head` is. The PM is asking the SDK dev for it.
 - **Review copy.**
   - Who sees the edit: "Your edit appears to anyone whose lens includes you."
   - How many approvals: one, or one per part (one if the wallet sends batches).
