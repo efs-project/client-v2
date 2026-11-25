@@ -7,8 +7,8 @@ refuses any other bytes.
 
 | File | Source | sha256 |
 |---|---|---|
-| `efs-sdk-0.0.0-57f76f0.tgz` | efs-project/sdk-v2 main `57f76f0a2f859b5cd274dd17c04125af2992573c` (#33: `SequenceProgress.effect` (files.edit: file, revision), reason EXPIRED, NOT_SENT for wallet refusals before signing; a disconnect stays AMBIGUOUS with a named reason. Earlier: #32 fault facts and reorg reasons, #31 onProgress, #30 structured reasons; contracts `07818d1`), packed with the SDK's own `tools/pack.mjs` | `708847a3c0db2382e10139443cfde7745ee9ac38c9279a649037b67b10ea7880` |
-| `efs-fixture-0.0.0-88bfc0c.tgz` | `@efs/fixture` from sdk-v2 main `88bfc0c` (byte-identical at `57f76f0`) (node-only; `startFixtureChain` over the vendored contracts fixture, contracts `07818d1`), for the live-chain e2e job only; never bundled | `2296fa1c8414670114c70c47309fd1d2afe50023f067f06cef3888c7c6d887b8` |
+| `efs-sdk-0.0.0-78464e9.tgz` | efs-project/sdk-v2 main `78464e9a02e136cab4531bfd3d952e1593b35ac9` (#34: `progress.current.deadline`, `checkedAt`, fail-closed `pastDeadline`; optional `Basis.timestamp`; an unknown resume reports `sequenceMayHaveSent`. #33 (57f76f0, sha256 `708847a3…7880`, confirmed by the SDK dev): `effect`, EXPIRED, NOT_SENT only for refusals before signing. Earlier: #32, #31, #30; contracts `07818d1`), packed with the SDK's own `tools/pack.mjs`; matches the SDK dev's independent build | `1198607d02ad00fe6f8bf9be05c292b94e6e96bf1fde1afcd7700e65aeb0e270` |
+| `efs-fixture-0.0.0-88bfc0c.tgz` | `@efs/fixture` from sdk-v2 main `88bfc0c` (byte-identical at `78464e9`) (node-only; `startFixtureChain` over the vendored contracts fixture, contracts `07818d1`), for the live-chain e2e job only; never bundled | `2296fa1c8414670114c70c47309fd1d2afe50023f067f06cef3888c7c6d887b8` |
 
 **Bumping:** the SDK dev names a main commit. Pack it from a `git archive` of that commit
 (`pnpm install --frozen-lockfile && pnpm --filter @efs/sdk build && node tools/pack.mjs --only sdk`);

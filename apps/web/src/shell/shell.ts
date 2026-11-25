@@ -214,7 +214,6 @@ export class EfsShell extends EfsElement {
         return s.status === 'READY' ? s.saves : [];
       }),
       refresh: (o) => saves.refresh(o),
-      deadlineOf: (progress) => saves.deadlineOf(progress),
       unconfirmed: saves.unconfirmed,
       markUnconfirmed: (u) => saves.markUnconfirmed(u),
       track: (progress, draft) => saves.track(progress, draft),

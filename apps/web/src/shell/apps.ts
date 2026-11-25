@@ -56,8 +56,6 @@ export interface SavingHost {
    * new send (`settle: false`: the journal only). Resolves with how it went; never hangs.
    */
   refresh(o?: { readonly settle?: boolean; readonly timeoutMs?: number }): Promise<CheckResult>;
-  /** When an in-flight save's current part expires (unix seconds), as that part's plan says. */
-  deadlineOf(progress: SequenceProgress): number | undefined;
   /** Sends that threw before anything could be confirmed, until a check finds their save. */
   readonly unconfirmed: ReadonlySignal<readonly Unconfirmed[]>;
   markUnconfirmed(u: Unconfirmed): void;

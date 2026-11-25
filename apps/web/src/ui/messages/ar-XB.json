@@ -281,7 +281,7 @@
   "save.expiredPart": "‮Partially saved (‬{$committed :integer}‮ of ‬{$total :integer}‮). Part ‬{$part :integer}‮ didn't go through in time.‬",
   "save.notThrough": "‮This save didn't go through. Nothing was saved.‬",
   "files.edit.waiting": "‮Waiting for your earlier save to confirm before saving again.‬",
-  "files.edit.waitingFor": "‮Waiting for your earlier save to confirm before saving again (at most about ‬{$minutes :integer}‮ min).‬",
+  "files.edit.waitingFor": "‮Waiting for your earlier save to confirm before saving again (at most about ‬{$minutes :integer}‮ min, as of block ‬{$block}‮).‬",
   "files.edit.lapsed": "‮Your earlier save didn't confirm in time. If it somehow still does, this new save will be refused as changed.‬",
   "files.edit.checkFailed": "‮We couldn't check your earlier save, so saving waits.‬",
   "files.edit.paused": "‮Saving is paused until we can check your last save.‬",
