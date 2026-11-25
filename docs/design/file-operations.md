@@ -1,6 +1,6 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** draft flows and copy, on main for the integration owner's (PM's) review. No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
+**Status:** draft flows and copy for the integration owner's (PM's) review, revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder adds its creator to the lens). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
 
 **Scope:**
 - **In scope:** list a folder from the realm root; create a file; create a folder; rename and move; remove your own entry and restore it; filter by Type.
@@ -49,11 +49,18 @@
                                                       [ Show more ]
 ```
 
-- **Routes.**
-  - `#/r/<realm>/<path>` is read by the SDK's `parseLink`, then resolved through the lens (`files.resolve`).
-  - The breadcrumb comes from the resolved chain, with each segment's author, so "whose `/photos`" is answerable (#36 hard case 4).
+- **Links** (decision-sheet default, 2026-11-25).
+  - **Folder paths live under an address:** `#/r/<realm>/0x…/photos/2026`. A bare path is a topic, never a folder.
+  - **The realm's shared root folder gets no link of its own.** So until addresses are places (contracts C8), a folder opens by its permanent object link (`~efs/o/<id>`), like a file.
+  - **The File Browser shares only permanent links until then:** no folder path link is shared (PM, 2026-11-25).
   - The canonical form replaces a typed link, as object links do today.
-  - **Whether folders keep the bare path** (`/photos/2026`) or move under homes is question 1 in `tags.md`. The flows here don't change either way, because `parseLink` says which kind a link is.
+- **The breadcrumb.**
+  - **For a folder path under an address,** it comes from the resolved chain, with each segment's author, so "whose `/photos`" is answerable (#36 hard case 4).
+  - **For a folder opened by its object link,** it shows how the person got there in this tab, because folders form a graph and have no single parent (#36 hard case 5). Opened fresh from a link, it shows only the folder's own name.
+- **Whose entries.**
+  - A folder view reads through the lens with the folder's creator inserted after "you" (decision-sheet default: a folder adds its creator, as an address does), and public last, on by default.
+  - The lens line, the "everyone" switch and the media gate are the ones in `tags.md`.
+  - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, oldest first (decision-sheet default).
 - **What a path that doesn't resolve shows:**
   - **ABSENT_PROVEN at a segment:** "Nothing is called "2026" in /photos now. It may have been renamed or moved." When the SDK offers `files.placements`, it adds "Find it by its permanent link".
   - **MASKED:** "Removed by an author in your lens."
@@ -111,11 +118,11 @@ They are one SDK operation: one atomic change of placement (#36's `planRenameFil
   - The review says: "Rename "notes.txt" to "plans.txt". Links to this file keep working. Links that use its old path won't find it there."
 - **Move.**
   - It starts from "Move to…" in the ⋯ menu, which opens a folder picker (the tree, folders only).
-  - The person can move an entry into any folder, including one another author made. Their entry appears there for anyone whose lens includes them, and the review says so: "Your entry appears in /team/plans to anyone whose lens includes you."
+  - The person can move an entry into any folder, including one another author made. The review says who will see it there: "Your entry appears in /team/plans for you, for anyone whose lens names you, and for everyone with public on."
   - A folder can't be moved into itself or below itself. The picker greys those out, and the SDK refuses them too.
 - **Links:**
   - Object and revision links are unaffected, because a link names the file and not its place.
-  - A path link to the old place answers ABSENT_PROVEN, with the copy above.
+  - A folder path link (under an address, once those exist) to the old place answers ABSENT_PROVEN, with the copy above.
 - **Several at once.**
   - Selecting several entries and choosing Move, or Remove, makes one review and one prompt (A1: "reorganizing 50 items is one ceremony").
   - The SDK splits the batch by gas, and a partial batch uses the banner's existing Continue / Stop.
@@ -169,7 +176,7 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.name.notNfc` | This name isn't in the usual Unicode form, so a name that looks the same could be a different name. It will be saved exactly as typed. |
 | `files.rename.review` | Rename {$from} to {$to}. Links to this file keep working. Links that use its old path won't find it there. |
 | `files.move.picker` | Move to… |
-| `files.move.review` | Your entry appears in {$folder} to anyone whose lens includes you. |
+| `files.move.review` | Your entry appears in {$folder} for you, for anyone whose lens names you, and for everyone with public on. |
 | `files.move.intoSelf` | A folder can't be moved into itself. |
 | `files.remove.title` | Remove {$name} from {$folder}? |
 | `files.remove.here` | It stops appearing here for anyone who sees your entries. |
