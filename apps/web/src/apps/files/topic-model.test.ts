@@ -176,6 +176,9 @@ describe('directories: children and a word page', () => {
     expect(all.rows.map((r) => r.word)).toEqual(['w1', 'w2']);
     const failed = { kind: 'efs.lookupPage', status: 'UNKNOWN' } as never;
     expect(fromPlacesPage(failed)).toEqual({ phase: 'unknown' });
+    // The reader's proof the directory isn't there: a word nobody has used.
+    const absent = { kind: 'efs.lookupPage', status: 'ABSENT_PROVEN' } as never;
+    expect(fromPlacesPage(absent)).toEqual({ phase: 'absent' });
     const refused = { kind: 'efs.lookupPage', status: 'INVALID', reason: { code: 'X' } } as never;
     expect(fromPlacesPage(refused)).toEqual({ phase: 'invalid', reason: { code: 'X' } });
     expect(fromPlacesPage(failed, first as never)).toMatchObject({ phase: 'page', more: 'failed' });

@@ -46,6 +46,7 @@ import {
   TOPIC_VIEWS,
   type TopicListState,
 } from './topic-model.ts';
+import { authorLabel } from './who.ts';
 
 /** A tag or an address: the places this pane lists. */
 export type PlaceLink = Extract<LinkState, { status: 'topic' } | { status: 'home' }>;
@@ -63,9 +64,12 @@ const loadChecksum = async () => (await import('@efs/sdk')).checksumAddress;
 /** What a row's line says about who it's from (empty for an address's own rows). */
 export function whoLine(
   t: Translator['t'],
+  efs: Efs | undefined,
   row: TopicRow,
   me: string | undefined,
   owner: string | undefined,
+  /** An address view's own address: its contract principal (a Safe's home) reads as it too. */
+  contracts?: readonly string[],
 ): string {
   const who = rowWho(row, me, owner);
   if (!who) return '';
@@ -73,7 +77,7 @@ export function whoLine(
     case 'you':
       return t('files.topic.taggedByYou');
     case 'author':
-      return t('files.topic.taggedBy', { author: shortId(who.author) });
+      return t('files.topic.taggedBy', { author: authorLabel(efs, who.author, contracts) });
     case 'public':
       return who.yes === undefined ? '' : t('files.topic.yes', { count: Number(who.yes) });
     case 'raw':
@@ -383,7 +387,8 @@ export class EfsFilesTopic extends EfsElement {
         </div>
       </section>`;
     }
-    if (c.rows.length === 0 && c.finished) return nothing;
+    // Proven to have nothing under it (a tag nobody registered), or a finished empty page.
+    if (c.phase === 'absent' || (c.rows.length === 0 && c.finished)) return nothing;
     const { shown, held } = shownPlaces(c.rows, this.#showAll.get());
     const open = (word: string) => {
       const words = [...place.segments, word];
@@ -507,7 +512,7 @@ export class EfsFilesTopic extends EfsElement {
         ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
       </button>
       <span class="efs-entry-meta efs-quiet">
-        <span class="efs-topic-who">${whoLine(t, row, me, owner)}</span>
+        <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined)}</span>
         ${filed}
       </span>
     </li>`;

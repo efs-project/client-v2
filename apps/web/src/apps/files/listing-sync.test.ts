@@ -23,6 +23,16 @@ describe('touchesFolder', () => {
     expect(touchesFolder({ kind: 'files.edit' } as never, DIR)).toBe(false);
     expect(touchesFolder(undefined, DIR)).toBe(false);
   });
+  it('an Unblock and a block name their folder (the SDK records them since 13a733d)', () => {
+    const unhide = { kind: 'files.unhide', entries: [{ folder: DIR, name: 'x' }] } as never;
+    const hide = { kind: 'files.hide', entries: [{ folder: OTHER, name: 'x' }] } as never;
+    expect(touchesFolder(unhide, DIR)).toBe(true);
+    expect(touchesFolder(hide, DIR)).toBe(false);
+    expect(touchesFolder(hide, OTHER)).toBe(true);
+    // A block shows once nothing is listed at the name.
+    expect(showsEffect(hide, OTHER, [row('x', YOU)], ME)).toBe(false);
+    expect(showsEffect(hide, OTHER, [], ME)).toBe(true);
+  });
 });
 
 describe('showsEffect: did the endpoint answer from after the save?', () => {

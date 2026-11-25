@@ -25,7 +25,6 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { approvalsLine } from './approvals.ts';
-import { shortId } from './editor.ts';
 import type { PickerSelection } from './folder-picker.ts';
 import {
   type AnyFolderPlan,
@@ -40,6 +39,7 @@ import {
   withoutIndices,
 } from './folder-requests.ts';
 import type { NavStep } from './navigation.ts';
+import { authorLabel } from './who.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
 /** The dialog closed and the control that opened it is gone: its pane should take focus. */
@@ -464,9 +464,11 @@ export class EfsFolderSave extends EfsElement {
         return;
       }
       // It may have been sent: these places pause until a check finds the save.
-      this.host.saving.markUnconfirmed(
-        thrown.sequenceId ? { places, sequenceId: thrown.sequenceId } : { places },
-      );
+      // Places that can't be keyed (undefined) pause everything: an unconfirmed naming none.
+      this.host.saving.markUnconfirmed({
+        ...(places ? { places } : {}),
+        ...(thrown.sequenceId ? { sequenceId: thrown.sequenceId } : {}),
+      });
       void this.host.saving.refresh();
       this.#phase.set({ phase: 'unconfirmed' });
       return;
@@ -512,7 +514,7 @@ export class EfsFolderSave extends EfsElement {
 
   /** Another author, as the review names them: "0x1234…cdef" (in full in the title). */
   #who(author: string): string {
-    return shortId(author);
+    return authorLabel(this.efs, author);
   }
 
   #picking(ask: Extract<FolderAsk, { kind: 'move' }>) {
@@ -887,7 +889,7 @@ export class EfsFolderSave extends EfsElement {
                     ${t(refusalMessage(r.code), {
                       code: r.code,
                       name: r.name,
-                      author: r.author ? shortId(r.author) : '—',
+                      author: r.author ? this.#who(r.author) : '—',
                     })}
                   </p>`,
               )}

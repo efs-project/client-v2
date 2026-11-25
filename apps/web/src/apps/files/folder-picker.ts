@@ -12,7 +12,6 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { shortId } from './editor.ts';
 import {
   continueListing,
   type FolderReads,
@@ -24,6 +23,7 @@ import {
 import type { ViewPath } from './folder-requests.ts';
 import { type NavStep, viewPath } from './navigation.ts';
 import { cannotMoveHere, cannotOpen, pickerNotice } from './picker-model.ts';
+import { authorLabel } from './who.ts';
 
 export const PICKER_CHANGE_EVENT = 'efs-picker-change';
 /** The folder the picker is on now: where "Move here" would put the entry. */
@@ -186,7 +186,7 @@ export class EfsFolderPicker extends EfsElement {
       owner && author === owner.toLowerCase()
         ? nothing
         : html`<span class="efs-entry-whose"
-            >${mine ? t('files.whose.yours') : t('files.whose.author', { author: shortId(row.author) })}</span
+            >${mine ? t('files.whose.yours') : t('files.whose.author', { author: authorLabel(this.efs, row.author) })}</span
           >`;
     return html`<li class="efs-entry" data-kind="folder">
       <button

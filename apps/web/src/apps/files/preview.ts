@@ -16,7 +16,7 @@ import { EfsElement, html, keyed, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
-import { type EditDoneDetail, shortId } from './editor.ts';
+import type { EditDoneDetail } from './editor.ts';
 import { placeLens } from './folder-model.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
@@ -24,6 +24,7 @@ import { readerNotice } from './notice.ts';
 import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
+import { authorLabel } from './who.ts';
 
 /**
  * The SDK's byte reads load only when there is a verified session to read through, so opening
@@ -621,7 +622,9 @@ export class EfsFilesPreview extends EfsElement {
       return html`<wa-callout variant="neutral" size="small" class="efs-edit-not-in-view">
         <span slot="icon">${appIcon('circle-info')}</span>
         <div class="wa-split wa-gap-s">
-          <p>${t('files.edit.notInView', { author: shortId(other) })}</p>
+          <p>${t('files.edit.notInView', {
+            author: authorLabel(verifiedEfs(this.host.reader.get()), other),
+          })}</p>
           <wa-button
             size="s"
             class="efs-edit-show-mine"
@@ -911,7 +914,9 @@ export class EfsFilesPreview extends EfsElement {
       ${
         reordered?.canonical === link.canonical
           ? html`<p class="efs-quiet efs-preview-reordered" role="status">
-              ${t('files.preview.reordered', { author: shortId(reordered.author) })}
+              ${t('files.preview.reordered', {
+                author: authorLabel(verifiedEfs(this.host.reader.get()), reordered.author),
+              })}
             </p>`
           : nothing
       }

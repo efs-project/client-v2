@@ -25,6 +25,8 @@ export function touchesFolder(effect: Effect, folder: string): boolean {
       );
     case 'files.remove':
     case 'files.restore':
+    case 'files.unhide':
+    case 'files.hide':
       return (
         Array.isArray(e.entries) &&
         (e.entries as Record<string, unknown>[]).some((x) => same(x.folder, folder))
@@ -59,6 +61,11 @@ export function showsEffect(
     case 'files.remove':
       return (e.entries as Record<string, unknown>[]).every(
         (x) => !same(x.folder, folder) || !mine(String(x.name)),
+      );
+    case 'files.hide':
+      // A block covers someone else's entry: shown once nothing is listed at the name.
+      return (e.entries as Record<string, unknown>[]).every(
+        (x) => !same(x.folder, folder) || !rows.some((r) => r.name === String(x.name)),
       );
     case 'files.move':
       return (e.moves as Record<string, unknown>[]).every(

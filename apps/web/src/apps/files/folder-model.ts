@@ -101,6 +101,11 @@ function fromPage(page: FolderPage, before?: Page): ListingState {
           : 'unknown';
     return { phase, reason: page.reason };
   }
+  // The listing reads folders only (an address isn't listed here yet): a page for anything else
+  // is a client error, never shown as a folder.
+  if (page.folder.kind !== 'folder') {
+    return { phase: 'invalid', reason: { code: 'CLIENT_ERROR', retry: 'never' } as Reason };
+  }
   return {
     phase: 'page',
     folder: page.folder,

@@ -27,7 +27,6 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { type Composer, newFileKey } from './compose.ts';
-import { shortId } from './editor.ts';
 import {
   continueListing,
   type FolderReads,
@@ -46,6 +45,7 @@ import type {
 } from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
 import { uploadMediaType } from './upload-model.ts';
+import { authorLabel } from './who.ts';
 
 /**
  * The largest file read for an upload: past this it isn't read into memory at all (the SDK's own
@@ -130,8 +130,6 @@ export class EfsFilesListing extends EfsElement {
   #synced = new Map<string, 'committed' | 'final'>();
   /** A removal sent from here, until its save is complete (or fails). */
   #pendingRemoval: Removal | undefined;
-  /** Saves sent from here whose record names no effect (Unblock), by the folder they touch. */
-  #unnamed = new Map<string, string>();
   /**
    * The entry the person removed here, offered back with Restore (this tab only): shown only once
    * the removal's save is complete, and cleared if it fails or the network undoes it.
@@ -199,12 +197,7 @@ export class EfsFilesListing extends EfsElement {
       const dir = s?.phase === 'page' ? s.folder.directory : undefined;
       for (const p of this.host.saving.saves.get()) {
         this.#watchRemoval(p);
-        // A save the SDK records without an effect (an Unblock, until it names one) touches the
-        // folder it was sent from here: the only one this tab knows it for.
-        const touches = p.effect
-          ? touchesFolder(p.effect, dir ?? '')
-          : this.#unnamed.get(p.sequenceId) === dir?.toLowerCase();
-        if (!dir || !touches) continue;
+        if (!dir || !touchesFolder(p.effect, dir)) continue;
         const stage = p.final
           ? 'final'
           : p.total > 0 && p.committed === p.total
@@ -356,7 +349,8 @@ export class EfsFilesListing extends EfsElement {
   #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): Promise<void> {
     // Another folder: what was selected there isn't here.
     const selected = this.#selected.get();
-    const was = selected.values().next().value?.entry.folder.directory.toLowerCase();
+    const parent = selected.values().next().value?.entry.folder;
+    const was = parent?.kind === 'folder' ? parent.directory.toLowerCase() : undefined;
     if (was !== undefined && was !== folder?.directory.toLowerCase()) this.#selected.set(new Map());
     this.#run?.dispose();
     this.#run = undefined;
@@ -435,7 +429,9 @@ export class EfsFilesListing extends EfsElement {
       reader !== undefined && this.#efs?.lens.principalOf(reader as never).toLowerCase() === author;
     return html`<span class="efs-entry-whose"
       >${
-        mine ? t('files.whose.yours') : t('files.whose.author', { author: shortId(row.author) })
+        mine
+          ? t('files.whose.yours')
+          : t('files.whose.author', { author: authorLabel(this.#efs, row.author) })
       }</span
     >`;
   }
@@ -686,7 +682,7 @@ export class EfsFilesListing extends EfsElement {
         ? this.#restoreAsk(removedSave.entries, removedSave.blocked)
         : undefined;
       body = html`${
-        removed && removed.folder.directory === folder.directory
+        removed?.folder.kind === 'folder' && removed.folder.directory === folder.directory
           ? html`<p class="efs-entries-removed" role="status">
               ${
                 removedSave?.blocked
@@ -979,10 +975,6 @@ export class EfsFilesListing extends EfsElement {
       this.#removed.set(undefined);
     } else if (ask?.kind === 'restore' || ask?.kind === 'unhide') {
       this.#removed.set(undefined);
-    }
-    if (ask?.kind === 'unhide') {
-      const folder = ask.entries[0]?.folder.directory.toLowerCase();
-      if (folder) this.#unnamed.set(detail.sequenceId, folder);
     }
   };
 }

@@ -48,6 +48,7 @@ import { appIcon } from '../../ui/icons.ts';
 import { approvalsLine } from './approvals.ts';
 import { newFileKey } from './compose.ts';
 import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
+import { authorLabel } from './who.ts';
 
 type EditPlanned = Extract<EditPlanResult, { status: 'PLANNED' }>;
 type CreatePlanned = Extract<FolderPlanResult<CreateFileReview>, { status: 'PLANNED' }>;
@@ -111,9 +112,8 @@ export interface EditDoneDetail {
 }
 export const EDIT_DONE_EVENT = 'efs-edit-done';
 
-/** "0x0000…2266": enough to tell authors apart, in full in the title. */
-export const shortId = (id: string): string =>
-  id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
+/** Short ids live with the author labels (who.ts); re-exported for the panes that use them. */
+export { shortId } from './who.ts';
 
 const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
 
@@ -635,7 +635,7 @@ export class EfsFileEditor extends EfsElement {
     return a.status === 'READY' &&
       this.efs.lens.principalOf(a.account as never).toLowerCase() === author.toLowerCase()
       ? shortAccount(a.account)
-      : shortId(author);
+      : authorLabel(this.efs, author);
   }
 
   #chainName(id: number, t: Translator['t']): string {
@@ -721,7 +721,7 @@ export class EfsFileEditor extends EfsElement {
             : html`<wa-callout variant="warning" class="efs-review-not-visible">
                 <span slot="icon">${appIcon('triangle-exclamation')}</span>
                 <p>
-                  ${t('review.notVisible', { author: shortId(author) })}
+                  ${t('review.notVisible', { author: authorLabel(this.efs, author) })}
                 </p>
               </wa-callout>`
         }

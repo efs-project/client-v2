@@ -81,6 +81,8 @@ export function touchesOf(effect: SequenceProgress['effect']): Touches {
         : { kind: 'unknown' };
     case 'files.remove':
     case 'files.restore':
+    case 'files.unhide':
+    case 'files.hide':
       return Array.isArray(e.entries)
         ? keysOf((e.entries as Record<string, unknown>[]).map((x) => [x.folder, x.name] as const))
         : { kind: 'unknown' };

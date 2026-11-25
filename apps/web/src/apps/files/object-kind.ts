@@ -288,7 +288,9 @@ export function objectKindState(
       host.openLink(linkOf({ kind: 'object', subject: target.subject, ...own }), { replace: true });
       return;
     }
-    const start = answer.chain[0]?.folder ?? { kind: 'folder', directory: l.link.folder };
+    const first = answer.chain[0]?.folder;
+    const start: FolderRef =
+      first?.kind === 'folder' ? first : { kind: 'folder', directory: l.link.folder };
     const fromRoot = start.directory.toLowerCase() === root.directory.toLowerCase();
     const trail: NavStep[] = fromRoot ? [] : [{ folder: start, name: '' }];
     for (const step of answer.chain) {

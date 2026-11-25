@@ -168,7 +168,9 @@ export type PlacesState =
     }
   | { readonly phase: 'unknown' }
   /** The SDK refused the directory read: shown with its code, never as empty or as unknown. */
-  | { readonly phase: 'invalid'; readonly reason: Reason };
+  | { readonly phase: 'invalid'; readonly reason: Reason }
+  /** The reader proved the directory isn't there: a word nobody has used, a tag nobody registered. */
+  | { readonly phase: 'absent' };
 
 export type PlacesCursor = NonNullable<
   Extract<LookupPage<PlaceCountRow>, { status: 'PRESENT' }>['next']
@@ -181,6 +183,12 @@ export function fromPlacesPage(
   page: LookupPage<PlaceCountRow>,
   before?: Extract<PlacesState, { phase: 'page' }>,
 ): PlacesState {
+  if (page.status === 'ABSENT_PROVEN') {
+    // Proven empty: nothing more to read (a later page can't be absent once a first one wasn't).
+    return before
+      ? { phase: 'page', rows: before.rows, finished: true, more: 'idle' }
+      : { phase: 'absent' };
+  }
   if (page.status !== 'PRESENT') {
     if (before) return { ...before, more: 'failed' };
     return page.status === 'INVALID'

@@ -28,7 +28,9 @@ describe('placesOf', () => {
   });
   it('a rename holds its old name and its new one', () => {
     expect(
-      placesOf({ kind: 'rename', from: { folder, name: 'a.txt' }, to: 'b.txt' }).map((p) => p.name),
+      placesOf({ kind: 'rename', from: { folder, name: 'a.txt' }, to: 'b.txt' })?.map(
+        (p) => p.name,
+      ),
     ).toEqual(['a.txt', 'b.txt']);
   });
   it('an upload holds the name it creates', () => {
@@ -59,6 +61,13 @@ describe('placesOf', () => {
       { folder: DIR.toLowerCase(), name: 'b' },
       { folder: to.directory.toLowerCase(), name: 'b' },
     ]);
+  });
+  it('a parent that is an address has no key yet: the places are undefined (held fail-closed)', () => {
+    const home = { kind: 'home' as const, address: `0x${'ab'.repeat(20)}` as never };
+    expect(placesOf({ kind: 'remove', entries: [{ folder: home, name: 'a' }], hide: false })).toBe(
+      undefined,
+    );
+    expect(placesOf({ kind: 'createFolder', folder, name: 'x' })).toHaveLength(1);
   });
   it('remove and restore hold every entry they name', () => {
     const entries = [
@@ -296,6 +305,17 @@ describe('folderHold: the send rule', () => {
     expect(folderHold({ ...base, unconfirmed: [{}] }, saveHold).hold).toEqual({ kind: 'paused' });
     // An unconfirmed edit of a file doesn't pause a folder save.
     expect(folderHold({ ...base, unconfirmed: [{ file: '0x01' }] }, saveHold).hold).toBeUndefined();
+  });
+
+  it('places that cannot be keyed are held fail-closed: by any unconfirmed or unsettled save', () => {
+    const unknown = { ...base, places: undefined };
+    expect(folderHold(unknown, saveHold).hold).toBeUndefined();
+    expect(folderHold({ ...unknown, unconfirmed: [{ file: '0x01' }] }, saveHold).hold).toEqual({
+      kind: 'paused',
+    });
+    expect(folderHold({ ...unknown, saves: [unsettledAt(A, 'y')] }, saveHold).hold).toEqual({
+      kind: 'held',
+    });
   });
 
   it('needs a READY wallet', () => {
