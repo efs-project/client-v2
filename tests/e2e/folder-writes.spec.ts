@@ -670,3 +670,75 @@ test('New text file, storage lost right after Send: "couldn\'t confirm", never "
     await chain.finish();
   }
 });
+
+/** A 1×1 PNG: its signature, not its name, says what it is. */
+const PNG_1X1 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('Upload: a PNG named pic.txt is stored as image/png from its bytes, one send, and previews as an image', async ({
+  page,
+}) => {
+  const chain = await testChain('client-upload', 'The realm root; upload pic.txt (a PNG).');
+  try {
+    await openRoot(page, chain);
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({ name: 'pic.txt', mimeType: 'text/plain', buffer: PNG_1X1 });
+    await expect(dialog(page)).toContainText('Upload a file');
+    await expect(dialog(page).locator('wa-input.efs-folder-name')).toHaveJSProperty(
+      'value',
+      'pic.txt',
+    );
+    chain.step('Upload: the file is read; named by its own name first');
+
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await expect(dialog(page)).toContainText(/Uploads\W+pic\.txt\W+to/);
+    await expect(dialog(page).locator('.efs-upload-type')).toContainText(
+      /Its type, from its contents:\W+image\/png/,
+    );
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'pic.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Review (image/png from its bytes, not its name), Send: pic.txt is listed');
+
+    await row(page, 'pic.txt').locator('a.efs-entry-open').click();
+    const img = preview(page).locator('img.efs-preview-media');
+    await expect(img).toHaveAttribute('src', /^blob:/);
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+    chain.step('Open it: the Preview shows it as an image');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('Upload: several files at once are refused with a note, and nothing is read or planned', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-upload-several',
+    'The realm root; two files dropped at once.',
+  );
+  try {
+    await openRoot(page, chain);
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .evaluate((input: HTMLInputElement) => input.setAttribute('multiple', ''));
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles([
+        { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('a') },
+        { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('b') },
+      ]);
+    await expect(entries(page).locator('.efs-upload-note')).toContainText(
+      'Upload one file at a time for now.',
+    );
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Two files at once: said, nothing planned');
+  } finally {
+    await chain.finish();
+  }
+});

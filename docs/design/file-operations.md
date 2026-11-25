@@ -9,9 +9,10 @@
   - "Show removed": the person's own removed entries in the folder on screen, each with Restore (`apps/files/removed-list.ts`);
   - Move, with the folder picker and `via` (`apps/files/folder-picker.ts`);
   - New text file: named in the folder dialog, written in the editor's create mode (`apps/files/compose.ts`, `editor.ts`);
+  - Upload, one file at a time, from the toolbar or a drop (`apps/files/upload-model.ts`);
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
-  - Upload;
+  - uploading several files at once (with multi-select batches);
   - "Remove and block this name";
   - multi-select batches;
   - the lazy "also: …" marker.
@@ -140,9 +141,10 @@ It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2
   - **Leaving keeps it.** The composer shows only where it was started; leaving ends it, and the folder lists the unsaved file as "Not saved yet", which opens it again ("Your unsaved new file is back").
   - **Once Saved,** the new file opens by its own link (if the person is still where they wrote it), read in the folder's place Lens.
 - **Upload files**
-  - Upload uses a file picker, or drag and drop onto the Entries pane.
-  - The media type comes from the bytes' signature, never from the extension alone. The Preview already checks signatures.
-  - Size limits are the SDK's. A file too large for one save shows its part count in the review, before Send.
+  - Upload uses a file picker, or drag and drop onto the Entries pane (the button is always the keyboard path). One file at a time for now: several at once say so and read nothing.
+  - The file is named in the folder dialog, its own name first, then reviewed and sent like a new folder: "Uploads <name> to <folder>", its size, and its type.
+  - The media type comes from the bytes, never from the extension alone (`upload-model.ts`): a known signature decides ("Its type, from its contents: image/png", even for a PNG named `.txt`); text keeps the browser's textual type, else `text/plain`; anything else stores no type. Every candidate passes the SDK's `normalizeMediaType`. The Preview checks bytes against the type again.
+  - Size limits are the SDK's (TOO_LARGE: "This file is too large to save here"). A file too large for one save shows its part count in the review, before Send. Files over 50 MB aren't read into memory at all.
 - **A name that's already taken** in this folder:
   - **By the person's own entry:** the planner refuses it with `NAME_TAKEN_MINE`, and the dialog says "You already have something called "notes.txt" here. Choose another name, or open it to save a new version." That's the skip / new version / rename choice of A2.
   - **By another author's entry:** planned, because entries are per author. `review.visibleInLens` is false and `review.shownInstead` names who the view shows, so the review warns as edits do: "Your file will be saved, but this view shows <author>'s "notes.txt" first."

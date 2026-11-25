@@ -30,6 +30,17 @@ describe('placesOf', () => {
       placesOf({ kind: 'rename', from: { folder, name: 'a.txt' }, to: 'b.txt' }).map((p) => p.name),
     ).toEqual(['a.txt', 'b.txt']);
   });
+  it('an upload holds the name it creates', () => {
+    expect(
+      placesOf({
+        kind: 'createFile',
+        folder,
+        name: 'pic.png',
+        content: new Uint8Array(1),
+        mediaType: 'image/png',
+      }),
+    ).toEqual([{ folder: DIR.toLowerCase(), name: 'pic.png' }]);
+  });
   it('a move holds its old place and the same name at its new folder', () => {
     const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
     expect(placesOf({ kind: 'move', from: { folder, name: 'a.txt' }, to })).toEqual([
@@ -49,6 +60,7 @@ describe('placesOf', () => {
 
 describe('planRequest', () => {
   const planners = () => ({
+    planCreateFile: vi.fn(async () => ({ status: 'PLANNED' })),
     planCreateFolder: vi.fn(async () => ({ status: 'PLANNED' })),
     planMoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planRemoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
@@ -73,6 +85,25 @@ describe('planRequest', () => {
       efs,
       writer,
       { moves: [{ from: { folder, name: 'a.txt' }, to: { name: 'b.txt' } }], lens },
+      { signal },
+    );
+  });
+
+  it("an upload plans a new file with its bytes and media type, in the view's Lens", async () => {
+    const p = planners();
+    const content = new Uint8Array([1, 2, 3]);
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'createFile', folder, name: 'x.bin', content, mediaType: '' },
+      lens,
+      signal,
+    );
+    expect(p.planCreateFile).toHaveBeenCalledWith(
+      efs,
+      writer,
+      { folder, name: 'x.bin', content, mediaType: '', lens },
       { signal },
     );
   });
