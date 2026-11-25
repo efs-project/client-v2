@@ -136,6 +136,8 @@ async function startChain(): Promise<FixtureChain> {
 export async function testChain(name: string, note: string): Promise<TestChain> {
   const calls: string[] = [];
   const steps: string[] = [];
+  /** Failures of the test's own chain or wallet plumbing: any one fails the test in finish(). */
+  const harnessErrors: unknown[] = [];
   let lastRpc = Date.now();
   const drop = { drop: false };
 
@@ -237,17 +239,34 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     step(text) {
       steps.push(text);
     },
-    finish: () => finish(),
+    async finish() {
+      try {
+        if (harnessErrors.length > 0) {
+          throw new Error(`the test chain failed:\n${harnessErrors.map(String).join('\n')}`);
+        }
+      } finally {
+        await finish();
+      }
+    },
     async attach(page) {
       await page.route(RPC_ORIGIN, async (route) => {
         lastRpc = Date.now();
+        let json: unknown;
         try {
-          const json = await answerRpc(JSON.parse(route.request().postData() ?? 'null'));
-          lastRpc = Date.now();
-          await route.fulfill({ json });
-        } catch {
-          // The page navigated away while this was answered.
+          json = await answerRpc(JSON.parse(route.request().postData() ?? 'null'));
+        } catch (error) {
+          // The harness itself failed (anvil down, a broken transcript): fail the test.
+          harnessErrors.push(error);
+          await route.abort('failed').catch(() => undefined);
+          return;
         }
+        lastRpc = Date.now();
+        await route.fulfill({ json }).catch((error: unknown) => {
+          // Only a page that has navigated away (the reload test) may drop an answer.
+          if (!/closed|detached|navigat|already handled/i.test(String(error))) {
+            harnessErrors.push(error);
+          }
+        });
       });
       await page.exposeFunction('__efsTestWallet', async (r: WalletRequest) => {
         calls.push(r.method);

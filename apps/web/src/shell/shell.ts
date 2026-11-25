@@ -204,11 +204,19 @@ export class EfsShell extends EfsElement {
   }
 
   #saving(): AppHost['saving'] {
+    const saves = this.saves;
     return {
       availability: this.writer.availability,
       requestWallet: () => this.#requestWallet(),
       writer: () => this.writer.writer(),
-      track: (progress) => this.saves.track(progress),
+      saves: computed(() => {
+        const s = saves.state.get();
+        return s.status === 'READY' ? s.saves : [];
+      }),
+      refresh: () => saves.refresh(),
+      track: (progress, draft) => saves.track(progress, draft),
+      reopening: saves.reopening,
+      takeReopen: (link) => saves.takeReopen(link),
     };
   }
 
@@ -295,6 +303,7 @@ export class EfsShell extends EfsElement {
                 slot="banner"
                 .saves=${this.saves}
                 .writer=${this.writer}
+                .network=${this.os.network.get()}
                 .translator=${this.translator}
                 @efs-request-wallet=${() => this.#requestWallet()}
               ></efs-saves-banner>`

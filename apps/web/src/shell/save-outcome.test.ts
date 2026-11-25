@@ -1,7 +1,14 @@
 import type { SequenceProgress } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
 import en from '../ui/messages/en.json' with { type: 'json' };
-import { isFault, SAVE_MESSAGE, saveAction, saveMessage, saveOutcome } from './save-outcome.ts';
+import {
+  isFault,
+  SAVE_MESSAGE,
+  saveAction,
+  saveMessage,
+  saveOutcome,
+  saveValues,
+} from './save-outcome.ts';
 
 const p = (over: Partial<SequenceProgress>): SequenceProgress =>
   ({
@@ -15,10 +22,46 @@ const p = (over: Partial<SequenceProgress>): SequenceProgress =>
     ...over,
   }) as SequenceProgress;
 
-const CAS = { selector: '0x12345678', error: 'E_CAS', args: [1n, 2n] };
-
-const reason = (code: string, retry = 'transient', detail?: string, extra = {}) =>
-  ({ code, retry, detail, ...extra }) as never;
+// Only (code, retry) pairs the SDK emits (sdk-v2 2ab07d7, src/actions): never invented ones.
+const R = {
+  userRejected: { code: 'USER_REJECTED', retry: 'never' },
+  busy: { code: 'BUSY', retry: 'transient' },
+  walletMismatch: {
+    code: 'WALLET_MISMATCH',
+    retry: 'transient',
+    wallet: {
+      expected: { chainId: 31337, account: `0x${'ab'.repeat(20)}` },
+      actual: { chainId: 1, account: `0x${'ab'.repeat(20)}` },
+    },
+  },
+  cas: {
+    code: 'STALE',
+    retry: 'after-replan',
+    revert: { selector: '0x12345678', error: 'E_CAS', args: [1n, 2n] },
+  },
+  staleOther: {
+    code: 'STALE',
+    retry: 'after-replan',
+    revert: { selector: '0x87654321', error: 'E_DEADLINE' },
+  },
+  staleUnknownSelector: {
+    code: 'STALE',
+    retry: 'after-replan',
+    revert: { selector: '0xdeadbeef' },
+  },
+  staleNoRevert: { code: 'STALE', retry: 'after-replan', detail: 'revert E_CAS (text only)' },
+  overCap: { code: 'OVER_TX_GAS_CAP', retry: 'after-replan' },
+  limit: { code: 'LIMIT_EXCEEDED', retry: 'after-replan' },
+  journalTransient: { code: 'JOURNAL_UNAVAILABLE', retry: 'transient' },
+  journalReconcile: { code: 'JOURNAL_UNAVAILABLE', retry: 'after-reconcile' },
+  rpcError: { code: 'RPC_ERROR', retry: 'transient' },
+  rpcUnavailable: { code: 'RPC_UNAVAILABLE', retry: 'transient' },
+  responseLost: { code: 'RESPONSE_LOST', retry: 'after-reconcile' },
+  reorged: { code: 'REORGED', retry: 'after-reconcile' },
+  notVerified: { code: 'NOT_VERIFIED_DEPLOYMENT', retry: 'never' },
+  aborted: { code: 'ABORTED', retry: 'never' },
+} as const;
+const reason = (r: (typeof R)[keyof typeof R]) => r as never;
 
 describe('saveOutcome', () => {
   it('says saved only when complete AND final; otherwise confirming', () => {
@@ -34,112 +77,113 @@ describe('saveOutcome', () => {
   });
 
   it('a reorg is "undone by the network", whatever state it left behind', () => {
-    expect(saveOutcome(p({ state: 'IN_FLIGHT', reason: reason('REORGED') }))).toEqual({
-      kind: 'undone',
-    });
-    expect(saveOutcome(p({ state: 'PARTIAL', reason: reason('REORGED') }))).toEqual({
-      kind: 'undone',
-    });
+    for (const state of ['IN_FLIGHT', 'PARTIAL', 'NOT_STARTED'] as const) {
+      expect(saveOutcome(p({ state, reason: reason(R.reorged) }))).toEqual({ kind: 'undone' });
+    }
+    expect(saveAction({ kind: 'undone' })).toBe('send-again');
+  });
+
+  it('decides by code before retry: a gas-cap refusal is "too large", not "stale"', () => {
+    expect(saveOutcome(p({ reason: reason(R.overCap) }))).toEqual({ kind: 'too-large' });
+    expect(
+      saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 3, reason: reason(R.overCap) })),
+    ).toEqual({ kind: 'too-large' });
+  });
+
+  it('a part declined mid-save is "You declined part k", with Continue (retry is "never")', () => {
+    const o = saveOutcome(
+      p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason(R.userRejected) }),
+    );
+    expect(o).toEqual({ kind: 'declined', committed: 2, total: 5, part: 3 });
+    expect(saveAction(o)).toBe('continue');
+    // Before anything was sent it's a plain refusal, sent again from the review.
+    expect(saveOutcome(p({ reason: reason(R.userRejected) }))).toEqual({ kind: 'refused' });
+    expect(saveAction({ kind: 'refused' })).toBe('retry');
   });
 
   it('a race lost by the finishing part is "changed", never "Continue" (it would fail again)', () => {
-    const lost = p({
-      state: 'PARTIAL',
-      committed: 2,
-      total: 3,
-      reason: reason('STALE', 'after-replan', undefined, { revert: CAS }),
-    });
-    expect(saveOutcome(lost)).toEqual({ kind: 'changed', committed: 2 });
-    expect(saveAction(saveOutcome(lost))).toBe('reopen');
-    expect(saveMessage(saveOutcome(lost))).toBe('save.changedPartly');
-  });
-
-  it('decides on the structured revert, never on the detail text', () => {
-    const structured = reason('STALE', 'after-replan', 'no marker here', {
-      revert: { selector: '0x12345678', error: 'E_CAS' },
-    });
-    expect(saveOutcome(p({ reason: structured }))).toEqual({ kind: 'changed', committed: 0 });
-    const other = reason('STALE', 'after-replan', 'mentions E_CAS but is not', {
-      revert: { selector: '0x12345678', error: 'E_DEADLINE' },
-    });
-    expect(saveOutcome(p({ reason: other }))).toEqual({ kind: 'stale' });
-    // An unknown selector names no error: not a race.
-    const unknown = reason('STALE', 'after-replan', 'E_CAS', {
-      revert: { selector: '0xdeadbeef' },
-    });
-    expect(saveOutcome(p({ reason: unknown }))).toEqual({ kind: 'stale' });
-    expect(saveOutcome(p({ reason: reason('STALE', 'after-replan', 'revert E_CAS') }))).toEqual({
-      kind: 'stale',
-    });
-  });
-
-  it('offers Continue only when the same plan can finish', () => {
-    for (const retry of ['transient', 'after-reconcile']) {
-      const o = saveOutcome(
-        p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason('RPC_ERROR', retry) }),
-      );
-      expect(o).toEqual({ kind: 'partial', committed: 2, total: 5, canContinue: true });
-      expect(saveAction(o)).toBe('continue');
-    }
-    // Listed after a reload: no reason yet.
-    expect(saveAction(saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 2 })))).toBe(
-      'continue',
+    const lost = saveOutcome(
+      p({ state: 'PARTIAL', committed: 2, total: 3, reason: reason(R.cas) }),
     );
-    // A refusal in the middle of a sequence leaves it resumable.
-    expect(
-      saveAction(
-        saveOutcome(
-          p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason('USER_REJECTED') }),
-        ),
-      ),
-    ).toBe('continue');
+    expect(lost).toEqual({ kind: 'changed', committed: 2 });
+    expect(saveAction(lost)).toBe('reopen');
+    expect(saveMessage(lost)).toBe('save.changedPartly');
+    expect(saveOutcome(p({ reason: reason(R.cas) }))).toEqual({ kind: 'changed', committed: 0 });
+  });
+
+  it('decides the race on the structured revert only, never on the detail text', () => {
+    expect(saveOutcome(p({ reason: reason(R.staleOther) }))).toEqual({
+      kind: 'stale',
+      error: 'E_DEADLINE',
+    });
+    expect(saveOutcome(p({ reason: reason(R.staleUnknownSelector) }))).toEqual({ kind: 'stale' });
+    expect(saveOutcome(p({ reason: reason(R.staleNoRevert) }))).toEqual({ kind: 'stale' });
+    expect(saveMessage({ kind: 'stale', error: 'E_DEADLINE' })).toBe('save.refusedByLedger');
+    // A stale plan in the middle of a save can't be continued.
     const stuck = saveOutcome(
-      p({
-        state: 'PARTIAL',
-        committed: 1,
-        total: 2,
-        reason: reason('STALE', 'after-replan', 'deadline'),
-      }),
+      p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason(R.staleOther) }),
     );
     expect(stuck).toEqual({ kind: 'partial', committed: 1, total: 2, canContinue: false });
     expect(saveAction(stuck)).toBe('abandon');
     expect(saveMessage(stuck)).toBe('save.partialStuck');
   });
 
-  it('a wallet that moved before sending is "switch back, then Continue"', () => {
+  it('a wallet switched away names the account and network to switch back to', () => {
     const o = saveOutcome(
-      p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason('WALLET_MISMATCH') }),
+      p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason(R.walletMismatch) }),
     );
-    expect(o).toEqual({ kind: 'wallet-mismatch' });
+    expect(o).toEqual({
+      kind: 'wallet-mismatch',
+      account: `0x${'ab'.repeat(20)}`,
+      chainId: 31337,
+    });
     expect(saveAction(o)).toBe('continue');
+    expect(saveMessage(o)).toBe('save.walletMismatchTo');
+    expect(
+      saveValues(
+        o,
+        (a) => `${a.slice(0, 6)}…`,
+        (id) => (id === 31337 ? 'Testnet' : `chain ${id}`),
+      ),
+    ).toEqual({ account: '0xabab…', chain: 'Testnet' });
   });
 
-  it('tells a refusal from a stale plan before anything was sent', () => {
-    expect(saveOutcome(p({ reason: reason('STALE', 'after-replan', 'wrong chain') }))).toEqual({
-      kind: 'stale',
-    });
-    expect(saveOutcome(p({ reason: reason('USER_REJECTED') }))).toEqual({ kind: 'refused' });
-  });
-
-  it('names the other refusals and keeps unknown codes as not sent', () => {
-    expect(saveOutcome(p({ reason: reason('OVER_TX_GAS_CAP', 'never') })).kind).toBe('too-large');
-    expect(saveOutcome(p({ reason: reason('BUSY') })).kind).toBe('busy');
-    expect(saveOutcome(p({ reason: reason('JOURNAL_UNAVAILABLE', 'never') })).kind).toBe(
-      'no-journal',
+  it('continues by retry only for codes this version does not name', () => {
+    for (const r of [R.rpcError, R.rpcUnavailable, R.responseLost]) {
+      const o = saveOutcome(p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason(r) }));
+      expect(o).toEqual({ kind: 'partial', committed: 2, total: 5, canContinue: true });
+    }
+    for (const r of [R.limit, R.notVerified, R.aborted]) {
+      const o = saveOutcome(p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason(r) }));
+      expect(o).toMatchObject({ kind: 'partial', canContinue: false });
+    }
+    // Listed after a reload: no reason yet.
+    expect(saveAction(saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 2 })))).toBe(
+      'continue',
     );
-    expect(saveOutcome(p({ reason: reason('SOMETHING_NEW') }))).toEqual({
-      kind: 'not-sent',
-      code: 'SOMETHING_NEW',
-    });
   });
 
-  it('actions', () => {
-    expect(saveAction({ kind: 'undone' })).toBe('send-again');
-    expect(saveAction({ kind: 'changed', committed: 0 })).toBe('reopen');
-    expect(saveAction({ kind: 'refused' })).toBe('retry');
+  it('names the other refusals; unknown ones stay "not sent", retried only when the SDK says so', () => {
+    expect(saveOutcome(p({ reason: reason(R.busy) })).kind).toBe('busy');
+    expect(saveOutcome(p({ reason: reason(R.journalTransient) })).kind).toBe('no-journal');
+    expect(saveOutcome(p({ reason: reason(R.journalReconcile) })).kind).toBe('no-journal');
+    expect(saveOutcome(p({ reason: reason(R.rpcError) }))).toEqual({
+      kind: 'not-sent',
+      code: 'RPC_ERROR',
+      canRetry: true,
+    });
+    const never = saveOutcome(p({ reason: reason(R.notVerified) }));
+    expect(never).toEqual({ kind: 'not-sent', code: 'NOT_VERIFIED_DEPLOYMENT', canRetry: false });
+    expect(saveAction(never)).toBeUndefined();
+  });
+
+  it('no action while the network decides, or once saved', () => {
     expect(saveAction({ kind: 'saved' })).toBeUndefined();
     expect(saveAction({ kind: 'confirming' })).toBeUndefined();
     expect(saveAction({ kind: 'checking' })).toBeUndefined();
+    expect(saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.responseLost) }))).toEqual({
+      kind: 'checking',
+    });
   });
 
   it('recognizes a thrown SDK fault by code', () => {
@@ -153,7 +197,13 @@ describe('saveOutcome', () => {
   });
 
   it('every outcome has catalog copy', () => {
-    for (const id of [...Object.values(SAVE_MESSAGE), 'save.changedPartly', 'save.partialStuck'])
+    for (const id of [
+      ...Object.values(SAVE_MESSAGE),
+      'save.changedPartly',
+      'save.partialStuck',
+      'save.refusedByLedger',
+      'save.walletMismatchTo',
+    ])
       expect(en).toHaveProperty(id);
   });
 });

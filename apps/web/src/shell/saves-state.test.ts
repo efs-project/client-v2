@@ -189,6 +189,78 @@ describe('createSavesSession', () => {
     error.mockRestore();
   });
 
+  it('a browser that refuses IndexedDB shows no banner (reads never need the journal)', async () => {
+    const reader = state<ReaderState>(verified);
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const fault = Object.assign(new Error('blocked'), {
+      name: 'EfsFault',
+      code: 'JOURNAL_UNAVAILABLE',
+    });
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({
+            openSequences: async () => {
+              throw fault;
+            },
+            close: () => {},
+          }),
+        }) as never,
+    });
+    await vi.waitFor(() => expect(info).toHaveBeenCalled());
+    expect(session.state.get()).toEqual({ status: 'IDLE' });
+    info.mockRestore();
+  });
+
+  it('a save handed over while a check is reading is kept, not replaced by the older listing', async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    let release: (list: SequenceProgress[]) => void = () => {};
+    const view = {
+      pendingSequences: vi.fn(
+        () => new Promise<SequenceProgress[]>((resolve) => (release = resolve)),
+      ),
+      reconcileSequence: vi.fn(async (id: string) => progress({ sequenceId: id as never })),
+    };
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({ openSequences: async () => [{}], close: () => {} }),
+        }) as never,
+      loadActions: async () => ({ openJournal: () => view }) as never,
+      confirmEveryMs: 60_000,
+    });
+    reader.set(verified);
+    await vi.waitFor(() => expect(view.pendingSequences).toHaveBeenCalled());
+    // The editor hands a save over while the listing (taken before it) is still being read.
+    const handed = progress({
+      sequenceId: `0x${'0c'.repeat(32)}`,
+      state: 'COMPLETE',
+      committed: 1,
+      total: 1,
+    });
+    session.track(handed);
+    release([]);
+    await tick();
+    await tick();
+    expect(session.state.get()).toEqual({ status: 'READY', saves: [handed] });
+  });
+
+  it('keeps the draft a save was made from, in memory, for "Review changes"', async () => {
+    const { reader, session } = setup([], []);
+    reader.set(verified);
+    await tick();
+    await tick();
+    const p = progress({ state: 'PARTIAL' });
+    const draft = { route: '#/r/testnet/x', link: 'x', text: 'my edit' };
+    session.track(p, draft);
+    expect(session.draftOf(p.sequenceId)).toEqual(draft);
+    expect(session.takeReopen('x')).toBeUndefined();
+    session.reopen(draft);
+    expect(session.takeReopen('other')).toBeUndefined();
+    expect(session.takeReopen('x')).toEqual(draft);
+    expect(session.reopening.get()).toBeUndefined();
+  });
+
   it('only final completed and abandoned saves need no attention', () => {
     expect(needsAttention(progress({ state: 'COMPLETE', final: true }))).toBe(false);
     expect(needsAttention(progress({ state: 'ABANDONED' }))).toBe(false);

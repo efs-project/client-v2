@@ -3,7 +3,9 @@
 // confirming ("Saved · confirming"). Only Continue (a writer, after Connect) can prompt.
 //
 // Readers who never saved pay nothing: the small journal module answers "is anything open?"
-// without creating storage, and the SDK's write code loads only when the answer is yes.
+// without creating storage, and the SDK's write code loads only when the answer is yes. Reads
+// never need the journal: where this browser refuses it, there is simply nothing to show (saving
+// says it's off when someone tries).
 //
 // After the wallet answers, the save belongs here: the editor hands its progress over (`track`)
 // and this session carries it to "Saved", across reloads, in one place. A save that turns final
@@ -16,6 +18,7 @@ import type { OwnerScope } from '../platform/scope.ts';
 import { effect } from '../state/effect.ts';
 import { type ReadonlySignal, state } from '../state/signals.ts';
 import { type ReaderState, verifiedEfs } from './reader-state.ts';
+import { isFault } from './save-outcome.ts';
 
 export type SavesState =
   /** No verified session yet, or nothing to show. */
@@ -25,14 +28,30 @@ export type SavesState =
   | { readonly status: 'READY'; readonly saves: readonly SequenceProgress[] }
   | { readonly status: 'LOAD_FAILED' };
 
+/** The edit a save was made from, kept in this tab's memory only (never stored). */
+export interface Draft {
+  /** The route to come back to (`#/r/<realm>/<link>`). */
+  readonly route: string;
+  /** The file's canonical link, to recognize it when it's open again. */
+  readonly link: string;
+  readonly text: string;
+}
+
 export interface SavesSession {
   readonly state: ReadonlySignal<SavesState>;
-  /** Re-reads and settles open saves (after a reconnect, or "Check again"). */
+  /** Re-reads and settles open saves (after a reconnect, an unconfirmed send, "Check again"). */
   refresh(): void;
   /** A save's latest progress, straight from the writer: shown now, settled from here on. */
-  track(progress: SequenceProgress): void;
+  track(progress: SequenceProgress, draft?: Draft): void;
   /** Hides a finished ("Saved") save. */
   dismiss(sequenceId: Hex): void;
+  /** The edit a save was made from, while this tab still holds it. */
+  draftOf(sequenceId: Hex): Draft | undefined;
+  /** "Review changes": the draft to put back in the editor once its file is on screen. */
+  readonly reopening: ReadonlySignal<Draft | undefined>;
+  reopen(draft: Draft): void;
+  /** Takes the pending reopen if it is for `link`. */
+  takeReopen(link: string): Draft | undefined;
 }
 
 type JournalModule = typeof import('@efs/sdk/web/journal');
@@ -54,6 +73,10 @@ export interface SavesSessionOptions {
 export const needsAttention = (p: SequenceProgress): boolean =>
   !(p.state === 'COMPLETE' && p.final) && p.state !== 'ABANDONED';
 
+/** Not yet saved: blocks starting another save for the same account (it could double-write). */
+export const unsettled = (p: SequenceProgress): boolean =>
+  p.state === 'IN_FLIGHT' || p.state === 'PARTIAL' || p.state === 'NOT_STARTED';
+
 /** Settled by the ledger alone, no wallet: a part in flight, or a save waiting to be final. */
 const settlesByItself = (p: SequenceProgress): boolean =>
   p.state === 'IN_FLIGHT' || (p.state === 'COMPLETE' && !p.final);
@@ -69,6 +92,7 @@ export function createSavesSession(
   }: SavesSessionOptions = {},
 ): SavesSession {
   const current = state<SavesState>({ status: 'IDLE' });
+  const reopening = state<Draft | undefined>(undefined);
   let run: OwnerScope | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Efs | undefined;
@@ -76,7 +100,11 @@ export function createSavesSession(
   const watched = new Set<Hex>();
   /** Saves that became final while watched: listed as "Saved" until dismissed. */
   const finals = new Map<Hex, SequenceProgress>();
-  /** The open saves last read, in display order. */
+  const drafts = new Map<Hex, Draft>();
+  /** Progress handed over by `track`, with the generation it arrived in. */
+  const tracked = new Map<Hex, { readonly progress: SequenceProgress; readonly at: number }>();
+  let generation = 0;
+  /** The open saves, in display order. */
   let open: SequenceProgress[] = [];
 
   const publish = (): void => {
@@ -88,12 +116,18 @@ export function createSavesSession(
     current.set(saves.length > 0 ? { status: 'READY', saves } : { status: 'IDLE' });
   };
 
-  const schedule = (efs: Efs, saves: readonly SequenceProgress[]): void => {
+  const forget = (id: Hex): void => {
+    watched.delete(id);
+    tracked.delete(id);
+    drafts.delete(id);
+  };
+
+  const schedule = (efs: Efs): void => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
-    const every = saves.some((p) => p.state === 'IN_FLIGHT')
+    const every = open.some((p) => p.state === 'IN_FLIGHT')
       ? settleEveryMs
-      : saves.some((p) => p.state === 'COMPLETE' && !p.final)
+      : open.some((p) => p.state === 'COMPLETE' && !p.final)
         ? confirmEveryMs
         : undefined;
     if (every === undefined) return;
@@ -106,10 +140,21 @@ export function createSavesSession(
     if (timer !== undefined) clearTimeout(timer);
   });
 
+  /**
+   * The open list after a check that started at generation `since`: what the listing found, except
+   * that progress handed over since then is newer than the listing and wins (or is added).
+   */
+  const merge = (listing: readonly SequenceProgress[], since: number): SequenceProgress[] => {
+    const newer = [...tracked.values()].filter((t) => t.at > since).map((t) => t.progress);
+    const ids = new Set(newer.map((p) => p.sequenceId));
+    return [...newer.filter(needsAttention), ...listing.filter((p) => !ids.has(p.sequenceId))];
+  };
+
   const check = (efs: Efs): void => {
     run?.dispose();
     const mine = scope.child();
     run = mine;
+    const since = generation;
     void (async () => {
       try {
         const { indexedDbJournal } = await loadJournal();
@@ -119,8 +164,9 @@ export function createSavesSession(
         // Cheap and non-creating: most visitors have never saved anything.
         if ((await journal.openSequences()).length === 0 && unresolved.length === 0) {
           if (mine.signal.aborted) return;
-          open = [];
+          open = merge([], since);
           publish();
+          schedule(efs);
           return;
         }
         if (mine.signal.aborted) return;
@@ -133,7 +179,10 @@ export function createSavesSession(
         // can't be read right now keeps its last known progress; it never hides the others.
         const settle = (p: SequenceProgress) =>
           settlesByItself(p)
-            ? view.reconcileSequence(p.sequenceId, { signal: mine.signal }).catch(() => p)
+            ? view.reconcileSequence(p.sequenceId, { signal: mine.signal }).catch((error) => {
+                if (!mine.signal.aborted) console.warn('save not settled yet', p.sequenceId, error);
+                return p;
+              })
             : Promise.resolve(p);
         const settled = await Promise.all(listed.map(settle));
         // A watched save no longer listed finished (or was abandoned) since the last look.
@@ -141,20 +190,31 @@ export function createSavesSession(
           unresolved
             .filter((id) => !listed.some((p) => p.sequenceId === id))
             .map((id) =>
-              view.reconcileSequence(id, { signal: mine.signal }).catch(() => undefined),
+              view.reconcileSequence(id, { signal: mine.signal }).catch((error) => {
+                if (!mine.signal.aborted) console.warn('save not found again', id, error);
+                return undefined;
+              }),
             ),
         );
         if (mine.signal.aborted) return;
         for (const p of [...settled, ...gone]) {
           if (!p || needsAttention(p)) continue;
           if (p.state === 'COMPLETE' && watched.has(p.sequenceId)) finals.set(p.sequenceId, p);
-          else watched.delete(p.sequenceId);
+          else forget(p.sequenceId);
         }
-        open = settled.filter(needsAttention);
+        open = merge(settled.filter(needsAttention), since);
         publish();
-        schedule(efs, open);
+        schedule(efs);
       } catch (error) {
         if (mine.signal.aborted) return;
+        if (isFault(error, 'JOURNAL_UNAVAILABLE')) {
+          // This browser won't keep the journal: nothing can have been saved from here, and
+          // reading doesn't need it. No banner; saving says it's off if someone tries.
+          console.info('save journal unavailable in this browser', error);
+          open = merge([], since);
+          publish();
+          return;
+        }
         console.error(error);
         current.set({ status: 'LOAD_FAILED' });
       }
@@ -170,6 +230,8 @@ export function createSavesSession(
       // Another deployment's saves are not this one's.
       watched.clear();
       finals.clear();
+      tracked.clear();
+      drafts.clear();
       open = [];
       if (efs) check(efs);
       else {
@@ -182,24 +244,38 @@ export function createSavesSession(
 
   return {
     state: current,
+    reopening,
     refresh() {
       if (active) check(active);
     },
-    track(progress) {
+    track(progress, draft) {
       const efs = active;
       if (!efs) return;
-      watched.add(progress.sequenceId);
-      open = open.filter((p) => p.sequenceId !== progress.sequenceId);
+      const id = progress.sequenceId;
+      tracked.set(id, { progress, at: ++generation });
+      watched.add(id);
+      if (draft) drafts.set(id, draft);
+      open = open.filter((p) => p.sequenceId !== id);
       if (needsAttention(progress)) open = [progress, ...open];
-      else if (progress.state === 'COMPLETE') finals.set(progress.sequenceId, progress);
-      else watched.delete(progress.sequenceId);
+      else if (progress.state === 'COMPLETE') finals.set(id, progress);
+      else forget(id);
       publish();
-      schedule(efs, open);
+      schedule(efs);
     },
     dismiss(sequenceId) {
       finals.delete(sequenceId);
-      if (!open.some((p) => p.sequenceId === sequenceId)) watched.delete(sequenceId);
+      if (!open.some((p) => p.sequenceId === sequenceId)) forget(sequenceId);
       publish();
+    },
+    draftOf: (sequenceId) => drafts.get(sequenceId),
+    reopen(draft) {
+      reopening.set(draft);
+    },
+    takeReopen(link) {
+      const draft = reopening.get();
+      if (!draft || draft.link !== link) return undefined;
+      reopening.set(undefined);
+      return draft;
     },
   };
 }

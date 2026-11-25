@@ -10,6 +10,7 @@ import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import type { NetworkState } from './network-state.ts';
 import type { ReaderState } from './reader-state.ts';
+import type { Draft } from './saves-state.ts';
 import type { WriterAvailability } from './writer-state.ts';
 
 /** One pane in a layout: which view, and optionally its share of the width (0–1). */
@@ -48,8 +49,19 @@ export interface SavingHost {
   requestWallet(): void;
   /** The writer for the connected account, created on first use; undefined unless READY. */
   writer(): Promise<EfsWriter | undefined>;
-  /** Hands a save's progress to the shell, which shows it and carries it to "Saved". */
-  track(progress: SequenceProgress): void;
+  /** The saves the banner shows (open, confirming, just saved), newest first. */
+  readonly saves: ReadonlySignal<readonly SequenceProgress[]>;
+  /** Re-reads open saves: after a send whose outcome couldn't be confirmed. */
+  refresh(): void;
+  /**
+   * Hands a save's progress to the shell, which shows it and carries it to "Saved". `draft` is
+   * the person's edit, kept in memory so "Review changes" can bring it back.
+   */
+  track(progress: SequenceProgress, draft?: Draft): void;
+  /** A draft the banner asked to reopen ("Review changes"). */
+  readonly reopening: ReadonlySignal<Draft | undefined>;
+  /** Takes the pending reopen when its file (`link`) is the one on screen. */
+  takeReopen(link: string): Draft | undefined;
 }
 
 /** What the shell gives an app. Nothing ambient: no globals, no wallet object, no storage handle. */

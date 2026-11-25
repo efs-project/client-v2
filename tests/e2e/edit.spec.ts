@@ -134,15 +134,14 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
       'Load 2: pin, openFile, readBytes; the saves check: pendingSequences, reconcileSequence',
     );
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
-    expect(chain.walletCalls.length, 'nothing is asked of the wallet on the next load').toBe(
-      before,
-    );
     // Finality: 64 more blocks on anvil, then the banner's next check.
     await chain.control?.mine(64);
     await page.clock.fastForward(12_000);
     chain.step('After 12 s: reconcileSequence finds the block finalized');
     await expect(save(page, 'saved')).toContainText('Saved');
     await expect(save(page, 'confirming')).toHaveCount(0);
+    // From the reload to Saved, the wallet was asked nothing at all (not only no second send).
+    expect(chain.walletCalls.slice(before), 'no wallet request after the reload').toEqual([]);
     expect(sends(chain), 'the save was sent exactly once').toHaveLength(1);
     await save(page, 'saved').locator('wa-button.efs-save-dismiss').click();
     await expect(page.locator('efs-saves-banner')).toHaveCount(0);

@@ -56,6 +56,11 @@ export class EfsFilesPreview extends EfsElement {
   #mine = state<string | undefined>(undefined);
   /** After a save this view won't show: whose version it shows instead. */
   #notInView = state<string | undefined>(undefined);
+  /** The person's own text, brought back by the banner's "Review changes". */
+  #draftText = state<string | undefined>(undefined);
+  /** Saves handed off from this pane, and those already refreshed for (once each). */
+  #handedOff = new Set<string>();
+  #refreshed = new Set<string>();
 
   protected override createRenderRoot() {
     return this;
@@ -72,9 +77,34 @@ export class EfsFilesPreview extends EfsElement {
       this.#loaded = efs && key ? { efs, key } : undefined;
       // Another file (or session): close the editor and drop this file's view choices.
       this.#editing.set(false);
+      this.#draftText.set(undefined);
       this.#mine.set(undefined);
       this.#notInView.set(undefined);
       queueMicrotask(() => this.#load(efs, link, false));
+    });
+    // A save handed off from here reached the ledger (Saved · confirming, then Saved): show the
+    // file as it is now, once.
+    effect(scope, () => {
+      for (const p of this.host.saving.saves.get()) {
+        if (p.state !== 'COMPLETE' || !this.#handedOff.has(p.sequenceId)) continue;
+        if (this.#refreshed.has(p.sequenceId)) continue;
+        this.#refreshed.add(p.sequenceId);
+        queueMicrotask(() => this.#reload());
+      }
+    });
+    // "Review changes" in the banner: the person's edit back in the editor, on the current file.
+    effect(scope, () => {
+      const draft = this.host.saving.reopening.get();
+      const link = this.target.get();
+      if (!draft || link.status !== 'target' || link.canonical !== draft.link) return;
+      queueMicrotask(() => {
+        const taken = this.host.saving.takeReopen(link.canonical);
+        if (!taken) return;
+        this.#notInView.set(undefined);
+        this.#draftText.set(taken.text);
+        this.#editing.set(true);
+        this.#reload();
+      });
     });
   }
 
@@ -129,12 +159,18 @@ export class EfsFilesPreview extends EfsElement {
     const author =
       shown && 'open' in shown && shown.open.status === 'PRESENT' ? shown.open.file.author : null;
     this.#editing.set(false);
+    this.#draftText.set(undefined);
     const p = detail.progress;
-    this.#notInView.set(
-      p && p.state === 'COMPLETE' && detail.visibleInLens === false ? (author ?? '—') : undefined,
-    );
-    if (p) this.#lastAccount = p.account;
-    if (p || detail.showLatest) this.#reload();
+    // Whatever state the save is in, this view won't show it: say so now, with "Show my version".
+    this.#notInView.set(p && detail.visibleInLens === false ? (author ?? '—') : undefined);
+    if (p) {
+      this.#lastAccount = p.account;
+      this.#handedOff.add(p.sequenceId);
+      if (p.state === 'COMPLETE') this.#refreshed.add(p.sequenceId);
+    }
+    // Saved already, or the person asked for the newer version: show the file as it is now.
+    // Otherwise the refresh comes when the banner sees the save reach the ledger.
+    if (p?.state === 'COMPLETE' || detail.showLatest) this.#reload();
   };
 
   /** The account of the last save from this pane (for "Show my version"). */
@@ -180,6 +216,11 @@ export class EfsFilesPreview extends EfsElement {
       link.status === 'target' &&
       link.target.kind === 'file'
     );
+  }
+
+  #canonical(): string {
+    const link = this.target.get();
+    return link.status === 'target' ? link.canonical : '';
   }
 
   #currentLens(): Lens | undefined {
@@ -295,7 +336,9 @@ export class EfsFilesPreview extends EfsElement {
                     .host=${this.host}
                     .efs=${verifiedEfs(this.host.reader.get())}
                     .file=${open.file}
+                    .link=${this.#canonical()}
                     .original=${content?.kind === 'text' ? content.text : ''}
+                    .draft=${this.#draftText.get()}
                     .lens=${this.#currentLens()}
                     @efs-edit-done=${this.#onEditDone}
                   ></efs-file-editor>`
