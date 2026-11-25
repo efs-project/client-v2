@@ -32,7 +32,14 @@ saves session <── journal (non-creating check) <── every verified sessio
 - **No wallet before a click, no storage before a save.** Guest boot touches no wallet, and creates no journal database until the first real submission. The e2e suite asserts both.
 - **Plan in the view's Lens.** The edit is planned in the link's Lens, else the default. The base check and `review.visibleInLens` are therefore about what the person is looking at.
   - When the view won't show the edit (`visibleInLens` false: the Lens leaves the author out, or puts another author first), the review says so before Send: "Your edit will be saved, but this view shows <author>'s version first."
-  - After such a save, "Show my version" switches this file's view to `mineFirst(account)` for this tab. The view never switches by itself.
+  - After such a save, "Show my version" switches this file's view to `mineFirst(account)` for this tab. The view never switches by itself, apart from the identity changes below.
+  - **Decided, not yet built: "you" first when connected** (PM, 2026-11-25, from James's *"me, vitalik, public"* example; `tags.md`, Whose entries).
+    - The view's lens becomes: the connected account, then the place's owner, then the link's or default lens, then public.
+    - **An unsaved edit keeps its base** when connecting or disconnecting reorders the view (slice H's rule). Review plans from the kept base, never from the newly shown version, so BASE_CHANGED asks before anything is saved over.
+    - **A reorder is never silent.** When connecting changes what a file shows, the Preview says so: "Showing your version · also: <author>'s".
+    - **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.** Otherwise "the view never switches by itself" still holds.
+    - **The review's "this view shows <author>'s version first" is computed from the lens at review time.** With "you" first, it appears only when the person put someone else first, or opened a link that carries its own lens.
+    - **Test, when built:** start an edit on the owner's version as a guest, then connect a wallet that has its own version of the file. The editor stays on the owner's text and base, and Review finds BASE_CHANGED against the person's own version, never saving over either one unasked.
 - **Review copy.**
   - Who sees the edit: "Your edit appears to anyone whose lens includes you."
   - How many approvals: one, or one per part (one if the wallet sends batches).
