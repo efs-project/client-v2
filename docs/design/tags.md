@@ -24,6 +24,15 @@
   - A word nobody has used is proven absent (sdk-v2 13a733d: the reader's own proof that no word page exists): "No tag uses the word tesla yet". A tag nobody registered has no "Tags under this one". A refused read still shows its code, never as "nothing uses it" or "couldn't be confirmed".
 - **Tags under this one** (children), on a tag's list: newest first, from `topicChildren`, the first 8, then "Show all N" for a finished directory ("Show more" otherwise, then Keep looking). Each opens its own tag, with "about N". The junk rule and the Lens tiers wait for the SDK.
 - **The location bar's first word** opens that word's page, as the link means.
+
+**Built (stage 3, tagging: `apps/files/tag-picker.ts`, the `tag` request in `folder-requests.ts`, the tag review in `folder-save.ts`):**
+- **Tag** on a file's Preview and on every folder row with a file or folder (anyone's: a tag is the tagger's own statement). It opens the folder dialog's tag picker, then the same review, send and banner path as every save.
+- **The picker:** a path of words ("cars/tesla"), with the places that already use the last word typed (the SDK's word page, the first 8, each "about N tagged things, from everyone"; Lens counts wait for the SDK). A path no suggestion matches is said to be new ("Nobody has used /notes/todo yet") before anything is signed, and a word the grammar refuses is named, with Review off. Exact words only: no partial-word search.
+- **"Applies" (number 0, planTag) or "Not this" (−1, planDeny)**, one choice in the picker. An optional size waits for its "More options".
+- **The review** says what the tag does ("Tag note.txt /notes/todo" or "Say note.txt is not /notes/todo"), every tag it creates ("Creates 2 new tags: /notes, /notes/todo"), that it's public and permanent, and for "Not this" its reach ("It says nothing about /notes"). Prompts and the price come from the review, as for every save.
+- **"Remove my tag"** on a row you decided, in a tag's or an address's list: planUntag at the tag it was filed under (the thing's kind read first with openObject). Its review says "Your tag goes … Other people's tags stay"; the list reads again once the save completes.
+- A tag holds no folder name, so a tag save is held only by unsettled saves the SDK records without an effect (fail-closed), never by a name.
+- **Names:** a file tagged from its Preview is named by its short id until the SDK names files in lists (`topicName` and a file's name in a topic are coming); room is left for them in the review and the rows.
 - **A file opened from a tag (or any file link) whose versions are all by people outside the view's Lens** is read in its own place, as a folder is: you, then its creator, then that Lens. It never reads "Confirmed not present" for that alone. A link carrying its own Lens is read in that Lens only.
 
 **Build order:**

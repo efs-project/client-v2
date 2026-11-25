@@ -76,6 +76,8 @@ describe('placesOf', () => {
     ];
     expect(placesOf({ kind: 'remove', entries, hide: false })).toHaveLength(2);
     expect(placesOf({ kind: 'restore', entries })).toHaveLength(2);
+    // A tag is a statement at a tag (or an address), never a folder entry: it holds no name.
+    expect(placesOf({ kind: 'tag', place: ['cars'], targets: [], stance: 'tag' })).toEqual([]);
     expect(placesOf({ kind: 'unhide', entries })).toEqual([
       { folder: folder.directory.toLowerCase(), name: 'a' },
       { folder: folder.directory.toLowerCase(), name: 'b' },
@@ -91,6 +93,47 @@ describe('planRequest', () => {
     planRemoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planRestoreEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planUnhideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
+    planTag: vi.fn(async () => ({ status: 'PLANNED' })),
+    planDeny: vi.fn(async () => ({ status: 'PLANNED' })),
+    planUntag: vi.fn(async () => ({ status: 'PLANNED' })),
+  });
+
+  it('a tag goes to planTag, "Not this" to planDeny, Remove my tag to planUntag; no Lens decides it', async () => {
+    const p = planners();
+    const targets = [{ kind: 'file' as const, subject: `0x${'5a'.repeat(32)}` as never }];
+    const place = ['cars', 'tesla'];
+    const run = (stance: 'tag' | 'deny' | 'untag', number?: number) =>
+      planRequest(
+        p as unknown as FolderPlanners,
+        efs,
+        writer,
+        { kind: 'tag', place, targets, stance, ...(number !== undefined ? { number } : {}) },
+        lens,
+        signal,
+      );
+    await run('tag');
+    expect((p.planTag.mock.calls[0] as unknown[] | undefined)?.[2]).toEqual({
+      topic: place,
+      targets,
+    });
+    await run('deny');
+    expect((p.planDeny.mock.calls[0] as unknown[] | undefined)?.[2]).toEqual({
+      topic: place,
+      targets,
+    });
+    await run('tag', 7);
+    expect((p.planTag.mock.calls[1] as unknown[] | undefined)?.[2]).toEqual({
+      topic: place,
+      targets,
+      number: 7,
+    });
+    // Remove my tag carries no number: it returns to saying nothing.
+    await run('untag', 3);
+    expect((p.planUntag.mock.calls[0] as unknown[] | undefined)?.[2]).toEqual({
+      topic: place,
+      targets,
+    });
+    expect(p.planRemoveEntries).not.toHaveBeenCalled();
   });
 
   it("Unblock releases the person's own blocks through planUnhideEntries, in the view's Lens", async () => {
@@ -235,6 +278,18 @@ describe('withoutIndices: "Leave these out and review the rest"', () => {
       to,
     });
   });
+  it('drops refused tag targets, keeping the rest in order', () => {
+    const targets = ['1', '2', '3'].map((n) => ({
+      kind: 'file' as const,
+      subject: `0x${n.repeat(64)}` as never,
+    }));
+    expect(withoutIndices({ kind: 'tag', place: ['cars'], targets, stance: 'tag' }, [1])).toEqual({
+      kind: 'tag',
+      place: ['cars'],
+      targets: [targets[0], targets[2]],
+      stance: 'tag',
+    });
+  });
   it('drops refused unblocks too', () => {
     expect(withoutIndices({ kind: 'unhide', entries }, [1])).toEqual({
       kind: 'unhide',
@@ -256,6 +311,10 @@ describe('copy', () => {
     expect(refusalMessage('NEVER_BOUND')).toBe('files.refused.neverBound');
     expect(refusalMessage('HISTORY_UNKNOWN')).toBe('files.refused.historyUnknown');
     expect(refusalMessage('NOT_HIDDEN')).toBe('files.refused.notHidden');
+    // The tag planners' refusals.
+    expect(refusalMessage('TARGET_ABSENT')).toBe('files.refused.targetAbsent');
+    expect(refusalMessage('UNCHANGED')).toBe('files.refused.tagUnchanged');
+    expect(refusalMessage('NOT_STATED')).toBe('files.refused.notStated');
     expect(refusalMessage('SOMETHING_NEW')).toBe('files.refused.unknown');
     expect(refusalMessage('toString')).toBe('files.refused.unknown');
   });

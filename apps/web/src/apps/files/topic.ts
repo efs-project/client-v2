@@ -16,7 +16,7 @@
 
 import type { Address, Efs, Lens, Reason } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
-import type { TopicPlace, TopicRow, TopicView } from '@efs/sdk/tags';
+import type { TagPlace, TagTarget, TopicPlace, TopicRow, TopicView } from '@efs/sdk/tags';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
@@ -25,7 +25,7 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { shortId } from './editor.ts';
+import type { EfsFolderSave } from './folder-save.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
@@ -46,7 +46,7 @@ import {
   TOPIC_VIEWS,
   type TopicListState,
 } from './topic-model.ts';
-import { authorLabel } from './who.ts';
+import { authorLabel, shortId } from './who.ts';
 
 /** A tag or an address: the places this pane lists. */
 export type PlaceLink = Extract<LinkState, { status: 'topic' } | { status: 'home' }>;
@@ -171,6 +171,8 @@ export class EfsFilesTopic extends EfsElement {
   #paths = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
   /** The address shown, checksummed (display only; the lowercase form is what's read). */
   #checksummed = state<string | undefined>(undefined);
+  /** Saves sent from this list ("Remove my tag"): once complete, the list is read again. */
+  #untagging = new Set<string>();
   /** "Tags under this one": newest first (the junk rule and the Lens tiers wait on the SDK). */
   #children = state<PlacesState | undefined>(undefined);
   #showAll = state(false);
@@ -194,6 +196,40 @@ export class EfsFilesTopic extends EfsElement {
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => void this.#load(efs, place, view, below, reader));
+    });
+    // "Remove my tag" landed: read the list again (the row leaves it, or shows the next stance).
+    effect(scope, () => {
+      for (const p of this.host.saving.saves.get()) {
+        if (!this.#untagging.has(p.sequenceId) || p.state !== 'COMPLETE') continue;
+        this.#untagging.delete(p.sequenceId);
+        queueMicrotask(() => this.#reload());
+      }
+    });
+  }
+
+  /**
+   * "Remove my tag": your own tag on a row, taken back where it was filed (planUntag). The thing's
+   * kind is read first (openObject), since a tag names a file or a folder by its own id.
+   */
+  async #untag(row: TopicRow, at: TagPlace): Promise<void> {
+    const efs = verifiedEfs(this.host.reader.get());
+    if (!efs) return;
+    const { openObject } = await import('@efs/sdk/files');
+    const object = await openObject(efs, row.thing).catch(() => undefined);
+    const target: TagTarget | undefined =
+      object?.status === 'FILE'
+        ? object.file
+        : object?.status === 'FOLDER'
+          ? object.folder
+          : undefined;
+    if (!target) return;
+    const dialog = this.querySelector<EfsFolderSave>('efs-files-folder-save.efs-topic-tag-dialog');
+    dialog?.open({
+      kind: 'tag',
+      targets: [target],
+      names: [shortId(row.thing)],
+      place: at,
+      stance: 'untag',
     });
   }
 
@@ -481,6 +517,41 @@ export class EfsFilesTopic extends EfsElement {
     }
   }
 
+  /** "Remove my tag" on a row you decided, where its place (the tag it was filed at) is known. */
+  #removeMine(
+    row: TopicRow,
+    s: Extract<TopicListState, { phase: 'page' }>,
+    place: PlaceLink,
+    me: string | undefined,
+    t: Translator['t'],
+    id: string,
+  ) {
+    if (rowWho(row, me)?.kind !== 'you' || this.host.saving.hosting.shared) return nothing;
+    const words = filedBelow(row, s.place)
+      ? this.#paths.get().get(row.topic.toLowerCase())
+      : place.status === 'topic'
+        ? place.segments
+        : undefined;
+    const at: TagPlace | undefined =
+      place.status === 'home' && !filedBelow(row, s.place)
+        ? { kind: 'home', address: place.address as Address }
+        : words
+          ? words
+          : undefined;
+    if (!at) return nothing;
+    return html`<span class="efs-entry-actions">
+      <wa-button
+        size="s"
+        appearance="plain"
+        class="efs-topic-untag"
+        @click=${() => void this.#untag(row, at)}
+        >${t('files.tag.removeMine')}<span class="wa-visually-hidden"
+          >${t('files.tag.removeMineFor', { id })}</span
+        ></wa-button
+      >
+    </span>`;
+  }
+
   #row(row: TopicRow, s: Extract<TopicListState, { phase: 'page' }>, place: PlaceLink) {
     const t = this.host.translator.t.bind(this.host.translator);
     const efs = verifiedEfs(this.host.reader.get());
@@ -511,6 +582,7 @@ export class EfsFilesTopic extends EfsElement {
       >
         ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
       </button>
+      ${this.#removeMine(row, s, place, me, t, id)}
       <span class="efs-entry-meta efs-quiet">
         <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined)}</span>
         ${filed}
@@ -697,7 +769,16 @@ export class EfsFilesTopic extends EfsElement {
       </div>`;
     }
     const s = this.#state.get();
+    const efs = verifiedEfs(this.host.reader.get());
     return html`<div class="wa-stack wa-gap-s efs-topic" data-place=${place.status}>
+      <efs-files-folder-save
+        class="efs-topic-tag-dialog"
+        .host=${this.host}
+        .efs=${efs}
+        .lens=${efs?.lens.default}
+        @efs-folder-saved=${(event: Event) =>
+          this.#untagging.add((event as CustomEvent<{ sequenceId: string }>).detail.sequenceId)}
+      ></efs-files-folder-save>
       ${this.#header(place, t)}
       ${
         notice ??

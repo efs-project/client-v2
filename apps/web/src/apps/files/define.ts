@@ -6,6 +6,7 @@ import { EfsFilesListing } from './listing.ts';
 import { EfsFilesOverview } from './overview.ts';
 import { EfsFilesPreview } from './preview.ts';
 import { EfsFilesRemoved } from './removed-list.ts';
+import { EfsTagPicker } from './tag-picker.ts';
 import { EfsFilesTopic } from './topic.ts';
 import { EfsFilesTree } from './tree.ts';
 import { EfsFilesView } from './views.ts';
@@ -35,6 +36,9 @@ export function registerFilesElements(): void {
   }
   if (!customElements.get('efs-files-removed')) {
     customElements.define('efs-files-removed', EfsFilesRemoved);
+  }
+  if (!customElements.get('efs-files-tag-picker')) {
+    customElements.define('efs-files-tag-picker', EfsTagPicker);
   }
   if (!customElements.get('efs-files-topic')) {
     customElements.define('efs-files-topic', EfsFilesTopic);

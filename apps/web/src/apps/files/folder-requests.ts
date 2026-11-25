@@ -4,6 +4,7 @@
 import type { Efs, Lens } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
 import type { EntryRef, FolderPlanResult, FolderRef, ParentRef } from '@efs/sdk/files';
+import type { TagPlace, TagPlanResult, TagTarget } from '@efs/sdk/tags';
 import type { Place } from '../../shell/save-hold.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 
@@ -16,7 +17,8 @@ export type FolderPlanners = Pick<
   | 'planRemoveEntries'
   | 'planRestoreEntries'
   | 'planUnhideEntries'
->;
+> &
+  Pick<typeof import('@efs/sdk/tags'), 'planTag' | 'planDeny' | 'planUntag'>;
 
 export type FolderRequest =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly name: string }
@@ -50,7 +52,19 @@ export type FolderRequest =
    * Unblock: release the person's own blocks at these names (a lone block of someone else's
    * entry, NEVER_BOUND), so the Lens shows the next author's entry there again.
    */
-  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] };
+  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] }
+  /**
+   * A tag (one author's statement about each target at one place: a tag's words, or an address).
+   * `stance`: "tag" (it applies, number ≥ 0, default 0), "deny" ("Not this", below 0, default −1),
+   * or "untag" (Remove my tag: back to saying nothing).
+   */
+  | {
+      readonly kind: 'tag';
+      readonly place: TagPlace;
+      readonly targets: readonly TagTarget[];
+      readonly stance: 'tag' | 'deny' | 'untag';
+      readonly number?: number;
+    };
 
 /**
  * The path to a folder from the start of the person's view (the realm's root, by names): what a
@@ -96,17 +110,22 @@ export function placesOf(r: FolderRequest): readonly Place[] | undefined {
     case 'restore':
     case 'unhide':
       return known(r.entries.map((e) => place(e.folder, e.name)));
+    case 'tag':
+      // A tag is a statement at a tag (or an address), never a folder entry: it holds no name.
+      return [];
   }
 }
 
-export type AnyFolderPlan = FolderPlanResult<
-  | import('@efs/sdk/files').CreateFileReview
-  | import('@efs/sdk/files').CreateFolderReview
-  | import('@efs/sdk/files').MoveReview
-  | import('@efs/sdk/files').RemoveReview
-  | import('@efs/sdk/files').RestoreReview
-  | import('@efs/sdk/files').UnhideReview
->;
+export type AnyFolderPlan =
+  | TagPlanResult
+  | FolderPlanResult<
+      | import('@efs/sdk/files').CreateFileReview
+      | import('@efs/sdk/files').CreateFolderReview
+      | import('@efs/sdk/files').MoveReview
+      | import('@efs/sdk/files').RemoveReview
+      | import('@efs/sdk/files').RestoreReview
+      | import('@efs/sdk/files').UnhideReview
+    >;
 
 /** Plans `r` through the SDK, in the Lens the person sees the folder through. */
 export function planRequest(
@@ -159,6 +178,15 @@ export function planRequest(
       return planners.planRestoreEntries(efs, writer, { entries: r.entries, lens }, o);
     case 'unhide':
       return planners.planUnhideEntries(efs, writer, { entries: r.entries, lens }, o);
+    case 'tag': {
+      // A tag is the writer's own statement: no Lens decides it.
+      const input = { topic: r.place, targets: r.targets };
+      if (r.stance === 'untag') return planners.planUntag(efs, writer, input, o);
+      const at = { ...input, ...(r.number !== undefined ? { number: r.number } : {}) };
+      return r.stance === 'deny'
+        ? planners.planDeny(efs, writer, at, o)
+        : planners.planTag(efs, writer, at, o);
+    }
   }
 }
 
@@ -189,6 +217,10 @@ export function withoutIndices(
       const entries = keep(r.entries);
       return entries.length > 0 ? { ...r, entries } : undefined;
     }
+    case 'tag': {
+      const targets = keep(r.targets);
+      return targets.length > 0 ? { ...r, targets } : undefined;
+    }
     default:
       return undefined;
   }
@@ -204,6 +236,9 @@ const REFUSAL: Readonly<Record<string, MessageId>> = {
   NEVER_BOUND: 'files.refused.neverBound',
   HISTORY_UNKNOWN: 'files.refused.historyUnknown',
   NOT_HIDDEN: 'files.refused.notHidden',
+  TARGET_ABSENT: 'files.refused.targetAbsent',
+  UNCHANGED: 'files.refused.tagUnchanged',
+  NOT_STATED: 'files.refused.notStated',
 };
 
 /** The words for a refusal code; an unknown code is shown raw, never as success. */

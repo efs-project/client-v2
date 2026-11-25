@@ -450,10 +450,28 @@ export class EfsFilesListing extends EfsElement {
       ${saving ? html`<span class="efs-entry-saving" role="status">${t('files.pending')}</span>` : nothing}
     </span>`;
     // Rename and Remove only on the person's own entries (another author's is theirs to change).
+    // Tag on anyone's file or folder: a tag is the tagger's own statement about it.
     const entry: EntryRef = { folder, name: row.name };
+    const tagTarget =
+      row.kind === 'invalid'
+        ? undefined
+        : row.target?.kind === 'file' || row.target?.kind === 'folder'
+          ? row.target
+          : undefined;
+    const tag = tagTarget
+      ? html`<wa-button
+          size="s"
+          appearance="plain"
+          class="efs-entry-tag"
+          ?disabled=${saving || this.host.saving.hosting.shared}
+          @click=${() => this.#ask({ kind: 'tag', targets: [tagTarget], names: [row.name] })}
+          >${appIcon('tag', t('files.tag.buttonFor', { name: row.name }))}</wa-button
+        >`
+      : nothing;
     const actions =
       this.#isMine(row.author) && row.kind !== 'invalid'
         ? html`<span class="efs-entry-actions">
+            ${tag}
             <wa-button
               size="s"
               appearance="plain"
@@ -494,7 +512,9 @@ export class EfsFilesListing extends EfsElement {
               >${appIcon('trash', t('files.remove.button', { name: row.name }))}</wa-button
             >
           </span>`
-        : nothing;
+        : tagTarget
+          ? html`<span class="efs-entry-actions">${tag}</span>`
+          : nothing;
     const name = html`<span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>`;
     const target = row.target;
     let open: unknown;

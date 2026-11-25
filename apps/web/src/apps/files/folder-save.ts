@@ -11,6 +11,7 @@
 import type { Efs, Lens, NameCheck } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { EntryRef, FolderRef } from '@efs/sdk/files';
+import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
 import { saveHold } from '../../shell/save-hold.ts';
 import {
@@ -39,6 +40,8 @@ import {
   withoutIndices,
 } from './folder-requests.ts';
 import type { NavStep } from './navigation.ts';
+import type { TagPick } from './tag-picker.ts';
+import { pathText } from './topic-model.ts';
 import { authorLabel } from './who.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
@@ -62,8 +65,11 @@ type CheckName = (input: string) => NameCheck;
 const loadCheckName = async (): Promise<CheckName> => (await import('@efs/sdk')).checkName;
 
 const loadPlanners = async (): Promise<FolderPlanners> => {
-  const files = await import('@efs/sdk/files');
+  const [files, tags] = await Promise.all([import('@efs/sdk/files'), import('@efs/sdk/tags')]);
   return {
+    planTag: tags.planTag,
+    planDeny: tags.planDeny,
+    planUntag: tags.planUntag,
     planCreateFile: files.planCreateFile,
     planCreateFolder: files.planCreateFolder,
     planMoveEntries: files.planMoveEntries,
@@ -109,7 +115,19 @@ export type FolderAsk =
       readonly entries: readonly RestoreItem[];
     }
   /** Unblock the person's own lone blocks (NEVER_BOUND rows in "Show removed"). */
-  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] };
+  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] }
+  /**
+   * Tag things (a file, a folder, an address), chosen where they're shown: the place is picked in
+   * the dialog. `names`: each target as it was shown, for the review and any refusal.
+   */
+  | {
+      readonly kind: 'tag';
+      readonly targets: readonly TagTarget[];
+      readonly names: readonly string[];
+      /** "Remove my tag" from a list: the place is known, so it plans at once (no picker). */
+      readonly place?: TagPlace;
+      readonly stance?: 'untag';
+    };
 
 /** An entry the person picked: what it is, and whether it's a folder. */
 export interface SelectedEntry {
@@ -130,6 +148,18 @@ export interface RestoreItem {
 }
 
 type Planned = Extract<AnyFolderPlan, { status: 'PLANNED' }>;
+
+/** What a tag review does, from its own statements: a number below 0 is "Not this", none is untag. */
+function tagStance(r: TagReview): 'tag' | 'deny' | 'untag' {
+  const n = r.statements[0]?.number;
+  return n === null || n === undefined ? 'untag' : n < 0 ? 'deny' : 'tag';
+}
+
+const TAG_SEND: Readonly<Record<'tag' | 'deny' | 'untag', MessageId>> = {
+  tag: 'files.tag.sendTag',
+  deny: 'files.tag.sendDeny',
+  untag: 'files.tag.sendUntag',
+};
 type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${string}` };
 
 type Phase =
@@ -174,6 +204,8 @@ export class EfsFolderSave extends EfsElement {
   #ask = state<FolderAsk | undefined>(undefined);
   /** The folder the Move picker is on (where "Move here" puts the entry). */
   #pick = state<PickerSelection | undefined>(undefined);
+  /** The tag being chosen in the tag picker: its words (once valid) and its stance. */
+  #tagPick = state<TagPick | undefined>(undefined);
   /** The destination's name as picked, for the move review. */
   #moveLabel = '';
   /** Plans made since this opening (shown as data-plans; see #plan). */
@@ -253,7 +285,14 @@ export class EfsFolderSave extends EfsElement {
     } else if (ask.kind === 'upload') this.#phase.set({ phase: 'naming', value: ask.name });
     else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
     else if (ask.kind === 'move') this.#pickAgain();
-    else void this.#plan(this.#request(ask, ''));
+    else if (ask.kind === 'tag') {
+      if (ask.place && ask.stance === 'untag') {
+        void this.#plan({ kind: 'tag', place: ask.place, targets: ask.targets, stance: 'untag' });
+      } else {
+        this.#tagPick.set(undefined);
+        this.#phase.set({ phase: 'picking' });
+      }
+    } else void this.#plan(this.#request(ask, ''));
   }
 
   /**
@@ -350,6 +389,8 @@ export class EfsFolderSave extends EfsElement {
         };
       case 'unhide':
         return { kind: 'unhide', entries: ask.entries };
+      case 'tag':
+        throw new Error('a tag is planned from the tag picker');
     }
   }
 
@@ -378,12 +419,16 @@ export class EfsFolderSave extends EfsElement {
         this.#phase.set({
           phase: 'refused',
           request,
-          refused: plan.refused.map((r) => ({
-            index: r.index,
-            code: r.code,
-            name: r.entry.name,
-            ...(r.author ? { author: r.author } : {}),
-          })),
+          refused: plan.refused.map((r) =>
+            'entry' in r
+              ? {
+                  index: r.index,
+                  code: r.code,
+                  name: r.entry.name,
+                  ...(r.author ? { author: r.author } : {}),
+                }
+              : { index: r.index, code: r.code, name: this.#targetName(r.index) },
+          ),
         });
       else {
         this.#phase.set({
@@ -510,6 +555,110 @@ export class EfsFolderSave extends EfsElement {
       console.warn('could not drop an unsent save', sequenceId, error);
       void this.host.saving.refresh();
     }
+  }
+
+  /** The tag picker: where the tag goes, and whether it applies; Review plans it. */
+  #tagPicking(ask: Extract<FolderAsk, { kind: 'tag' }>) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const reader = this.host.saving.availability.get().status === 'READY';
+    const pick = this.#tagPick.get();
+    return html`<efs-files-tag-picker
+        .efs=${this.efs}
+        .translator=${this.host.translator}
+        @efs-tag-change=${(event: Event) =>
+          this.#tagPick.set((event as CustomEvent<TagPick>).detail)}
+      ></efs-files-tag-picker>
+      ${
+        reader
+          ? nothing
+          : html`<wa-callout variant="neutral" size="small">
+              <span slot="icon">${appIcon('wallet')}</span>
+              <p>${t('files.save.connect')}</p>
+            </wa-callout>`
+      }
+      <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
+        >${t('review.cancel')}</wa-button
+      >
+      ${
+        reader
+          ? html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-tag-review"
+              ?disabled=${!pick?.words}
+              @click=${() => {
+                const words = this.#tagPick.get()?.words;
+                if (!words) return;
+                void this.#plan({
+                  kind: 'tag',
+                  place: words,
+                  targets: ask.targets,
+                  stance: this.#tagPick.get()?.stance ?? 'tag',
+                });
+              }}
+              >${t('files.save.review')}</wa-button
+            >`
+          : html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-connect"
+              @click=${() => this.host.saving.requestWallet()}
+              >${t('files.save.connectButton')}</wa-button
+            >`
+      }`;
+  }
+
+  /** A tag's review: what it says, the tags it creates, that it's public, and "Not this"'s reach. */
+  #tagReview(ask: Extract<FolderAsk, { kind: 'tag' }>, r: TagReview) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const name = ask.names.join(', ');
+    const path = r.place.kind === 'topic' ? pathText(r.place.words) : shortAccount(r.place.address);
+    const stance = tagStance(r);
+    const parent =
+      r.place.kind === 'topic' && r.place.words.length > 1
+        ? pathText(r.place.words.slice(0, -1))
+        : undefined;
+    const line =
+      stance === 'tag'
+        ? 'files.tag.reviewTag'
+        : stance === 'deny'
+          ? 'files.tag.reviewDeny'
+          : 'files.tag.reviewUntag';
+    return html`<p class="efs-tag-says">${t(line, { name, path })}</p>
+      ${
+        r.newTopics.length > 0
+          ? html`<p class="efs-tag-creates">
+              ${t('files.tag.creates', {
+                count: r.newTopics.length,
+                paths: r.newTopics.map((x) => pathText(x.words)).join(', '),
+              })}
+            </p>`
+          : nothing
+      }
+      ${
+        stance === 'deny'
+          ? html`<p class="efs-tag-reach">
+              ${
+                parent
+                  ? t('files.tag.denyReach', { name, path, parent })
+                  : t('files.tag.denyReachRoot', { name, path })
+              }
+            </p>`
+          : nothing
+      }
+      ${
+        stance === 'untag'
+          ? html`<p class="efs-tag-untag">${t('files.tag.untagNote', { name, path })}</p>`
+          : html`<p class="efs-tag-public">
+              ${t(stance === 'deny' ? 'files.tag.publicDeny' : 'files.tag.public', { name, path })}
+            </p>`
+      }`;
+  }
+
+  /** A tagged thing as the dialog names it: the name it was shown by, else its short id. */
+  #targetName(index: number): string {
+    const ask = this.#ask.get();
+    return ask?.kind === 'tag' ? (ask.names[index] ?? '') : '';
   }
 
   /** Another author, as the review names them: "0x1234…cdef" (in full in the title). */
@@ -800,6 +949,8 @@ export class EfsFolderSave extends EfsElement {
             )}
           </ul>`;
       }
+      case 'efs.tagReview':
+        return ask.kind === 'tag' ? this.#tagReview(ask, r) : nothing;
       case 'efs.unhideReview': {
         // Your block goes; what shows at the name afterwards is the next author's, or nothing.
         const e = r.entries[0];
@@ -841,7 +992,9 @@ export class EfsFolderSave extends EfsElement {
                   ? 'files.restore'
                   : ask?.kind === 'unhide'
                     ? 'files.unhide.title'
-                    : 'files.remove.title';
+                    : ask?.kind === 'tag'
+                      ? 'files.tag.title'
+                      : 'files.remove.title';
     const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
     const first =
       ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
@@ -860,7 +1013,9 @@ export class EfsFolderSave extends EfsElement {
           ? many
             ? t('files.move.titleMany', { count: ask.entries.length })
             : t(title, { name: first?.name ?? '' })
-          : t(title);
+          : ask?.kind === 'tag'
+            ? t(title, { name: ask.names.join(', ') })
+            : t(title);
     let body: unknown = nothing;
     if (open && ask) {
       switch (s.phase) {
@@ -869,6 +1024,7 @@ export class EfsFolderSave extends EfsElement {
           break;
         case 'picking':
           if (ask.kind === 'move') body = this.#picking(ask);
+          else if (ask.kind === 'tag') body = this.#tagPicking(ask);
           break;
         case 'planning':
           body = html`<p class="wa-cluster wa-gap-xs" role="status">
@@ -1086,7 +1242,9 @@ export class EfsFolderSave extends EfsElement {
                               : 'files.remove.yes'
                             : ask.kind === 'unhide'
                               ? 'files.unhide.yes'
-                              : 'review.send',
+                              : s.plan.review.kind === 'efs.tagReview'
+                                ? TAG_SEND[tagStance(s.plan.review)]
+                                : 'review.send',
                       )}</wa-button
                     >`
             }`;
