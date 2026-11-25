@@ -26,6 +26,13 @@
 4. **Pending isn't done.**
    - Until the banner says "Saved", the listing shows the change with a "Saving" badge (A1's optimistic UI over the journal).
    - **Which rows are pending comes from the save's effect,** not from the client's guess. Each effect (`files.create`, `files.createFolder`, `files.move`, `files.remove`, `files.restore`) lists the (folder, name) positions it touches, and those rows carry the badge. A second operation on a held position waits, as a second edit of the same file does.
+   - **The hold rule** (`shell/save-hold.ts`, PM 2026-11-25). An unsettled save of the same account holds a new one when:
+     - both are `files.edit` of the same file (as today); or
+     - both list positions, and any position is shared. A move holds both its old and its new position.
+   - **It stays fail-closed.** A pending save whose effect is missing, or of a kind this version doesn't recognize, still holds every new save of that account, as a folder save does today, because today's check knows only `files.edit`.
+   - **An edit and a folder operation hold each other only by that fallback.** An edit changes a file's contents and has no positions; a folder operation changes placements, not contents.
+   - The release rules (`pastDeadline`, PARTIAL and NOT_STARTED waiting for the person) don't change.
+   - **Tests, when wired:** an unrelated position doesn't wait; a shared position waits; a move holds both ends; an unknown effect kind holds everything.
    - A stop shown in the banner (partial, "undone by the network") also shows on the row.
    - A pending entry is never shown as a settled one.
 5. **Names are checked by the SDK, as the person types.**
