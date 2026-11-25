@@ -39,6 +39,14 @@ import {
 } from './folder-model.ts';
 import type { ComposeDetail, EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
+import { uploadMediaType } from './upload-model.ts';
+
+/**
+ * The largest file read for an upload: past this it isn't read into memory at all (the SDK's own
+ * limits, far lower today, refuse what it can't save, in the review).
+ */
+const UPLOAD_MAX_MB = 50;
+
 import { type FolderNav, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import type { ObjectKindState } from './object-kind.ts';
@@ -113,6 +121,8 @@ export class EfsFilesListing extends EfsElement {
   #showRemoved = state(false);
   /** Bumped when a save touching the folder on screen lands, so the removed list reads again. */
   #removedGeneration = state(0);
+  /** Why the last upload didn't start (several files, or one too large to read). */
+  #uploadNote = state<'files.upload.oneAtATime' | 'files.upload.tooBig' | undefined>(undefined);
 
   protected override createRenderRoot() {
     return this;
@@ -651,7 +661,23 @@ export class EfsFilesListing extends EfsElement {
               @click=${() =>
                 this.#ask({ kind: 'createFile', folder, folderName: this.#folderName() })}
               ><span slot="start">${appIcon('file')}</span>${t('files.new.textFile')}</wa-button
-            >`
+            >
+            <wa-button
+              size="s"
+              class="efs-upload"
+              @click=${() => this.querySelector<HTMLInputElement>('input.efs-upload-input')?.click()}
+              ><span slot="start">${appIcon('upload')}</span>${t('files.new.upload')}</wa-button
+            >
+            <input
+              type="file"
+              class="efs-upload-input"
+              hidden
+              @change=${(event: Event) => {
+                const input = event.target as HTMLInputElement;
+                void this.#upload(input.files);
+                input.value = '';
+              }}
+            />`
           : nothing
       }
       ${
@@ -666,12 +692,28 @@ export class EfsFilesListing extends EfsElement {
             >`
           : nothing
       }
+      ${
+        this.#uploadNote.get()
+          ? html`<p class="efs-upload-note" role="status">
+              ${t(this.#uploadNote.get() as 'files.upload.tooBig', { limit: UPLOAD_MAX_MB })}
+            </p>`
+          : nothing
+      }
     </div>`;
     return html`<div
       class="wa-stack wa-gap-s efs-listing"
       @efs-folder-saved=${this.#onSaved}
       @efs-restore-removed=${this.#onRestoreRemoved}
       @efs-compose=${this.#onCompose}
+      @dragover=${(event: DragEvent) => {
+        // A file dragged over a folder that can take writes: allow the drop.
+        if (folder && ready && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+      }}
+      @drop=${(event: DragEvent) => {
+        if (!folder || !ready || !event.dataTransfer?.types.includes('Files')) return;
+        event.preventDefault();
+        void this.#upload(event.dataTransfer.files);
+      }}
     >
       ${toolbar} ${body}
       ${
@@ -692,6 +734,41 @@ export class EfsFilesListing extends EfsElement {
         .lens=${efs && folder ? this.#lens(efs, folder) : undefined}
       ></efs-files-folder-save>
     </div>`;
+  }
+
+  /**
+   * Upload, from the picker or a drop: one file, read here, its media type found from its bytes
+   * (upload-model.ts), then named and reviewed in the folder dialog.
+   */
+  async #upload(files: FileList | null | undefined): Promise<void> {
+    const list = files ? [...files] : [];
+    const file = list[0];
+    const s = this.#state.get();
+    if (!file || s?.phase !== 'page') return;
+    if (list.length > 1) {
+      this.#uploadNote.set('files.upload.oneAtATime');
+      return;
+    }
+    if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
+      this.#uploadNote.set('files.upload.tooBig');
+      return;
+    }
+    this.#uploadNote.set(undefined);
+    const [buffer, { normalizeMediaType }] = await Promise.all([
+      file.arrayBuffer(),
+      import('@efs/sdk/files'),
+    ]);
+    const bytes = new Uint8Array(buffer);
+    const type = uploadMediaType(bytes, file.type, normalizeMediaType);
+    this.#ask({
+      kind: 'upload',
+      folder: s.folder,
+      folderName: this.#folderName(),
+      name: file.name,
+      bytes,
+      mediaType: type.mediaType,
+      typeFrom: type.from,
+    });
   }
 
   /** "New text file", named in the dialog: the Preview's editor writes it, here. */

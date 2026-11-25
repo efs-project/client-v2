@@ -10,11 +10,23 @@ import type { MessageId } from '../../ui/i18n.ts';
 /** The planners the dialog needs, injected so tests can replay recorded results. */
 export type FolderPlanners = Pick<
   typeof import('@efs/sdk/files'),
-  'planCreateFolder' | 'planMoveEntries' | 'planRemoveEntries' | 'planRestoreEntries'
+  | 'planCreateFile'
+  | 'planCreateFolder'
+  | 'planMoveEntries'
+  | 'planRemoveEntries'
+  | 'planRestoreEntries'
 >;
 
 export type FolderRequest =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly name: string }
+  /** Upload: a new file from bytes, with the media type its bytes support ("" unknown). */
+  | {
+      readonly kind: 'createFile';
+      readonly folder: FolderRef;
+      readonly name: string;
+      readonly content: Uint8Array;
+      readonly mediaType: string;
+    }
   | { readonly kind: 'rename'; readonly from: EntryRef; readonly to: string }
   /** Into another folder under the same name. A folder needs the path to `to` (`via`). */
   | {
@@ -53,6 +65,7 @@ const place = (folder: FolderRef, name: string): Place => ({
 export function placesOf(r: FolderRequest): readonly Place[] {
   switch (r.kind) {
     case 'createFolder':
+    case 'createFile':
       return [place(r.folder, r.name)];
     case 'rename':
       return [place(r.from.folder, r.from.name), place(r.from.folder, r.to)];
@@ -65,6 +78,7 @@ export function placesOf(r: FolderRequest): readonly Place[] {
 }
 
 export type AnyFolderPlan = FolderPlanResult<
+  | import('@efs/sdk/files').CreateFileReview
   | import('@efs/sdk/files').CreateFolderReview
   | import('@efs/sdk/files').MoveReview
   | import('@efs/sdk/files').RemoveReview
@@ -84,6 +98,13 @@ export function planRequest(
   switch (r.kind) {
     case 'createFolder':
       return planners.planCreateFolder(efs, writer, { folder: r.folder, name: r.name, lens }, o);
+    case 'createFile':
+      return planners.planCreateFile(
+        efs,
+        writer,
+        { folder: r.folder, name: r.name, content: r.content, mediaType: r.mediaType, lens },
+        o,
+      );
     case 'rename':
       return planners.planMoveEntries(
         efs,

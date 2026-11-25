@@ -60,6 +60,7 @@ const loadCheckName = async (): Promise<CheckName> => (await import('@efs/sdk'))
 const loadPlanners = async (): Promise<FolderPlanners> => {
   const files = await import('@efs/sdk/files');
   return {
+    planCreateFile: files.planCreateFile,
     planCreateFolder: files.planCreateFolder,
     planMoveEntries: files.planMoveEntries,
     planRemoveEntries: files.planRemoveEntries,
@@ -72,6 +73,18 @@ export type FolderAsk =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly folderName: string }
   /** Named here, then written in the editor (no plan in this dialog). */
   | { readonly kind: 'createFile'; readonly folder: FolderRef; readonly folderName: string }
+  /** Upload: a file's bytes, named here (its own name first), planned and sent from here. */
+  | {
+      readonly kind: 'upload';
+      readonly folder: FolderRef;
+      readonly folderName: string;
+      /** The file's own name, offered first. */
+      readonly name: string;
+      readonly bytes: Uint8Array;
+      /** From the bytes (upload-model.ts); "" unknown. */
+      readonly mediaType: string;
+      readonly typeFrom: 'signature' | 'text' | 'unknown';
+    }
   | { readonly kind: 'rename'; readonly from: EntryRef }
   | {
       readonly kind: 'move';
@@ -183,7 +196,11 @@ export class EfsFolderSave extends EfsElement {
     this.#controller?.abort();
     this.#controller = new AbortController();
     this.#ask.set(ask);
-    const named = ask.kind === 'createFolder' || ask.kind === 'createFile' || ask.kind === 'rename';
+    const named =
+      ask.kind === 'createFolder' ||
+      ask.kind === 'createFile' ||
+      ask.kind === 'upload' ||
+      ask.kind === 'rename';
     if (named && !this.#checkName.get()) {
       loadCheckName()
         .then((check) => this.#checkName.set(check))
@@ -191,7 +208,8 @@ export class EfsFolderSave extends EfsElement {
     }
     if (ask.kind === 'createFolder' || ask.kind === 'createFile') {
       this.#phase.set({ phase: 'naming', value: '' });
-    } else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
+    } else if (ask.kind === 'upload') this.#phase.set({ phase: 'naming', value: ask.name });
+    else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
     else if (ask.kind === 'move') this.#pickAgain();
     else void this.#plan(this.#request(ask, ''));
   }
@@ -229,6 +247,14 @@ export class EfsFolderSave extends EfsElement {
         return { kind: 'createFolder', folder: ask.folder, name };
       case 'createFile':
         throw new Error('a new file is planned in the editor');
+      case 'upload':
+        return {
+          kind: 'createFile',
+          folder: ask.folder,
+          name,
+          content: ask.bytes,
+          mediaType: ask.mediaType,
+        };
       case 'rename':
         return { kind: 'rename', from: ask.from, to: name };
       case 'move':
@@ -270,7 +296,13 @@ export class EfsFolderSave extends EfsElement {
             ...(r.author ? { author: r.author } : {}),
           })),
         });
-      else this.#phase.set({ phase: 'plan-failed', request, code: plan.reason.code });
+      else {
+        this.#phase.set({
+          phase: 'plan-failed',
+          request,
+          code: plan.status === 'TOO_LARGE' ? 'TOO_LARGE' : plan.reason.code,
+        });
+      }
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
@@ -552,6 +584,24 @@ export class EfsFolderSave extends EfsElement {
         }
       </p>`;
     switch (r.kind) {
+      case 'efs.createFileReview':
+        return html`<p>
+            ${t('files.upload.review', { name: r.name, folder: ask.kind === 'upload' ? ask.folderName : '' })}
+          </p>
+          <p class="efs-upload-type">
+            ${
+              r.mediaType
+                ? t(
+                    ask.kind === 'upload' && ask.typeFrom === 'signature'
+                      ? 'files.upload.typeSignature'
+                      : 'files.upload.typeText',
+                    { type: r.mediaType },
+                  )
+                : t('files.upload.typeUnknown')
+            }
+          </p>
+          <p>${t('files.upload.size', { size: Number(r.size) })}</p>
+          ${instead(r, r.name)}`;
       case 'efs.createFolderReview':
         return html`<p>${t('files.save.createsFolder', { name: r.name, folder: ask.kind === 'createFolder' ? ask.folderName : '' })}</p>
           ${instead(r, r.name)}`;
@@ -606,13 +656,15 @@ export class EfsFolderSave extends EfsElement {
         ? 'files.new.folder'
         : ask?.kind === 'createFile'
           ? 'files.new.textFile'
-          : ask?.kind === 'rename'
-            ? 'files.rename.title'
-            : ask?.kind === 'move'
-              ? 'files.move.title'
-              : ask?.kind === 'restore'
-                ? 'files.restore'
-                : 'files.remove.title';
+          : ask?.kind === 'upload'
+            ? 'files.upload.title'
+            : ask?.kind === 'rename'
+              ? 'files.rename.title'
+              : ask?.kind === 'move'
+                ? 'files.move.title'
+                : ask?.kind === 'restore'
+                  ? 'files.restore'
+                  : 'files.remove.title';
     const label =
       ask?.kind === 'remove'
         ? t(title, { name: ask.entry.name, folder: ask.folderName })
@@ -664,11 +716,14 @@ export class EfsFolderSave extends EfsElement {
         case 'plan-failed': {
           const noWallet = s.code === 'NO_WALLET';
           const intoItself = s.code === 'INTO_ITSELF';
+          const tooLarge = s.code === 'TOO_LARGE';
           const message = noWallet
             ? t('files.save.connect')
             : intoItself
               ? t('files.move.intoSelf')
-              : t('files.save.planFailed', { code: s.code });
+              : tooLarge
+                ? t('files.upload.tooLarge')
+                : t('files.save.planFailed', { code: s.code });
           body = html`<wa-callout variant=${noWallet ? 'neutral' : 'danger'} size="small">
               <span slot="icon">${appIcon(noWallet ? 'wallet' : 'circle-exclamation')}</span>
               <p>${message}</p>
@@ -684,7 +739,7 @@ export class EfsFolderSave extends EfsElement {
                     @click=${() => this.host.saving.requestWallet()}
                     >${t('files.save.connectButton')}</wa-button
                   >`
-                : intoItself
+                : intoItself || tooLarge
                   ? nothing
                   : html`<wa-button
                       slot="footer"
