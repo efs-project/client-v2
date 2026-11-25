@@ -26,6 +26,7 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { type Composer, newFileKey } from './compose.ts';
 import { shortId } from './editor.ts';
 import {
   continueListing,
@@ -36,7 +37,7 @@ import {
   rootFolder,
   startListing,
 } from './folder-model.ts';
-import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
+import type { ComposeDetail, EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
 import { type FolderNav, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
@@ -82,11 +83,14 @@ export class EfsFilesListing extends EfsElement {
     host: { attribute: false },
     nav: { attribute: false },
     object: { attribute: false },
+    composer: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
   /** What the route's object link names (a folder lists here). */
   declare object: ObjectKindState;
+  /** "New text file": the file being written (the Preview shows its editor). */
+  declare composer: Composer | undefined;
 
   #state = state<PaneState | undefined>(undefined);
   #kind = state<KindFilter>('all');
@@ -536,6 +540,7 @@ export class EfsFilesListing extends EfsElement {
         s.rows,
         unsettled,
       );
+      const unsaved = this.#unsavedNewFiles(folder);
       const restoreAsk = removedSave
         ? this.#restoreAsk(removedSave.entry, removedSave.isFolder)
         : undefined;
@@ -559,16 +564,17 @@ export class EfsFilesListing extends EfsElement {
           : nothing
       }
       ${
-        line && !(line.id === 'files.list.empty' && creating.length > 0)
+        line && !(line.id === 'files.list.empty' && creating.length + unsaved.length > 0)
           ? html`<p class="efs-entries-notice" role="status">
               ${t(line.id, 'count' in line ? { count: line.count } : {})}
             </p>`
           : nothing
       }
         ${
-          s.rows.length > 0 || creating.length > 0
+          s.rows.length > 0 || creating.length > 0 || unsaved.length > 0
             ? html`<ul class="efs-entries" aria-label=${t('files.entries.title')}>
               ${s.rows.map((row) => this.#row(row, folder, pending, placeLens))}
+              ${unsaved}
               ${creating.map(
                 (c) => html`<li class="efs-entry efs-entry-creating" data-kind=${c.kind}>
                   <span class="efs-entry-open"
@@ -638,6 +644,13 @@ export class EfsFilesListing extends EfsElement {
               @click=${() =>
                 this.#ask({ kind: 'createFolder', folder, folderName: this.#folderName() })}
               ><span slot="start">${appIcon('plus')}</span>${t('files.new.folder')}</wa-button
+            >
+            <wa-button
+              size="s"
+              class="efs-new-file"
+              @click=${() =>
+                this.#ask({ kind: 'createFile', folder, folderName: this.#folderName() })}
+              ><span slot="start">${appIcon('file')}</span>${t('files.new.textFile')}</wa-button
             >`
           : nothing
       }
@@ -658,6 +671,7 @@ export class EfsFilesListing extends EfsElement {
       class="wa-stack wa-gap-s efs-listing"
       @efs-folder-saved=${this.#onSaved}
       @efs-restore-removed=${this.#onRestoreRemoved}
+      @efs-compose=${this.#onCompose}
     >
       ${toolbar} ${body}
       ${
@@ -678,6 +692,52 @@ export class EfsFilesListing extends EfsElement {
         .lens=${efs && folder ? this.#lens(efs, folder) : undefined}
       ></efs-files-folder-save>
     </div>`;
+  }
+
+  /** "New text file", named in the dialog: the Preview's editor writes it, here. */
+  #onCompose = (event: Event): void => {
+    const detail = (event as CustomEvent<ComposeDetail>).detail;
+    event.stopPropagation();
+    this.#write(detail);
+  };
+
+  /** Writes (or keeps writing) a new file in the folder on screen. */
+  #write(file: ComposeDetail): void {
+    const location = this.host.location.get();
+    if (location.kind !== 'realm') return;
+    this.composer?.start({ ...file, route: location.link });
+  }
+
+  /** Unsaved new files in `folder` (this tab), each offered back. */
+  #unsavedNewFiles(folder: FolderRef) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const location = this.host.location.get();
+    if (location.kind !== 'realm' || !this.composer) return [];
+    this.host.saving.drafts.count.get();
+    const writing = this.composer.current.get();
+    return this.host.saving.drafts
+      .newFiles()
+      .filter(([key, d]) => key === newFileKey(location.realm, folder, d.create.name))
+      .filter(
+        ([, d]) => !(writing && writing.name === d.create.name && writing.route === location.link),
+      )
+      .map(
+        ([, d]) => html`<li class="efs-entry efs-entry-unsaved" data-kind="file">
+          <button
+            type="button"
+            class="efs-entry-open"
+            aria-label=${t('files.new.resume', { name: d.create.name })}
+            @click=${() => this.#write({ ...d.create, folder })}
+          >
+            ${appIcon('file')}
+            <span class="efs-entry-name" translate="no" dir="auto">${d.create.name}</span>
+          </button>
+          <span class="efs-entry-meta efs-quiet">
+            <span>${t('files.kind.file')}</span>
+            <span class="efs-entry-unsaved-note">${t('files.new.unsaved')}</span>
+          </span>
+        </li>`,
+      );
   }
 
   /** A save the dialog handed to the banner. A removal's notice waits for its save to complete. */

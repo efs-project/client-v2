@@ -3,6 +3,7 @@
 
 import type { Efs, Lens } from '@efs/sdk';
 import { link } from '@efs/sdk/links';
+import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { draftKey } from '../../shell/drafts.ts';
@@ -11,10 +12,12 @@ import { verifiedEfs } from '../../shell/reader-state.ts';
 import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
-import { EfsElement, html, nothing } from '../../ui/element.ts';
+import { EfsElement, html, keyed, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import { type EditDoneDetail, shortId } from './editor.ts';
+import { placeLens } from './folder-model.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
@@ -81,8 +84,11 @@ export class EfsFilesPreview extends EfsElement {
     target: { attribute: false },
     nav: { attribute: false },
     object: { attribute: false },
+    composer: { attribute: false },
   };
   declare host: AppHost;
+  /** The new text file being written, if any: shown here instead of the route's link. */
+  declare composer: Composer | undefined;
   /** What the route's object link names: a file is read here only once openObject says so. */
   declare object: ObjectKindState | undefined;
   /** Where the person browsed in this tab: a file opened from a listing reads in its Lens. */
@@ -116,6 +122,11 @@ export class EfsFilesPreview extends EfsElement {
   /** Open results from the object-kind resolver already shown once (never reused after). */
   #usedOpens = new WeakSet<object>();
   #refreshed = new Set<string>();
+  /** New files handed to the banner from here: opened by their link once Saved, if still here. */
+  #created = new Map<
+    string,
+    { readonly subject: string; readonly route: string; readonly lens: Lens | undefined }
+  >();
 
   protected override createRenderRoot() {
     return this;
@@ -152,6 +163,37 @@ export class EfsFilesPreview extends EfsElement {
         this.#refreshed.add(p.sequenceId);
         queueMicrotask(() => this.#reload());
       }
+    });
+    // A new file handed off from here is Saved: open it by its link, if the person is still where
+    // it was written (elsewhere, its row shows in its folder anyway).
+    effect(scope, () => {
+      for (const p of this.host.saving.saves.get()) {
+        const made = this.#created.get(p.sequenceId);
+        if (!made || p.state !== 'COMPLETE') continue;
+        this.#created.delete(p.sequenceId);
+        const location = this.host.location.get();
+        if (location.kind === 'realm' && location.link === made.route) {
+          queueMicrotask(() => {
+            // Read in the folder's place Lens, as a row click does: under the default Lens the
+            // person's own new file may have no HEAD yet ("not present").
+            if (made.lens) this.nav?.rememberLens(made.subject, made.lens);
+            this.host.openLink(link({ kind: 'object', subject: made.subject as never }));
+          });
+        }
+      }
+    });
+    // "Review changes" for a new file: back to its folder, with its text, in the editor.
+    effect(scope, () => {
+      const draft = this.host.saving.reopening.get();
+      const location = this.host.location.get();
+      if (!draft?.create || location.kind !== 'realm') return;
+      if (formatRealmRoute(location.realm, location.link) !== draft.route) return;
+      queueMicrotask(() => {
+        const taken = this.host.saving.takeReopen(draft.link);
+        if (!taken?.create) return;
+        this.#draftText.set(taken.text);
+        this.composer?.start({ ...taken.create, route: location.link });
+      });
     });
     // "Review changes" in the banner: the person's edit back in the editor, on the current file.
     effect(scope, () => {
@@ -316,6 +358,55 @@ export class EfsFilesPreview extends EfsElement {
     // is done; before that, focus() is a silent no-op.
     const ready = (target as { updateComplete?: Promise<unknown> } | null)?.updateComplete;
     void Promise.resolve(ready).then(() => target?.focus());
+  }
+
+  /** The new-file editor closed: cancelled, or handed the new file to the banner. */
+  #onNewFileDone = (event: Event): void => {
+    const detail = (event as CustomEvent<EditDoneDetail>).detail;
+    event.stopPropagation();
+    const c = this.composer?.current.get();
+    this.#draftText.set(undefined);
+    const p = detail.progress;
+    // The editor handed the save to the banner (with its text, for "Review changes"); it opens
+    // here once Saved (the effect above), including when it's Saved already.
+    if (p && detail.created && c) {
+      const efs = verifiedEfs(this.host.reader.get());
+      this.#created.set(p.sequenceId, {
+        subject: detail.created,
+        route: c.route,
+        lens: efs ? placeLens(efs, c.folder, p.account) : undefined,
+      });
+    }
+    this.composer?.end();
+  };
+
+  /** The editor for a new text file, at the place it was started. */
+  #compose(c: NewFile) {
+    const efs = verifiedEfs(this.host.reader.get());
+    const location = this.host.location.get();
+    if (!efs || location.kind !== 'realm') return nothing;
+    const a = this.host.saving.availability.get();
+    const reader = a.status === 'READY' ? a.account : undefined;
+    const key = newFileKey(location.realm, c.folder, c.name);
+    return html`<div class="wa-stack wa-gap-m efs-preview efs-compose" tabindex="-1">
+      ${keyed(
+        key,
+        html`<efs-file-editor
+          .host=${this.host}
+          .efs=${efs}
+          .create=${{ folder: c.folder, folderName: c.folderName, name: c.name }}
+          .realm=${location.realm}
+          .route=${formatRealmRoute(location.realm, c.route)}
+          .link=${''}
+          .original=${''}
+          .draft=${this.#draftText.get()}
+          .draftKey=${key}
+          .resumed=${this.host.saving.drafts.get(key) !== undefined}
+          .lens=${placeLens(efs, c.folder, reader)}
+          @efs-edit-done=${this.#onNewFileDone}
+        ></efs-file-editor>`,
+      )}
+    </div>`;
   }
 
   #onEditDone = (event: Event): void => {
@@ -686,6 +777,8 @@ export class EfsFilesPreview extends EfsElement {
   override render() {
     const t = this.host.translator.t.bind(this.host.translator);
     const link = this.target.get();
+    const composing = this.composer?.current.get();
+    if (composing) return readerNotice(this, this.host, t) ?? this.#compose(composing);
     if (link.status === 'none') return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
     if (link.status === 'path') {
       return html`<p class="efs-quiet efs-preview-soon">

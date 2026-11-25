@@ -1,4 +1,7 @@
 // Editing a text file opened by object link: edit → review → one approval (per part) → saved.
+// The same editor writes a new text file (`create`): no base revision, planCreateFile in place of
+// planEditFile, holds on its (folder, name), and the unsaved text kept under that folder and name
+// (compose.ts). Everything else (review, send, banner) is the edit path, unchanged.
 //
 // Typing needs no wallet; preparing a save needs the connected writer (planning reads the chain
 // but never prompts). The review dialog shows what the SDK planned, in the PM's words: who sees
@@ -18,7 +21,15 @@
 
 import type { Efs, Hex, Lens } from '@efs/sdk';
 import type { EfsWriter, SequenceOpts, SequenceProgress } from '@efs/sdk/actions';
-import type { EditPlanResult, OpenedFile, RevisionRef } from '@efs/sdk/files';
+import type {
+  CreateFileReview,
+  EditPlanResult,
+  FolderPlanResult,
+  FolderRef,
+  OpenedFile,
+  RevisionRef,
+} from '@efs/sdk/files';
+import type { RealmRef } from '../../boot/route.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import type { KeptDraft } from '../../shell/drafts.ts';
 import { type SaveHold, saveHold } from '../../shell/save-hold.ts';
@@ -34,8 +45,19 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { newFileKey } from './compose.ts';
+import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
 
-type Planned = Extract<EditPlanResult, { status: 'PLANNED' }>;
+type EditPlanned = Extract<EditPlanResult, { status: 'PLANNED' }>;
+type CreatePlanned = Extract<FolderPlanResult<CreateFileReview>, { status: 'PLANNED' }>;
+type Planned = EditPlanned | CreatePlanned;
+
+/** A new file to write (create mode): where, and the name it was given. */
+export interface NewFileTarget {
+  readonly folder: FolderRef;
+  readonly folderName: string;
+  readonly name: string;
+}
 
 /** A send that came back NOT_STARTED: what the SDK said, and the sequence to continue. */
 interface NotSent {
@@ -63,7 +85,12 @@ type Phase =
   | { readonly phase: 'base-changed'; readonly head: RevisionRef | null }
   /** The person's own version moved (another tab or device) while they edited another's. */
   | { readonly phase: 'own-changed'; readonly plan: Planned; readonly writer: EfsWriter }
-  | { readonly phase: 'plan-failed'; readonly message: MessageId };
+  | { readonly phase: 'plan-failed'; readonly message: MessageId }
+  /** A new file the planner refused (the person's own entry already has that name). */
+  | {
+      readonly phase: 'refused';
+      readonly refused: readonly { readonly code: string; readonly name: string }[];
+    };
 
 /** Sent when the editor closes: cancelled, or handed a save to the shell. */
 export interface EditDoneDetail {
@@ -72,6 +99,8 @@ export interface EditDoneDetail {
   readonly visibleInLens?: boolean;
   /** The person chose to drop their edit and see the newer version. */
   readonly showLatest?: boolean;
+  /** A new file handed to the banner: its SubjectId, to open it once it's saved. */
+  readonly created?: string;
 }
 export const EDIT_DONE_EVENT = 'efs-edit-done';
 
@@ -80,6 +109,8 @@ export const shortId = (id: string): string =>
   id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 
 const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
+const loadCreate = async () => (await import('@efs/sdk/files')).planCreateFile;
+const loadCheckName = async () => (await import('@efs/sdk')).checkName;
 
 /** Why a new send waits: a re-read after a throw, a save to finish or stop, or one in flight. */
 type Hold =
@@ -105,11 +136,20 @@ export class EfsFileEditor extends EfsElement {
     draftKey: { attribute: false },
     resumed: { attribute: false },
     lens: { attribute: false },
+    create: { attribute: false },
+    realm: { attribute: false },
+    route: { attribute: false },
   };
   declare host: AppHost;
   declare efs: Efs;
-  /** The revision on screen when the person pressed Edit (the base of the edit). */
-  declare file: OpenedFile;
+  /** The revision on screen when the person pressed Edit (the base of the edit); none for `create`. */
+  declare file: OpenedFile | undefined;
+  /** Create mode: the new file to write. */
+  declare create: NewFileTarget | undefined;
+  /** Create mode: the realm, for the new file's key among unsaved edits. */
+  declare realm: RealmRef | undefined;
+  /** Create mode: the route to come back to ("Review changes"), where it was started. */
+  declare route: string | undefined;
   /** The file's canonical link (to come back to it from the banner). */
   declare link: string;
   declare original: string;
@@ -135,6 +175,11 @@ export class EfsFileEditor extends EfsElement {
   #holding = state<'no' | 'checking' | 'failed' | 'no-journal'>('no');
   #base: RevisionRef | undefined;
   #controller = new AbortController();
+  /** Create mode: the name as typed now, and the SDK's checkName once loaded. */
+  #name = state('');
+  #checkName = state<((input: string) => import('@efs/sdk').NameCheck) | undefined>(undefined);
+  /** Create mode: the key the unsaved text is kept under now (it follows the name). */
+  #keptAs: string | undefined;
 
   protected override createRenderRoot() {
     return this;
@@ -145,12 +190,30 @@ export class EfsFileEditor extends EfsElement {
     // "Review changes" brings a save's edit back on the version shown now (the banner asked
     // before replacing a different unsaved edit). Otherwise an unsaved edit kept for this file
     // comes back with its own base, so a file that changed meanwhile still says so at Review.
-    const kept = this.draft === undefined ? this.host.saving.drafts.get(this.draftKey) : undefined;
+    if (this.create) {
+      this.#name.set(this.create.name);
+      this.#keptAs = this.#key();
+      loadCheckName()
+        .then((check) => this.#checkName.set(check))
+        .catch((error: unknown) => console.error(error));
+    }
+    const kept = this.draft === undefined ? this.host.saving.drafts.get(this.#key()) : undefined;
     this.#restored = kept;
     this.#text.set(this.draft ?? kept?.text ?? this.original);
-    this.#base = kept?.base ?? this.#fileBase();
+    this.#base = kept && 'base' in kept ? kept.base : this.#fileBase();
     this.#controller = new AbortController();
     this.#keep();
+  }
+
+  /** This edit's key among unsaved edits: the file's route, or a new file's folder and name. */
+  #key(): string {
+    const c = this.create;
+    return c && this.realm ? newFileKey(this.realm, c.folder, this.#name.get()) : this.draftKey;
+  }
+
+  /** Create mode: the name as checked now (VALID, or why not). */
+  #nameCheck(): import('@efs/sdk').NameCheck | undefined {
+    return this.#checkName.get()?.(this.#name.get());
   }
 
   override disconnectedCallback(): void {
@@ -169,12 +232,19 @@ export class EfsFileEditor extends EfsElement {
   #keep(): void {
     const text = this.#text.get();
     const drafts = this.host.saving.drafts;
-    if (text === this.original) drafts.drop(this.draftKey);
-    else drafts.keep(this.draftKey, { text, base: this.#base ?? this.#fileBase() });
+    const key = this.#key();
+    // A new file's key follows its name: the text moves with it.
+    if (this.#keptAs !== undefined && this.#keptAs !== key) drafts.drop(this.#keptAs);
+    this.#keptAs = this.create ? key : undefined;
+    const base = this.#base ?? this.#fileBase();
+    if (text === this.original) drafts.drop(key);
+    else if (this.create) {
+      drafts.keep(key, { text, create: { ...this.create, name: this.#name.get() } });
+    } else if (base) drafts.keep(key, { text, base });
   }
 
-  #fileBase(): RevisionRef {
-    return { kind: 'revision', recordId: this.file.revision };
+  #fileBase(): RevisionRef | undefined {
+    return this.file ? { kind: 'revision', recordId: this.file.revision } : undefined;
   }
 
   /**
@@ -182,7 +252,7 @@ export class EfsFileEditor extends EfsElement {
    * "Review changes"), discarded after asking, or never changed.
    */
   #done(detail: EditDoneDetail): void {
-    this.host.saving.drafts.drop(this.draftKey);
+    this.host.saving.drafts.drop(this.#key());
     this.dispatchEvent(new CustomEvent(EDIT_DONE_EVENT, { bubbles: true, composed: true, detail }));
   }
 
@@ -194,6 +264,11 @@ export class EfsFileEditor extends EfsElement {
   #keptNotice(t: Translator['t']) {
     const kept = this.#restored;
     if (!kept) return nothing;
+    if (!('base' in kept) || !this.file) {
+      return this.resumed
+        ? html`<p class="efs-quiet efs-edit-kept">${t('files.new.kept')}</p>`
+        : nothing;
+    }
     const moved = kept.base.recordId.toLowerCase() !== this.file.revision.toLowerCase();
     if (!moved && !this.resumed) return nothing;
     return html`<p class="efs-quiet efs-edit-kept">
@@ -218,12 +293,19 @@ export class EfsFileEditor extends EfsElement {
     if (holding === 'checking') return { hold: { kind: 'confirming' }, lapsed: false };
     if (holding === 'failed') return { hold: { kind: 'check-failed' }, lapsed: false };
     if (holding === 'no-journal') return { hold: { kind: 'no-journal' }, lapsed: false };
-    const mine = this.file.file.toLowerCase();
-    // An unconfirmed edit of this file, or an unconfirmed send that names nothing, pauses saving.
-    // A folder operation's unconfirmed send names its places, which an edit doesn't touch.
+    const mine = this.file?.file.toLowerCase();
+    const place = this.#place();
+    // An unconfirmed edit of this file (or a send touching a new file's place), or an unconfirmed
+    // send that names nothing, pauses saving. Other places and other files don't.
     const paused = this.host.saving.unconfirmed
       .get()
-      .some((u) => u.file?.toLowerCase() === mine || (u.file === undefined && !u.places));
+      .some(
+        (u) =>
+          (mine !== undefined && u.file?.toLowerCase() === mine) ||
+          (place !== undefined &&
+            (u.places ?? []).some((p) => p.folder === place.folder && p.name === place.name)) ||
+          (u.file === undefined && !u.places),
+      );
     if (paused) {
       return { hold: { kind: 'paused' }, lapsed: false };
     }
@@ -231,9 +313,16 @@ export class EfsFileEditor extends EfsElement {
     if (a.status !== 'READY') return { lapsed: false };
     return saveHold(this.host.saving.saves.get(), {
       account: a.account,
-      file: this.file.file,
+      ...(place ? { places: [place] } : this.file ? { file: this.file.file } : {}),
       except,
     });
+  }
+
+  /** Create mode: the (folder, name) the new file takes. */
+  #place(): { readonly folder: string; readonly name: string } | undefined {
+    return this.create
+      ? { folder: this.create.folder.directory.toLowerCase(), name: this.#name.get() }
+      : undefined;
   }
 
   #progressOpts(plan: Planned): SequenceOpts {
@@ -256,7 +345,7 @@ export class EfsFileEditor extends EfsElement {
    * (the person edits another author's version and only their own HEAD moved) is shown as
    * "your own version changed" first, never sent silently over that other save.
    */
-  async #plan(base: RevisionRef, afterRace = false): Promise<void> {
+  async #plan(base: RevisionRef | undefined, afterRace = false): Promise<void> {
     if (this.host.saving.availability.get().status !== 'READY') {
       this.#phase.set({ phase: 'editing' });
       return;
@@ -267,7 +356,7 @@ export class EfsFileEditor extends EfsElement {
       this.#phase.set({ phase: 'editing' });
       return;
     }
-    this.#base = base;
+    if (base) this.#base = base;
     this.#keep();
     const signal = this.#controller.signal;
     try {
@@ -277,6 +366,11 @@ export class EfsFileEditor extends EfsElement {
         this.#phase.set({ phase: 'editing' });
         return;
       }
+      if (this.create) {
+        await this.#planCreate(this.create, writer, signal);
+        return;
+      }
+      if (!base || !this.file) return;
       const planEditFile = await loadEdit();
       const result = await planEditFile(
         this.efs,
@@ -311,6 +405,39 @@ export class EfsFileEditor extends EfsElement {
       if (signal.aborted) return;
       console.error(error);
       this.#phase.set({ phase: 'plan-failed', message: 'files.edit.failed' });
+    }
+  }
+
+  /** Create mode: plans the new file at its folder and (current) name, in the folder's Lens. */
+  async #planCreate(c: NewFileTarget, writer: EfsWriter, signal: AbortSignal): Promise<void> {
+    const planCreateFile = await loadCreate();
+    const result = await planCreateFile(
+      this.efs,
+      writer,
+      {
+        folder: c.folder,
+        name: this.#name.get(),
+        content: new TextEncoder().encode(this.#text.get()),
+        ...(this.lens ? { lens: this.lens } : {}),
+      },
+      { signal },
+    );
+    if (signal.aborted) return;
+    switch (result.status) {
+      case 'PLANNED':
+        this.#phase.set({ phase: 'review', plan: result, writer });
+        return;
+      case 'REFUSED':
+        this.#phase.set({
+          phase: 'refused',
+          refused: result.refused.map((r) => ({ code: r.code, name: r.entry.name })),
+        });
+        return;
+      case 'TOO_LARGE':
+        this.#phase.set({ phase: 'plan-failed', message: 'files.edit.tooLarge' });
+        return;
+      default:
+        this.#phase.set({ phase: 'plan-failed', message: 'files.edit.unknown' });
     }
   }
 
@@ -375,10 +502,10 @@ export class EfsFileEditor extends EfsElement {
       // It may have been sent: never "nothing was saved". Saving this file pauses until a
       // successful check finds the save (then the banner's list decides); a failed or timed-out
       // check never releases it.
+      const place = this.#place();
+      const touched = place ? { places: [place] } : this.file ? { file: this.file.file } : {};
       this.host.saving.markUnconfirmed(
-        thrown.sequenceId
-          ? { file: this.file.file, sequenceId: thrown.sequenceId }
-          : { file: this.file.file },
+        thrown.sequenceId ? { ...touched, sequenceId: thrown.sequenceId } : touched,
       );
       void this.#recheck();
       this.#phase.set({ phase: 'unconfirmed', noJournal: thrown.noJournal });
@@ -390,7 +517,11 @@ export class EfsFileEditor extends EfsElement {
         // The person's own version moved (E_CAS). Nothing was sent; drop this plan and check the
         // file again: either it shows what changed, or it says their own version changed.
         await this.#drop(writer, progress.sequenceId);
-        await this.#plan(this.#base ?? { kind: 'revision', recordId: plan.review.base }, true);
+        // A new file: someone (the person, elsewhere) took the name; planning again says so.
+        if (this.create || !('base' in plan.review)) await this.#plan(undefined);
+        else {
+          await this.#plan(this.#base ?? { kind: 'revision', recordId: plan.review.base }, true);
+        }
         return;
       }
       this.#phase.set({
@@ -403,12 +534,25 @@ export class EfsFileEditor extends EfsElement {
     }
     // The wallet answered: from here the banner owns this save (Saved · confirming → Saved,
     // Partially saved → Continue, a race → changed), with the edit kept for "Review changes".
-    this.host.saving.track(progress, {
-      route: this.draftKey,
-      link: this.link,
-      text: this.#text.get(),
+    const c = this.create;
+    const key = this.#key();
+    this.host.saving.track(
+      progress,
+      c
+        ? {
+            route: this.route ?? '',
+            link: key,
+            key,
+            text: this.#text.get(),
+            create: { ...c, name: this.#name.get() },
+          }
+        : { route: this.draftKey, link: this.link, text: this.#text.get() },
+    );
+    this.#done({
+      progress,
+      visibleInLens: plan.review.visibleInLens,
+      ...(plan.review.kind === 'efs.createFileReview' ? { created: plan.review.file.subject } : {}),
     });
-    this.#done({ progress, visibleInLens: plan.review.visibleInLens });
   }
 
   /** Cancel in the review: a save that was started but never sent is dropped quietly. */
@@ -422,7 +566,10 @@ export class EfsFileEditor extends EfsElement {
   /** "Prepare again" after a refusal this plan can't get past (stale): a fresh, visible plan. */
   async #prepareAgain(s: Extract<Phase, { phase: 'review' }>): Promise<void> {
     if (s.sent?.sequenceId) await this.#drop(s.writer, s.sent.sequenceId);
-    await this.#plan(this.#base ?? { kind: 'revision', recordId: s.plan.review.base });
+    const review = s.plan.review;
+    await this.#plan(
+      'base' in review ? (this.#base ?? { kind: 'revision', recordId: review.base }) : undefined,
+    );
   }
 
   /** The connected account when the SDK says it is the author (it always is for a plan). */
@@ -485,7 +632,8 @@ export class EfsFileEditor extends EfsElement {
     const r = s.plan.review;
     const sending = s.phase === 'sending';
     const sent = s.phase === 'review' ? s.sent : undefined;
-    const author = this.file.author ?? '—';
+    const author =
+      'shownInstead' in r ? (r.shownInstead?.author ?? '—') : (this.file?.author ?? '—');
     const values = sent
       ? saveValues(sent.outcome, shortAccount, (id) => this.#chainName(id, t))
       : {};
@@ -520,6 +668,13 @@ export class EfsFileEditor extends EfsElement {
                 </p>
               </wa-callout>`
         }
+        ${
+          r.kind === 'efs.createFileReview'
+            ? html`<p class="efs-new-review">
+                ${t('files.new.review', { name: r.name, folder: this.create?.folderName ?? '' })}
+              </p>`
+            : nothing
+        }
         <p>${t('review.appears')}</p>
         <p class="efs-review-prompts">
           ${
@@ -541,8 +696,12 @@ export class EfsFileEditor extends EfsElement {
           <dd>${r.parts}</dd>
           <dt>${t('review.revision')}</dt>
           <dd><code translate="no" dir="ltr" class="efs-hash">${r.revision}</code></dd>
-          <dt>${t('review.protection')}</dt>
-          <dd>${t(r.guard === 'own-head' ? 'review.guardOwn' : 'review.guardLens')}</dd>
+          ${
+            'guard' in r
+              ? html`<dt>${t('review.protection')}</dt>
+                  <dd>${t(r.guard === 'own-head' ? 'review.guardOwn' : 'review.guardLens')}</dd>`
+              : nothing
+          }
         </dl>
         ${
           s.phase === 'sending'
@@ -666,6 +825,18 @@ export class EfsFileEditor extends EfsElement {
           ><span slot="icon">${appIcon('circle-exclamation')}</span>
           <p role="alert">${t(s.message)}</p></wa-callout
         >`;
+      case 'refused':
+        return html`<wa-callout variant="danger" size="small" class="efs-new-refused"
+          ><span slot="icon">${appIcon('circle-exclamation')}</span>
+          <div class="wa-stack wa-gap-2xs">
+            ${s.refused.map(
+              (r) =>
+                html`<p role="alert">
+                  ${t(refusalMessage(r.code), { code: r.code, name: r.name, author: '—' })}
+                </p>`,
+            )}
+          </div></wa-callout
+        >`;
       default:
         return nothing;
     }
@@ -677,16 +848,20 @@ export class EfsFileEditor extends EfsElement {
     const ready = this.host.saving.availability.get().status === 'READY';
     const { hold, lapsed } = this.#hold();
     const blocked = hold !== undefined;
-    const changed = this.#text.get() !== this.original;
+    // A new file can be saved empty; an edit needs a change.
+    const changed = this.create !== undefined || this.#text.get() !== this.original;
     const busy = s.phase === 'planning' || s.phase === 'sending';
+    const name = this.create ? this.#nameCheck() : undefined;
+    const nameOk = !this.create || name?.status === 'VALID';
     return html`<div class="wa-stack wa-gap-s efs-editor">
       ${
         this.draft !== undefined
           ? html`<p class="efs-quiet efs-edit-reopened">${t('files.edit.reopened')}</p>`
           : this.#keptNotice(t)
       }
+      ${this.create ? this.#nameField(this.create, name, busy, t) : nothing}
       <label class="wa-stack wa-gap-2xs">
-        <span>${t('files.edit.label')}</span>
+        <span>${t(this.create ? 'files.new.label' : 'files.edit.label')}</span>
         <textarea
           class="efs-edit-text"
           translate="no"
@@ -718,7 +893,7 @@ export class EfsFileEditor extends EfsElement {
           variant="brand"
           class="efs-edit-review-button"
           ?loading=${s.phase === 'planning'}
-          ?disabled=${!ready || blocked || !changed || busy}
+          ?disabled=${!ready || blocked || !changed || busy || !nameOk}
           @click=${() => void this.#plan(this.#base ?? this.#fileBase())}
           >${t('files.edit.review')}</wa-button
         >
@@ -741,6 +916,33 @@ export class EfsFileEditor extends EfsElement {
       }
       ${this.#discardDialog(t)}
     </div>`;
+  }
+
+  /** Create mode: the new file's name, editable, checked as typed (its text follows the name). */
+  #nameField(
+    c: NewFileTarget,
+    check: import('@efs/sdk').NameCheck | undefined,
+    busy: boolean,
+    t: Translator['t'],
+  ) {
+    const value = this.#name.get();
+    const error =
+      value === '' || !check || check.status === 'VALID'
+        ? undefined
+        : t(check.status === 'INVALID' ? nameRuleMessage(check.rule) : 'files.name.rule.character');
+    return html`<p class="efs-new-where">${t('files.new.where', { folder: c.folderName })}</p>
+      <wa-input
+        class="efs-new-name"
+        label=${t('files.name.label')}
+        .value=${value}
+        ?readonly=${busy}
+        @input=${(event: Event) => {
+          this.#name.set((event.target as HTMLInputElement).value);
+          if (this.#phase.get().phase === 'refused') this.#phase.set({ phase: 'editing' });
+          this.#keep();
+        }}
+      ></wa-input>
+      ${error ? html`<p class="efs-new-name-error" role="alert">${error}</p>` : nothing}`;
   }
 
   /**

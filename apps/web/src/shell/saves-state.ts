@@ -31,13 +31,17 @@ export type SavesState =
 /** The edit a save was made from, kept in this tab's memory only (never stored). */
 export interface Draft {
   /**
-   * The file's canonical route to come back to (`#/r/<realm>/<link>`), which is also its key
-   * among unsaved edits (shell/drafts.ts).
+   * The route to come back to (`#/r/<realm>/<link>`): the file's, which is also its key among
+   * unsaved edits (shell/drafts.ts); for a new file, the folder it was being created in.
    */
   readonly route: string;
-  /** The file's canonical link, to recognize it when it's open again. */
+  /** The file's canonical link, to recognize it when it's open again (a new file: its `key`). */
   readonly link: string;
   readonly text: string;
+  /** Its key among unsaved edits, when that isn't `route` (a new file's). */
+  readonly key?: string;
+  /** A new file: where it was to be created. "Review changes" opens it in the editor again. */
+  readonly create?: import('./drafts.ts').NewFileDraft['create'];
 }
 
 export interface SavesSession {

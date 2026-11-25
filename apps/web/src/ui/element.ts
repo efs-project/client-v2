@@ -6,3 +6,5 @@ import { LitElement } from 'lit';
 
 export const EfsElement = SignalWatcher(LitElement);
 export { css, html, nothing } from 'lit';
+/** Renders a fresh element when the key changes (a different new file gets a new editor). */
+export { keyed } from 'lit/directives/keyed.js';
