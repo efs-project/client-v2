@@ -176,8 +176,8 @@ importers:
         specifier: 2.5.14
         version: 2.5.14
       '@efs/fixture':
-        specifier: file:vendor/efs-fixture-0.0.0-88bfc0c.tgz
-        version: file:vendor/efs-fixture-0.0.0-88bfc0c.tgz(typescript@7.0.2)
+        specifier: file:vendor/efs-fixture-0.0.0-a4b2113.tgz
+        version: file:vendor/efs-fixture-0.0.0-a4b2113.tgz(typescript@7.0.2)
       '@efs/sdk':
         specifier: file:vendor/efs-sdk-0.0.0-78464e9.tgz
         version: file:vendor/efs-sdk-0.0.0-78464e9.tgz(typescript@7.0.2)
@@ -308,8 +308,8 @@ packages:
     resolution: {integrity: sha512-WyOx8cJQ+FQus4Mm4uPIZA64gbk3Wxh0so5Lcii0aJifqwoVOlfFtorjLE0Hen4OYyHZMXDWqMmaQemBhgxFRQ==}
     engines: {node: '>=14'}
 
-  '@efs/fixture@file:vendor/efs-fixture-0.0.0-88bfc0c.tgz':
-    resolution: {integrity: sha512-qBFka8Jgnrg9dLx+8be+wXJqEb6OuwR1JNV4UCv3JEPpdt3JIf2Y/+Nb4ixo1qoD5Agbl6A0LJTnAN/VXN3cqw==, tarball: file:vendor/efs-fixture-0.0.0-88bfc0c.tgz}
+  '@efs/fixture@file:vendor/efs-fixture-0.0.0-a4b2113.tgz':
+    resolution: {integrity: sha512-Jz96cyQXni/k3lT3hhG4f63qC6pDQm7AOjcu8XHK2OyOCY/FqHuaIrYEpMC+0+i7nk2BOA6cNdeXiqYbfyb6/g==, tarball: file:vendor/efs-fixture-0.0.0-a4b2113.tgz}
     version: 0.0.0
     engines: {node: '>=22.12'}
 
@@ -1133,7 +1133,7 @@ snapshots:
 
   '@ctrl/tinycolor@4.1.0': {}
 
-  '@efs/fixture@file:vendor/efs-fixture-0.0.0-88bfc0c.tgz(typescript@7.0.2)':
+  '@efs/fixture@file:vendor/efs-fixture-0.0.0-a4b2113.tgz(typescript@7.0.2)':
     dependencies:
       viem: 2.58.4(typescript@7.0.2)
     transitivePeerDependencies:
