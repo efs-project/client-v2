@@ -83,7 +83,8 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
       'everyone',
     );
     await expect(section(page, 'lens')).toHaveCount(1);
-    await expect(section(page, 'lens')).toContainText(/tagged by\W+0x/);
+    // Authors show as their checksummed address (displayOf), never the padded principal.
+    await expect(section(page, 'lens')).toContainText(/tagged by\W+0xf39F…2266/);
     await expect(section(page, 'public')).toHaveCount(1);
     await expect(section(page, 'public')).toContainText(/1 person says it applies/);
     await expect(section(page, 'public')).toContainText(/filed at\W+\/cars\/tesla\/model_y/);
@@ -187,12 +188,12 @@ test('a word the network refuses is named before any read; a tag word ending .et
       /This is the tag\W+vitalik\.eth\W+, not an address\./,
     );
     await expect(word.locator('.efs-topic-mark')).toContainText('Tag');
-    // A word nobody has used: the SDK's wordPage says INVALID today (its reader's ABSENT_PROVEN,
-    // asked to become an empty, finished page). Shown as refused, never as "couldn't be confirmed".
-    await expect(word.locator('.efs-word-invalid')).toContainText(
-      "This word's places can't be read:",
+    // A word nobody has used: proven absent (the reader's own proof), so "no tag uses it yet",
+    // never "couldn't be confirmed" or a refusal.
+    await expect(word.locator('.efs-topic-empty')).toContainText(
+      /No tag uses the word\W+vitalik\.eth\W+yet\./,
     );
-    await expect(word.locator('efs-outcome')).toHaveCount(0);
+    await expect(word.locator('efs-outcome, .efs-word-invalid')).toHaveCount(0);
     await chain.idle(500);
     chain.step('vitalik.eth: a tag, said not to be an address; nothing tagged');
   } finally {

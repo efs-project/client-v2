@@ -237,7 +237,8 @@ Remove "pet.jpg" from 0x12…ab?
       - NEVER_BOUND: a block with nothing of yours before it, so someone else's entry at that name is hidden. The row says "You blocked someone else's entry at this name" and offers **Unblock** (`planUnhideEntries`, which releases your block). The review says what shows at the name afterwards. The word "hide" is still never used (A7).
       - UNKNOWN: the history is too deep to read, for that row only. The row says so and offers nothing; it is never a guess.
       - Restore's refusals NEVER_BOUND and HISTORY_UNKNOWN, and Unblock's NOT_HIDDEN, each have their own words.
-      - Until the SDK's save record names an unhide's effect (asked for), the listing re-reads only after an Unblock sent from this tab, and the save hold treats it as touching everything (fail-closed).
+      - An Unblock's save names its effect (`files.unhide`, sdk-v2 13a733d), as a block's does (`files.hide`): the listing re-reads for it from any tab, and the save hold keys it by (folder, name).
+      - A request whose parent is an address (a home) has no (folder, name) key in the client yet: it holds, and is held by, every unsettled save of the account (fail-closed) until homes are wired.
     - **It reads again** whenever a save touching the folder lands, keeping its rows shown meanwhile.
   - **Restoring a folder needs the path to it** (`via`: from the realm's root, by the names on the trail), so the SDK can check it never lands inside itself. In a folder opened by its link the trail has no names: a folder's Restore is disabled there, with "Open this folder from the root to restore a folder here." A file restores anywhere. The SDK checks the path against the chain, so a stale trail is refused, never trusted.
   - **The review says where else the target is placed now** (`alsoPlaced`, by anyone): "It's in N other places now too; restoring puts it here as well." Nothing is said when the index can't vouch for the count (never "0").

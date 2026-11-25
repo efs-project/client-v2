@@ -3,7 +3,7 @@
 
 import type { Efs, Lens } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
-import type { EntryRef, FolderPlanResult, FolderRef } from '@efs/sdk/files';
+import type { EntryRef, FolderPlanResult, FolderRef, ParentRef } from '@efs/sdk/files';
 import type { Place } from '../../shell/save-hold.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 
@@ -65,25 +65,37 @@ export interface ViewPath {
 /** One entry to restore; a folder needs the path to its folder (`via`). */
 export type RestoreEntry = EntryRef & { readonly via?: ViewPath };
 
-const place = (folder: FolderRef, name: string): Place => ({
-  folder: folder.directory.toLowerCase(),
-  name,
-});
+/**
+ * A folder's (folder, name) key. A home parent (an address) has no key here yet: the client
+ * doesn't place entries under an address until homes are wired, and its key is the SDK's padded
+ * address, so a request naming one is held fail-closed (undefined) rather than keyed by guess.
+ */
+const place = (parent: ParentRef, name: string): Place | undefined =>
+  parent.kind === 'folder' ? { folder: parent.directory.toLowerCase(), name } : undefined;
 
-/** Every (folder, name) the request touches: what a send of it holds, and what holds it. */
-export function placesOf(r: FolderRequest): readonly Place[] {
+/** All the places, or undefined (fail-closed) when any of them can't be keyed. */
+const known = (places: readonly (Place | undefined)[]): readonly Place[] | undefined =>
+  places.every((p) => p !== undefined) ? (places as readonly Place[]) : undefined;
+
+/**
+ * Every (folder, name) the request touches: what a send of it holds, and what holds it. Undefined
+ * when one can't be keyed: then it holds, and is held by, every unsettled save of the account.
+ */
+export function placesOf(r: FolderRequest): readonly Place[] | undefined {
   switch (r.kind) {
     case 'createFolder':
     case 'createFile':
-      return [place(r.folder, r.name)];
+      return known([place(r.folder, r.name)]);
     case 'rename':
-      return [place(r.from.folder, r.from.name), place(r.from.folder, r.to)];
+      return known([place(r.from.folder, r.from.name), place(r.from.folder, r.to)]);
     case 'move':
-      return r.moves.flatMap((m) => [place(m.from.folder, m.from.name), place(r.to, m.from.name)]);
+      return known(
+        r.moves.flatMap((m) => [place(m.from.folder, m.from.name), place(r.to, m.from.name)]),
+      );
     case 'remove':
     case 'restore':
     case 'unhide':
-      return r.entries.map((e) => place(e.folder, e.name));
+      return known(r.entries.map((e) => place(e.folder, e.name)));
   }
 }
 
@@ -234,7 +246,8 @@ export interface FolderHoldInput {
   readonly signer: string;
   readonly unconfirmed: readonly import('../../shell/saves-state.ts').Unconfirmed[];
   readonly saves: readonly import('@efs/sdk/actions').SequenceProgress[];
-  readonly places: readonly Place[];
+  /** Undefined: places that can't be keyed (fail-closed: any unconfirmed or unsettled save holds). */
+  readonly places: readonly Place[] | undefined;
   /** The save this review continues: it never holds itself. */
   readonly except?: string | undefined;
 }
@@ -249,11 +262,13 @@ export function folderHold(
   input: FolderHoldInput,
   saveHold: typeof import('../../shell/save-hold.ts').saveHold,
 ): { readonly hold?: FolderHold; readonly lapsed: boolean } {
-  const keys = new Set(input.places.map((p) => `${p.folder.toLowerCase()}\u0000${p.name}`));
+  const keys = new Set((input.places ?? []).map((p) => `${p.folder.toLowerCase()}\u0000${p.name}`));
   const paused = input.unconfirmed.some((u) =>
-    u.places
-      ? u.places.some((p) => keys.has(`${p.folder.toLowerCase()}\u0000${p.name}`))
-      : u.file === undefined,
+    input.places === undefined
+      ? true
+      : u.places
+        ? u.places.some((p) => keys.has(`${p.folder.toLowerCase()}\u0000${p.name}`))
+        : u.file === undefined,
   );
   if (paused) return { hold: { kind: 'paused' }, lapsed: false };
   const a = input.availability;
@@ -266,7 +281,7 @@ export function folderHold(
   }
   const { hold, lapsed } = saveHold(input.saves, {
     account: input.signer,
-    places: input.places,
+    ...(input.places ? { places: input.places } : {}),
     except: input.except,
   });
   return hold ? { hold: { kind: 'held' }, lapsed } : { lapsed };

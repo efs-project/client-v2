@@ -29,6 +29,7 @@ import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
 import { type PreviewReads, runPreview } from './preview-model.ts';
 import type { PlaceLink } from './topic.ts';
+import { authorLabel } from './who.ts';
 
 const loadReads = async (): Promise<PreviewReads> => {
   const { openFile, readBytes } = await import('@efs/sdk/files');
@@ -220,7 +221,9 @@ export class EfsFilesOverview extends EfsElement {
             : mine
               ? t('files.overview.byYou')
               : owner
-                ? t('files.overview.by', { author: shortId(owner) })
+                ? t('files.overview.by', {
+                    author: authorLabel(verifiedEfs(this.host.reader.get()), owner),
+                  })
                 : nothing
         }
       </p>

@@ -254,7 +254,7 @@ export class EfsFilesWord extends EfsElement {
         ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
       </button>
       <span class="efs-entry-meta efs-quiet">
-        <span class="efs-topic-who">${whoLine(t, row, me, undefined)}</span>
+        <span class="efs-topic-who">${whoLine(t, efs, row, me, undefined)}</span>
         ${
           row.decider.kind === 'public'
             ? html`<span class="efs-word-public">${t('files.word.fromEveryone')}</span>`
@@ -351,6 +351,11 @@ export class EfsFilesWord extends EfsElement {
     if (s?.phase === 'loading') {
       body = html`<p class="wa-cluster wa-gap-xs" role="status">
         <wa-spinner></wa-spinner>${t('files.topic.reading')}
+      </p>`;
+    } else if (s?.phase === 'absent') {
+      // The reader proved no word page exists: no place uses the word yet.
+      body = html`<p class="efs-quiet efs-topic-empty" role="status">
+        ${t('files.word.none', { word })}
       </p>`;
     } else if (s?.phase === 'invalid') {
       // A refused read (the SDK's INVALID): said with its code, never as "nothing uses it".
