@@ -54,6 +54,8 @@ Evidence goes to `apps/web/dist-evidence/`.
 
 ## Pushing (during the MVP push)
 
+**Direct pushes to `main` are for the MVP push only.** When the MVP is finished, the industry-standard PR model comes back for every change, here as in contracts-v2 (James gave its dev the same limit).
+
 **The rule is James's, 2026-11-25.**
 - Recorded in planning `Decisions.md` (planning commit `1042fe5`): *"You guys have my permission to push changes to main as we're iterating hard and moving fast. Let's save PRs for really big things that truly need them."*
 - To this repo's dev directly: *"Yes you may push to main during this MVP push. … Use PRs where it makes sense. But once MVP is finished we should go back to the industry standard model."*
