@@ -11,7 +11,7 @@ import type { Efs, Lens, NameCheck } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { EntryRef, FolderRef } from '@efs/sdk/files';
 import type { AppHost } from '../../shell/apps.ts';
-import { type Place, saveHold } from '../../shell/save-hold.ts';
+import { saveHold } from '../../shell/save-hold.ts';
 import {
   type SaveOutcome,
   saveMessage,
@@ -28,6 +28,7 @@ import {
   type AnyFolderPlan,
   type FolderPlanners,
   type FolderRequest,
+  folderHold,
   nameRuleMessage,
   placesOf,
   planRequest,
@@ -86,13 +87,14 @@ type Phase =
     }
   | { readonly phase: 'plan-failed'; readonly request: FolderRequest; readonly code: string }
   | {
-      readonly phase: 'review';
+      readonly phase: 'review' | 'sending';
       readonly request: FolderRequest;
       readonly plan: Planned;
       readonly writer: EfsWriter;
       readonly sent?: NotSent;
+      /** Why the last Send stopped before sending (the journal couldn't be read). */
+      readonly note?: MessageId;
     }
-  | { readonly phase: 'sending'; readonly request: FolderRequest; readonly plan: Planned }
   | { readonly phase: 'unconfirmed' };
 
 export class EfsFolderSave extends EfsElement {
@@ -205,37 +207,58 @@ export class EfsFolderSave extends EfsElement {
       else this.#phase.set({ phase: 'plan-failed', request, code: plan.reason.code });
     } catch (error) {
       if (signal.aborted) return;
-      // A MISUSE here is a client bug (names are checked before Review): reported as one.
       console.error(error);
-      this.#phase.set({ phase: 'plan-failed', request, code: 'CLIENT_ERROR' });
+      // INTO_ITSELF can be reached through Restore (a folder put back inside itself): said in
+      // words. Any other MISUSE is a client bug (names are checked before Review): reported as one.
+      const code = (error as { details?: { code?: unknown } }).details?.code;
+      this.#phase.set({
+        phase: 'plan-failed',
+        request,
+        code: code === 'INTO_ITSELF' ? 'INTO_ITSELF' : 'CLIENT_ERROR',
+      });
     }
   }
 
-  /** Why a send must wait, if it must: an unsettled or unconfirmed save at one of these places. */
-  #hold(places: readonly Place[], except?: string): MessageId | undefined {
-    const a = this.host.saving.availability.get();
-    if (a.status !== 'READY') return undefined;
-    const keys = new Set(places.map((p) => `${p.folder}\u0000${p.name}`));
-    const paused = this.host.saving.unconfirmed
-      .get()
-      .some((u) =>
-        u.places
-          ? u.places.some((p) => keys.has(`${p.folder.toLowerCase()}\u0000${p.name}`))
-          : u.file === undefined,
-      );
-    if (paused) return 'files.save.paused';
-    const { hold } = saveHold(this.host.saving.saves.get(), { account: a.account, places, except });
-    return hold ? 'files.save.held' : undefined;
+  /** Why this reviewed save can't be sent now, if it can't: checked on the signer, never the screen. */
+  #hold(request: FolderRequest, writer: EfsWriter, except?: string) {
+    return folderHold(
+      {
+        availability: this.host.saving.availability.get(),
+        signer: writer.account,
+        unconfirmed: this.host.saving.unconfirmed.get(),
+        saves: this.host.saving.saves.get(),
+        places: placesOf(request),
+        except,
+      },
+      saveHold,
+    );
   }
 
-  async #send(request: FolderRequest, plan: Planned, writer: EfsWriter, again?: `0x${string}`) {
-    this.#phase.set({ phase: 'sending', request, plan });
+  async #send(s: Extract<Phase, { phase: 'review' | 'sending' }>): Promise<void> {
+    const { request, plan, writer } = s;
+    const again = s.sent?.sequenceId;
+    this.#phase.set({ ...s, phase: 'sending' });
     const places = placesOf(request);
-    const back = (sent?: NotSent) =>
-      this.#phase.set({ phase: 'review', request, plan, writer, ...(sent ? { sent } : {}) });
+    // Back to the review, keeping what the last attempt said unless something new replaces it.
+    const back = (next: { sent?: NotSent; note?: MessageId } = {}) => {
+      const sent = next.sent ?? s.sent;
+      this.#phase.set({
+        phase: 'review',
+        request,
+        plan,
+        writer,
+        ...(sent ? { sent } : {}),
+        ...(next.note ? { note: next.note } : {}),
+      });
+    };
     // Re-read the journal first: a save may have opened here or in another tab since planning.
     const read = await this.host.saving.refresh({ settle: false });
-    if (read !== 'read' || this.#hold(places, again)) {
+    if (read !== 'read') {
+      back({ note: read === 'no-journal' ? 'save.noJournal' : 'files.save.checkFailed' });
+      return;
+    }
+    // Checked again here, on the signer: the screen may show another account by now.
+    if (this.#hold(request, writer, again).hold) {
       back();
       return;
     }
@@ -246,11 +269,11 @@ export class EfsFolderSave extends EfsElement {
       console.error(error);
       const thrown = thrownOutcome(error);
       if (thrown.kind === 'again') {
-        back(
-          thrown.sequenceId
+        back({
+          sent: thrown.sequenceId
             ? { outcome: thrown.outcome, sequenceId: thrown.sequenceId }
             : { outcome: thrown.outcome },
-        );
+        });
         return;
       }
       // It may have been sent: these places pause until a check finds the save.
@@ -262,7 +285,15 @@ export class EfsFolderSave extends EfsElement {
       return;
     }
     if (progress.state === 'NOT_STARTED') {
-      back({ outcome: saveOutcome(progress), sequenceId: progress.sequenceId });
+      const outcome = saveOutcome(progress);
+      if (outcome.kind === 'changed') {
+        // Something at these names moved (E_CAS) and nothing was sent: drop this plan and plan
+        // again, which shows what's there now (or a refusal).
+        await this.#drop(writer, progress.sequenceId);
+        await this.#plan(request);
+        return;
+      }
+      back({ sent: { outcome, sequenceId: progress.sequenceId } });
       return;
     }
     // The wallet answered: the banner owns the save from here.
@@ -275,6 +306,12 @@ export class EfsFolderSave extends EfsElement {
       }),
     );
     this.#phase.set({ phase: 'closed' });
+  }
+
+  /** "Prepare again": a fresh plan with the wallet as it is now (a stale plan, another account). */
+  async #prepareAgain(s: Extract<Phase, { phase: 'review' | 'sending' }>): Promise<void> {
+    if (s.sent?.sequenceId) await this.#drop(s.writer, s.sent.sequenceId);
+    await this.#plan(s.request);
   }
 
   async #drop(writer: EfsWriter, sequenceId: `0x${string}`): Promise<void> {
@@ -459,18 +496,40 @@ export class EfsFolderSave extends EfsElement {
               >${t('files.save.close')}</wa-button
             >`;
           break;
-        case 'plan-failed':
-          body = html`<wa-callout variant="danger" size="small">
-              <span slot="icon">${appIcon('circle-exclamation')}</span>
-              <p>${t('files.save.planFailed', { code: s.code })}</p>
+        case 'plan-failed': {
+          const noWallet = s.code === 'NO_WALLET';
+          const intoItself = s.code === 'INTO_ITSELF';
+          const message = noWallet
+            ? t('files.save.connect')
+            : intoItself
+              ? t('files.move.intoSelf')
+              : t('files.save.planFailed', { code: s.code });
+          body = html`<wa-callout variant=${noWallet ? 'neutral' : 'danger'} size="small">
+              <span slot="icon">${appIcon(noWallet ? 'wallet' : 'circle-exclamation')}</span>
+              <p>${message}</p>
             </wa-callout>
             <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
               >${t('review.cancel')}</wa-button
             >
-            <wa-button slot="footer" variant="brand" @click=${() => void this.#plan(s.request)}
-              >${t('outcome.retry')}</wa-button
-            >`;
+            ${
+              noWallet && this.host.saving.availability.get().status !== 'READY'
+                ? html`<wa-button
+                    slot="footer"
+                    variant="brand"
+                    @click=${() => this.host.saving.requestWallet()}
+                    >${t('files.save.connectButton')}</wa-button
+                  >`
+                : intoItself
+                  ? nothing
+                  : html`<wa-button
+                      slot="footer"
+                      variant="brand"
+                      @click=${() => void this.#plan(s.request)}
+                      >${t(noWallet ? 'files.save.review' : 'outcome.retry')}</wa-button
+                    >`
+            }`;
           break;
+        }
         case 'unconfirmed':
           body = html`<p role="status">${t('save.unconfirmed')}</p>
             <wa-button slot="footer" variant="brand" @click=${() => this.#close()}
@@ -480,10 +539,32 @@ export class EfsFolderSave extends EfsElement {
         case 'review':
         case 'sending': {
           const sending = s.phase === 'sending';
-          const sent = s.phase === 'review' ? s.sent : undefined;
-          const held = this.#hold(placesOf(s.request), sent?.sequenceId);
+          const sent = s.sent;
+          const { hold, lapsed } = this.#hold(s.request, s.writer, sent?.sequenceId);
           const prompts = s.plan.review.prompts.sequential;
           const isRemove = ask.kind === 'remove';
+          // Sent again (continued) only when the SDK says this same save can go as planned.
+          const canSendAgain =
+            !sent ||
+            sent.outcome.kind === 'refused' ||
+            sent.outcome.kind === 'busy' ||
+            sent.outcome.kind === 'wallet-mismatch' ||
+            sent.outcome.kind === 'nothing-new' ||
+            (sent.outcome.kind === 'not-sent' && sent.outcome.canRetry);
+          const prepareAgain = sent?.outcome.kind === 'stale' || hold?.kind === 'account';
+          const holdLine =
+            hold?.kind === 'paused'
+              ? t('files.save.paused')
+              : hold?.kind === 'held'
+                ? t('files.save.held')
+                : hold?.kind === 'wallet'
+                  ? t('files.save.connect')
+                  : hold?.kind === 'account'
+                    ? t('files.save.accountChanged', {
+                        connected: shortAccount(hold.connected),
+                        signer: shortAccount(hold.signer),
+                      })
+                    : undefined;
           body = html`<div class="wa-stack wa-gap-s">
               ${this.#reviewLines(ask, s.plan)}
               <p class="efs-review-prompts">
@@ -500,11 +581,20 @@ export class EfsFolderSave extends EfsElement {
                 sent
                   ? html`<wa-callout variant="warning" size="small" class="efs-review-not-sent">
                     <span slot="icon">${appIcon('circle-exclamation')}</span>
-                    <p role="alert">${t(saveMessage(sent.outcome), sent.outcome.kind === 'wallet-mismatch' && sent.outcome.account ? { account: shortAccount(sent.outcome.account), chain: '' } : {})}</p>
+                    <p role="alert">${t(
+                      sent.outcome.kind === 'changed'
+                        ? 'files.save.changed'
+                        : saveMessage(sent.outcome),
+                      sent.outcome.kind === 'wallet-mismatch' && sent.outcome.account
+                        ? { account: shortAccount(sent.outcome.account), chain: '' }
+                        : {},
+                    )}</p>
                   </wa-callout>`
                   : nothing
               }
-              ${held && !sending ? html`<p role="status">${t(held)}</p>` : nothing}
+              ${s.note && !sending ? html`<p role="alert" class="efs-folder-note">${t(s.note)}</p>` : nothing}
+              ${holdLine && !sending ? html`<p role="status" class="efs-folder-hold">${holdLine}</p>` : nothing}
+              ${lapsed && !hold ? html`<p class="efs-quiet">${t('files.save.lapsed')}</p>` : nothing}
             </div>
             <wa-button
               slot="footer"
@@ -515,18 +605,35 @@ export class EfsFolderSave extends EfsElement {
               @click=${() => this.#close()}
               >${t(isRemove ? 'files.remove.keep' : 'review.cancel')}</wa-button
             >
-            <wa-button
-              slot="footer"
-              variant=${isRemove ? 'danger' : 'brand'}
-              class="efs-folder-send"
-              ?loading=${sending}
-              ?disabled=${sending || held !== undefined}
-              @click=${() => {
-                if (s.phase === 'review')
-                  void this.#send(s.request, s.plan, s.writer, sent?.sequenceId);
-              }}
-              >${t(sent ? 'saves.sendAgain' : isRemove ? 'files.remove.yes' : 'review.send')}</wa-button
-            >`;
+            ${
+              hold?.kind === 'wallet' && !sending
+                ? html`<wa-button
+                    slot="footer"
+                    variant="brand"
+                    class="efs-folder-connect"
+                    @click=${() => this.host.saving.requestWallet()}
+                    >${t('files.save.connectButton')}</wa-button
+                  >`
+                : prepareAgain && s.phase === 'review'
+                  ? html`<wa-button
+                      slot="footer"
+                      variant="brand"
+                      class="efs-folder-prepare"
+                      @click=${() => void this.#prepareAgain(s)}
+                      >${t('review.prepareAgain')}</wa-button
+                    >`
+                  : html`<wa-button
+                      slot="footer"
+                      variant=${isRemove ? 'danger' : 'brand'}
+                      class="efs-folder-send"
+                      ?loading=${sending}
+                      ?disabled=${sending || !canSendAgain || hold !== undefined}
+                      @click=${() => {
+                        if (s.phase === 'review') void this.#send(s);
+                      }}
+                      >${t(sent ? 'saves.sendAgain' : isRemove ? 'files.remove.yes' : 'review.send')}</wa-button
+                    >`
+            }`;
           break;
         }
       }

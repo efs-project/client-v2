@@ -9,6 +9,7 @@
 // - Nothing reads as empty unless the SDK proved it (COMPLETE); see listingNotice.
 
 import type { Efs, Lens } from '@efs/sdk';
+import type { SequenceProgress } from '@efs/sdk/actions';
 import type { EntryKind, EntryRef, FolderRef, FolderRow } from '@efs/sdk/files';
 import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
@@ -16,6 +17,7 @@ import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { placeKey, touchesOf } from '../../shell/save-hold.ts';
+import { saveOutcome } from '../../shell/save-outcome.ts';
 import { unsettled } from '../../shell/saves-state.ts';
 import { effect } from '../../state/effect.ts';
 import { state } from '../../state/signals.ts';
@@ -31,6 +33,7 @@ import {
   startListing,
 } from './folder-model.ts';
 import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
+import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 
@@ -86,11 +89,17 @@ export class EfsFilesListing extends EfsElement {
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
   #efs: Efs | undefined;
-  /** Saves this pane handed to the banner, and those it has already reloaded for. */
-  #handedOff = new Set<string>();
-  #reloadedFor = new Set<string>();
-  /** The entry the person just removed here, offered back with Restore (this tab only). */
-  #removed = state<EntryRef | undefined>(undefined);
+  /** How far each save touching the folder on screen has been listed again for. */
+  #synced = new Map<string, 'committed' | 'final'>();
+  /** A removal sent from here, until its save is complete (or fails). */
+  #pendingRemoval: { readonly sequenceId: string; readonly entry: EntryRef } | undefined;
+  /**
+   * The entry the person removed here, offered back with Restore (this tab only): shown only once
+   * the removal's save is complete, and cleared if it fails or the network undoes it.
+   */
+  #removed = state<{ readonly sequenceId: string; readonly entry: EntryRef } | undefined>(
+    undefined,
+  );
 
   protected override createRenderRoot() {
     return this;
@@ -119,15 +128,64 @@ export class EfsFilesListing extends EfsElement {
       this.#loaded = key;
       queueMicrotask(() => this.#load(efs, folder, kind));
     });
-    // A save handed off from here is on the ledger (every part committed): list again, once.
+    // Any save touching the folder on screen (from here, another tab, or resumed by the banner):
+    // list again once every part is committed, and again once it's final.
     effect(scope, () => {
+      const s = this.#state.get();
+      const dir = s?.phase === 'page' ? s.folder.directory : undefined;
       for (const p of this.host.saving.saves.get()) {
-        if (!this.#handedOff.has(p.sequenceId) || this.#reloadedFor.has(p.sequenceId)) continue;
-        if (p.committed < p.total) continue;
-        this.#reloadedFor.add(p.sequenceId);
-        queueMicrotask(() => this.#retry());
+        this.#watchRemoval(p);
+        if (!dir || !touchesFolder(p.effect, dir)) continue;
+        const stage = p.final
+          ? 'final'
+          : p.total > 0 && p.committed === p.total
+            ? 'committed'
+            : undefined;
+        if (!stage || this.#synced.get(p.sequenceId) === stage) continue;
+        if (this.#synced.get(p.sequenceId) === 'final') continue;
+        this.#synced.set(p.sequenceId, stage);
+        const { effect: saved, account } = p;
+        queueMicrotask(() => void this.#listAgainFor(saved, account));
       }
     });
+  }
+
+  /**
+   * Lists again after a save, and once more (up to three times) while the answer doesn't show it
+   * yet: the endpoint answered from a block before the save (a lagging RPC).
+   */
+  async #listAgainFor(saved: SequenceProgress['effect'], account: string, attempt = 0) {
+    await this.#retry();
+    const s = this.#state.get();
+    const efs = this.#efs;
+    if (s?.phase !== 'page' || !efs || this.#kind.get() !== 'all' || attempt >= 3) return;
+    const me = efs.lens.principalOf(account as never);
+    if (showsEffect(saved, s.folder.directory, s.rows, me)) return;
+    setTimeout(() => void this.#listAgainFor(saved, account, attempt + 1), 1500);
+  }
+
+  /** The removal notice follows its save: shown when complete, gone if it fails or is undone. */
+  #watchRemoval(p: SequenceProgress): void {
+    const pending = this.#pendingRemoval;
+    const shown = this.#removed.get();
+    const failed = (o: ReturnType<typeof saveOutcome>) =>
+      o.kind === 'abandoned' ||
+      o.kind === 'expired' ||
+      o.kind === 'not-through' ||
+      o.kind === 'undone' ||
+      o.kind === 'undone-checking' ||
+      o.kind === 'changed';
+    if (pending?.sequenceId === p.sequenceId) {
+      if (p.state === 'COMPLETE') {
+        this.#pendingRemoval = undefined;
+        queueMicrotask(() => this.#removed.set(pending));
+      } else if (failed(saveOutcome(p))) {
+        this.#pendingRemoval = undefined;
+      }
+    }
+    if (shown?.sequenceId === p.sequenceId && (p.state !== 'COMPLETE' || failed(saveOutcome(p)))) {
+      queueMicrotask(() => this.#removed.set(undefined));
+    }
   }
 
   /** The folder dialog: New folder, Rename, Remove and Restore (from a click). */
@@ -182,18 +240,19 @@ export class EfsFilesListing extends EfsElement {
     });
   }
 
-  #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): void {
+  #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): Promise<void> {
     this.#run?.dispose();
     this.#run = undefined;
     if (!efs || !folder || !this.#scope || this.#scope.signal.aborted) {
       this.#state.set(undefined);
-      return;
+      return Promise.resolve();
     }
     const run = this.#scope.child();
     this.#run = run;
-    this.#state.set({ phase: 'loading' });
+    // A re-read keeps the rows on screen until it answers (no flash of "Reading…").
+    if (this.#state.get()?.phase !== 'page') this.#state.set({ phase: 'loading' });
     const kinds = KINDS[kind];
-    loadReads()
+    return loadReads()
       .then((reads) =>
         startListing(
           reads,
@@ -240,10 +299,13 @@ export class EfsFilesListing extends EfsElement {
       });
   }
 
-  #retry(): void {
-    this.#loaded = undefined;
+  #retry(): Promise<void> {
     const efs = this.#efs;
-    this.#load(efs, this.#folder(efs), this.#kind.get());
+    const folder = this.#folder(efs);
+    const kind = this.#kind.get();
+    this.#loaded =
+      efs && folder ? `${folder.directory}|${kind}|${this.#reader() ?? ''}` : undefined;
+    return this.#load(efs, folder, kind);
   }
 
   /** "yours", "0x12…ab's", or nothing for the folder owner's own rows. */
@@ -400,7 +462,14 @@ export class EfsFilesListing extends EfsElement {
       const folder = s.folder;
       const pending = this.#pending();
       const placeLens = this.#efs ? this.#lens(this.#efs, folder) : undefined;
-      const removed = this.#removed.get();
+      const removedSave = this.#removed.get();
+      const removed = removedSave?.entry;
+      const creating = pendingCreates(
+        this.host.saving.saves.get(),
+        folder.directory,
+        s.rows,
+        unsettled,
+      );
       body = html`${
         removed && removed.folder.directory === folder.directory
           ? html`<p class="efs-entries-removed" role="status">
@@ -415,16 +484,28 @@ export class EfsFilesListing extends EfsElement {
           : nothing
       }
       ${
-        line
+        line && !(line.id === 'files.list.empty' && creating.length > 0)
           ? html`<p class="efs-entries-notice" role="status">
               ${t(line.id, 'count' in line ? { count: line.count } : {})}
             </p>`
           : nothing
       }
         ${
-          s.rows.length > 0
+          s.rows.length > 0 || creating.length > 0
             ? html`<ul class="efs-entries" aria-label=${t('files.entries.title')}>
               ${s.rows.map((row) => this.#row(row, folder, pending, placeLens))}
+              ${creating.map(
+                (c) => html`<li class="efs-entry efs-entry-creating" data-kind=${c.kind}>
+                  <span class="efs-entry-open"
+                    >${appIcon(c.kind)}
+                    <span class="efs-entry-name" translate="no">${c.name}</span></span
+                  >
+                  <span class="efs-entry-meta efs-quiet">
+                    <span>${t(KIND_LABEL[c.kind])}</span>
+                    <span class="efs-entry-saving" role="status">${t('files.pending')}</span>
+                  </span>
+                </li>`,
+              )}
             </ul>`
             : nothing
         }
@@ -491,12 +572,15 @@ export class EfsFilesListing extends EfsElement {
     </div>`;
   }
 
-  /** A save the dialog handed to the banner: list again once it's on the ledger. */
+  /** A save the dialog handed to the banner. A removal's notice waits for its save to complete. */
   #onSaved = (event: Event) => {
     const detail = (event as CustomEvent<FolderSavedDetail>).detail;
-    this.#handedOff.add(detail.sequenceId);
     const ask = detail.ask;
-    if (ask?.kind === 'remove') this.#removed.set(ask.entry);
-    else if (ask?.kind === 'restore') this.#removed.set(undefined);
+    if (ask?.kind === 'remove') {
+      this.#pendingRemoval = { sequenceId: detail.sequenceId, entry: ask.entry };
+      this.#removed.set(undefined);
+    } else if (ask?.kind === 'restore') {
+      this.#removed.set(undefined);
+    }
   };
 }

@@ -2,6 +2,7 @@
 // preview-model.ts; this element only renders its states and the reader session's.
 
 import type { Efs, Lens } from '@efs/sdk';
+import { link } from '@efs/sdk/links';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { draftKey } from '../../shell/drafts.ts';
@@ -402,12 +403,19 @@ export class EfsFilesPreview extends EfsElement {
   }
 
   /** The key of this file's unsaved edit: its canonical route in the realm in view. */
+  /**
+   * An unsaved edit's key: the file, never a route carrying a Lens. The same file opened with and
+   * without `?lens=` is one edit, not two.
+   */
   #draftKey(): string | undefined {
     const location = this.host.location.get();
-    const link = this.target.get();
-    return location.kind === 'realm' && link.status === 'target'
-      ? draftKey(location.realm, link.canonical)
-      : undefined;
+    const target = this.target.get();
+    if (location.kind !== 'realm' || target.status !== 'target') return undefined;
+    const file =
+      target.target.kind === 'file'
+        ? link({ kind: 'object', subject: target.target.subject })
+        : target.canonical;
+    return draftKey(location.realm, file);
   }
 
   #currentLens(): Lens | undefined {

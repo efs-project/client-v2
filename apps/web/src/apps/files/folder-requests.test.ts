@@ -2,8 +2,10 @@ import type { Efs, Lens } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
 import type { FolderRef } from '@efs/sdk/files';
 import { describe, expect, it, vi } from 'vitest';
+import { saveHold } from '../../shell/save-hold.ts';
 import {
   type FolderPlanners,
+  folderHold,
   nameRuleMessage,
   placesOf,
   planRequest,
@@ -111,5 +113,61 @@ describe('copy', () => {
     expect(nameRuleMessage('trailing-whitespace')).toBe('files.name.rule.space');
     expect(nameRuleMessage('too-long')).toBe('files.name.rule.tooLong');
     expect(nameRuleMessage('reserved-prefix')).toBe('files.name.rule.reserved');
+  });
+});
+
+describe('folderHold: the send rule', () => {
+  const A = `0x${'aa'.repeat(20)}`;
+  const B = `0x${'bb'.repeat(20)}`;
+  const places = [{ folder: DIR.toLowerCase(), name: 'x' }];
+  const unsettledAt = (account: string, name: string) =>
+    ({
+      sequenceId: `0x${'01'.repeat(32)}`,
+      account,
+      state: 'PARTIAL',
+      total: 2,
+      committed: 1,
+      effect: { kind: 'files.create', folder: DIR, name, file: '0x', revision: '0x' },
+    }) as never;
+  const base = {
+    availability: { status: 'READY', account: A } as const,
+    signer: A,
+    unconfirmed: [],
+    saves: [],
+    places,
+  };
+
+  it("holds on the signer: a wallet switched to another account can never send A's plan", () => {
+    // A has an unsettled save at x; the wallet now shows B; the plan was made for (and signs as) A.
+    const r = folderHold(
+      { ...base, availability: { status: 'READY', account: B }, saves: [unsettledAt(A, 'x')] },
+      saveHold,
+    );
+    expect(r.hold).toEqual({ kind: 'account', signer: A, connected: B });
+  });
+
+  it('checks the unconfirmed pause first, before the wallet', () => {
+    const r = folderHold(
+      { ...base, availability: { status: 'NO_WALLET' }, unconfirmed: [{ places }] },
+      saveHold,
+    );
+    expect(r.hold).toEqual({ kind: 'paused' });
+    expect(folderHold({ ...base, unconfirmed: [{}] }, saveHold).hold).toEqual({ kind: 'paused' });
+    // An unconfirmed edit of a file doesn't pause a folder save.
+    expect(folderHold({ ...base, unconfirmed: [{ file: '0x01' }] }, saveHold).hold).toBeUndefined();
+  });
+
+  it('needs a READY wallet', () => {
+    expect(folderHold({ ...base, availability: { status: 'NO_WALLET' } }, saveHold).hold).toEqual({
+      kind: 'wallet',
+    });
+  });
+
+  it("holds per (folder, name) on the signer's saves only", () => {
+    expect(folderHold({ ...base, saves: [unsettledAt(A, 'x')] }, saveHold).hold).toEqual({
+      kind: 'held',
+    });
+    expect(folderHold({ ...base, saves: [unsettledAt(A, 'y')] }, saveHold).hold).toBeUndefined();
+    expect(folderHold({ ...base, saves: [unsettledAt(B, 'x')] }, saveHold).hold).toBeUndefined();
   });
 });

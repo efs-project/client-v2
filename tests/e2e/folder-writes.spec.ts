@@ -27,7 +27,10 @@ test.skip(
  */
 async function seededRandom(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    let x = 0x2545f491;
+    // The generator's state lives in the tab's sessionStorage, so a reload continues the sequence
+    // and a reload-then-create can never reuse a salt.
+    const KEY = 'efs-test-rng';
+    let x = Number(sessionStorage.getItem(KEY) ?? 0x2545f491) | 0 || 0x2545f491;
     crypto.getRandomValues = <T extends ArrayBufferView | null>(array: T): T => {
       if (!array) return array;
       const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
@@ -37,6 +40,7 @@ async function seededRandom(page: Page): Promise<void> {
         x ^= x << 5;
         bytes[i] = x & 0xff;
       }
+      sessionStorage.setItem(KEY, String(x));
       return array;
     };
   });
@@ -128,6 +132,65 @@ test('a name you already use here is refused with its own words, and nothing is 
     await expect(send(page)).toHaveCount(0);
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('New folder "projects" again: NAME_TAKEN_MINE, nothing sent');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a send the wallet refuses says so in the dialog; nothing is saved, and Send again sends it', async ({
+  page,
+}) => {
+  const chain = await testChain('client-folder-refused', 'New folder, refused once in the wallet.');
+  try {
+    await openRoot(page, chain);
+    await entries(page).locator('wa-button.efs-new-folder').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('kept');
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    chain.refuseSend(1);
+    await send(page).click();
+    await expect(dialog(page).locator('.efs-review-not-sent')).toContainText(
+      'You declined in your wallet. Nothing was saved.',
+    );
+    expect(chain.broadcasts).toHaveLength(0);
+    await expect(row(page, 'kept')).toHaveCount(0);
+    chain.step('Send: the wallet refuses (4001); nothing broadcast');
+    await expect(send(page)).toContainText('Send again');
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'kept').locator('.efs-entry-whose')).toHaveText('yours');
+    expect(chain.broadcasts).toHaveLength(1);
+    chain.step('Send again: the same save, one broadcast');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('storage lost right after a send: "couldn\'t confirm", never "nothing was saved", never sent twice', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-folder-unconfirmed',
+    'New folder; IndexedDB writes fail right after the wallet broadcasts. The dialog says it could not confirm and pauses that name; once storage is back the banner settles it.',
+  );
+  try {
+    await openRoot(page, chain);
+    await entries(page).locator('wa-button.efs-new-folder').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('lost');
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await chain.breakJournalAfterSend(page);
+    await send(page).click();
+    // Never "nothing was saved": it may have gone out.
+    await expect(dialog(page)).toContainText("We couldn't confirm this save yet. Checking…");
+    await expect(dialog(page)).not.toContainText('Nothing was saved');
+    chain.step('Send: broadcast; the journal write after it fails (thrown, may have sent)');
+    await dialog(page).locator('wa-button', { hasText: 'Close' }).click();
+    // (The pause itself is unit-tested in folderHold: here the folder already landed, so a new
+    // plan for the same name is refused as taken before any hold applies.)
+    await chain.restoreJournal(page);
+    chain.step('Storage back: the banner settles the save from the ledger');
+    await expect(save(page, 'confirming').or(save(page, 'saved'))).toBeVisible({ timeout: 20_000 });
+    await expect(row(page, 'lost').locator('.efs-entry-whose')).toHaveText('yours');
+    expect(sendRequests(chain), 'sent exactly once').toHaveLength(1);
   } finally {
     await chain.finish();
   }

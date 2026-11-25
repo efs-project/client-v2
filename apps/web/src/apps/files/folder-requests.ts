@@ -112,3 +112,58 @@ export function nameRuleMessage(rule: string): MessageId {
     ? (NAME_RULE[rule] as MessageId)
     : 'files.name.rule.character';
 }
+
+/** Why a reviewed folder save can't be sent now, in the order it's checked. */
+export type FolderHold =
+  /** An earlier send touching these places (or naming nothing) may have gone out: paused. */
+  | { readonly kind: 'paused' }
+  /** No wallet ready on this network. */
+  | { readonly kind: 'wallet' }
+  /** The wallet now shows another account than the one this save was prepared (and signs) for. */
+  | { readonly kind: 'account'; readonly signer: string; readonly connected: string }
+  /** An unsettled save of the signer's touches one of these places. */
+  | { readonly kind: 'held' };
+
+export interface FolderHoldInput {
+  readonly availability: import('../../shell/writer-state.ts').WriterAvailability;
+  /** The account the plan was made for: the writer that will sign (never the one on screen). */
+  readonly signer: string;
+  readonly unconfirmed: readonly import('../../shell/saves-state.ts').Unconfirmed[];
+  readonly saves: readonly import('@efs/sdk/actions').SequenceProgress[];
+  readonly places: readonly Place[];
+  /** The save this review continues: it never holds itself. */
+  readonly except?: string | undefined;
+}
+
+/**
+ * The send rule for folder saves, as the editor's: the unconfirmed pause first; then a READY
+ * wallet on the same account the plan signs as; then the signer's unsettled saves at these
+ * places (fail-closed for anything that names nothing). `lapsed`: an earlier save's deadline
+ * passed without it landing, so it no longer holds (said as a warning).
+ */
+export function folderHold(
+  input: FolderHoldInput,
+  saveHold: typeof import('../../shell/save-hold.ts').saveHold,
+): { readonly hold?: FolderHold; readonly lapsed: boolean } {
+  const keys = new Set(input.places.map((p) => `${p.folder.toLowerCase()}\u0000${p.name}`));
+  const paused = input.unconfirmed.some((u) =>
+    u.places
+      ? u.places.some((p) => keys.has(`${p.folder.toLowerCase()}\u0000${p.name}`))
+      : u.file === undefined,
+  );
+  if (paused) return { hold: { kind: 'paused' }, lapsed: false };
+  const a = input.availability;
+  if (a.status !== 'READY') return { hold: { kind: 'wallet' }, lapsed: false };
+  if (a.account.toLowerCase() !== input.signer.toLowerCase()) {
+    return {
+      hold: { kind: 'account', signer: input.signer, connected: a.account },
+      lapsed: false,
+    };
+  }
+  const { hold, lapsed } = saveHold(input.saves, {
+    account: input.signer,
+    places: input.places,
+    except: input.except,
+  });
+  return hold ? { hold: { kind: 'held' }, lapsed } : { lapsed };
+}
