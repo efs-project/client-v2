@@ -10,7 +10,7 @@ import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import type { NetworkState } from './network-state.ts';
 import type { ReaderState } from './reader-state.ts';
-import type { Draft } from './saves-state.ts';
+import type { CheckResult, Draft, Unconfirmed } from './saves-state.ts';
 import type { WriterAvailability } from './writer-state.ts';
 
 /** One pane in a layout: which view, and optionally its share of the width (0–1). */
@@ -51,10 +51,16 @@ export interface SavingHost {
   writer(): Promise<EfsWriter | undefined>;
   /** The saves the banner shows (open, confirming, just saved), newest first. */
   readonly saves: ReadonlySignal<readonly SequenceProgress[]>;
-  /** Re-reads open saves (after a send whose outcome couldn't be confirmed); resolves when read. */
-  refresh(): Promise<void>;
-  /** When an in-flight save's current part expires (unix seconds), as its plan says. */
-  deadlineOf(sequenceId: SequenceProgress['sequenceId']): number | undefined;
+  /**
+   * Re-reads open saves: after a send that couldn't be confirmed, on "Check again", and before a
+   * new send (`settle: false`: the journal only). Resolves with how it went; never hangs.
+   */
+  refresh(o?: { readonly settle?: boolean; readonly timeoutMs?: number }): Promise<CheckResult>;
+  /** When an in-flight save's current part expires (unix seconds), as that part's plan says. */
+  deadlineOf(progress: SequenceProgress): number | undefined;
+  /** Sends that threw before anything could be confirmed, until a check finds their save. */
+  readonly unconfirmed: ReadonlySignal<readonly Unconfirmed[]>;
+  markUnconfirmed(u: Unconfirmed): void;
   /**
    * Hands a save's progress to the shell, which shows it and carries it to "Saved". `draft` is
    * the person's edit, kept in memory so "Review changes" can bring it back.

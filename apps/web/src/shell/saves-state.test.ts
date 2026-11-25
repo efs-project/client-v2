@@ -364,7 +364,79 @@ describe('createSavesSession', () => {
       settleEveryMs: 60_000,
     });
     reader.set(verified);
-    await vi.waitFor(() => expect(session.deadlineOf(inFlight.sequenceId)).toBe(1_900_000_000));
+    await vi.waitFor(() => expect(session.deadlineOf(inFlight)).toBe(1_900_000_000));
+    // Keyed by the part's plan: a later part (or one sent again) is measured by its own deadline.
+    const later = { ...inFlight, current: { index: 1, planId: `0x${'0f'.repeat(32)}` } } as never;
+    expect(session.deadlineOf(later)).toBeUndefined();
+    // The SDK's own figure wins when it reports one.
+    const reported = {
+      ...inFlight,
+      current: { index: 0, planId, deadline: 1_950_000_000 },
+    } as never;
+    expect(session.deadlineOf(reported)).toBe(1_950_000_000);
+  });
+
+  it('a refresh that hangs (a lost IndexedDB connection) times out; it never reads as done', async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    let hang = false;
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({
+            openSequences: () => (hang ? new Promise(() => {}) : Promise.resolve([])),
+            close: () => {},
+            get: async () => undefined,
+          }),
+        }) as never,
+    });
+    reader.set(verified);
+    await tick();
+    await tick();
+    hang = true;
+    expect(await session.refresh({ timeoutMs: 20 })).toBe('timeout');
+  });
+
+  it('an unconfirmed send stays marked until a successful check finds its save', async () => {
+    const reader = state<ReaderState>({ status: 'OFF' });
+    const id = `0x${'1a'.repeat(32)}` as const;
+    let failing = true;
+    let listed: SequenceProgress[] = [];
+    const view = {
+      pendingSequences: vi.fn(async () => listed),
+      reconcileSequence: vi.fn(async (sid: string) =>
+        progress({ sequenceId: sid as never, state: 'IN_FLIGHT' }),
+      ),
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const session = createSavesSession(reader, createScope(), {
+      loadJournal: async () =>
+        ({
+          indexedDbJournal: () => ({
+            openSequences: async () => {
+              if (failing) throw new TypeError('IndexedDB connection lost');
+              return [{}];
+            },
+            close: () => {},
+            get: async () => undefined,
+          }),
+        }) as never,
+      loadActions: async () => ({ openJournal: () => view }) as never,
+      settleEveryMs: 60_000,
+    });
+    reader.set(verified);
+    await vi.waitFor(() => expect(session.state.get().status).toBe('LOAD_FAILED'));
+    session.markUnconfirmed({ file: '0xfile', sequenceId: id });
+    expect(await session.refresh()).toBe('failed');
+    expect(session.unconfirmed.get()).toEqual([{ file: '0xfile', sequenceId: id }]);
+    // The journal answers, but a journal-only read that doesn't list it can't clear it.
+    failing = false;
+    expect(await session.refresh({ settle: false })).toBe('read');
+    expect(session.unconfirmed.get()).toHaveLength(1);
+    // Listed: found. The banner holds it as usual from here.
+    listed = [progress({ sequenceId: id, state: 'IN_FLIGHT' })];
+    expect(await session.refresh()).toBe('read');
+    expect(session.unconfirmed.get()).toEqual([]);
+    error.mockRestore();
   });
 
   it('only final completed and abandoned saves need no attention', () => {

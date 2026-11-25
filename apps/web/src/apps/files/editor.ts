@@ -83,8 +83,17 @@ const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
 
 /** Why a new send waits: a re-read after a throw, a save to finish or stop, or one in flight. */
 type Hold =
+  /** Re-reading after a send that threw. */
   | { readonly kind: 'confirming' }
+  /** The re-read failed or timed out: never released on that; "Check again". */
+  | { readonly kind: 'check-failed' }
+  /** This browser won't keep the save journal: saving is off here. */
+  | { readonly kind: 'no-journal' }
+  /** A send for this file may have gone out and no check has found it yet. */
+  | { readonly kind: 'paused' }
+  /** A save to finish or stop (PARTIAL, NOT_STARTED). */
   | { readonly kind: 'unsettled' }
+  /** One in flight; `minutes` until its deadline when known (else "Check again"). */
   | { readonly kind: 'waiting'; readonly minutes?: number };
 
 /** Seconds past a plan's deadline before the local clock treats it as lapsed (clock skew). */
@@ -114,8 +123,8 @@ export class EfsFileEditor extends EfsElement {
 
   #text = state('');
   #phase = state<Phase>({ phase: 'editing' });
-  /** A send threw: new sends wait until the re-read it started has finished. */
-  #holding = state(false);
+  /** A re-read this editor needs: running, failed (or timed out), or the journal is off here. */
+  #holding = state<'no' | 'checking' | 'failed' | 'no-journal'>('no');
   /** The clock a waiting hold is measured against (ticks while the editor is open). */
   #now = state(Date.now());
   #tick: ReturnType<typeof setInterval> | undefined;
@@ -155,7 +164,14 @@ export class EfsFileEditor extends EfsElement {
    * landing, so it no longer holds anything back (said, as a warning).
    */
   #hold(except?: Hex): { readonly hold?: Hold; readonly lapsed: boolean } {
-    if (this.#holding.get()) return { hold: { kind: 'confirming' }, lapsed: false };
+    const holding = this.#holding.get();
+    if (holding === 'checking') return { hold: { kind: 'confirming' }, lapsed: false };
+    if (holding === 'failed') return { hold: { kind: 'check-failed' }, lapsed: false };
+    if (holding === 'no-journal') return { hold: { kind: 'no-journal' }, lapsed: false };
+    const mine = this.file.file.toLowerCase();
+    if (this.host.saving.unconfirmed.get().some((u) => u.file.toLowerCase() === mine)) {
+      return { hold: { kind: 'paused' }, lapsed: false };
+    }
     const a = this.host.saving.availability.get();
     if (a.status !== 'READY') return { lapsed: false };
     const now = this.#now.get();
@@ -166,13 +182,16 @@ export class EfsFileEditor extends EfsElement {
       if (p.sequenceId === except || !unsettled(p)) continue;
       if (p.account.toLowerCase() !== a.account.toLowerCase()) continue;
       const file = (p as { effect?: { file?: string } }).effect?.file;
-      if (file && file.toLowerCase() !== this.file.file.toLowerCase()) continue;
+      if (file && file.toLowerCase() !== mine) continue;
       if (p.state !== 'IN_FLIGHT') return { hold: { kind: 'unsettled' }, lapsed: false };
-      // In flight: it can still land until its deadline. Past it (with a margin for clock skew,
-      // until the SDK reports the latest block's time), it can't: a send from here would only be
-      // refused as changed if it somehow did.
-      const deadline = this.host.saving.deadlineOf(p.sequenceId);
-      if (deadline === undefined) waitingUnknown = true;
+      // In flight: it can still land until its deadline. Past it at the latest block (the SDK's
+      // pastDeadline; until then the local clock plus a margin for skew) it can't, short of a
+      // reorg: a send from here would then only be refused as changed. Not "proven not saved".
+      const past = (p.current as { pastDeadline?: boolean } | undefined)?.pastDeadline;
+      const deadline = this.host.saving.deadlineOf(p);
+      if (past === true) lapsed = true;
+      else if (deadline === undefined) waitingUnknown = true;
+      else if (past === undefined && now > (deadline + LAPSE_MARGIN_S) * 1000) lapsed = true;
       else if (now > (deadline + LAPSE_MARGIN_S) * 1000) lapsed = true;
       else waiting = Math.max(waiting ?? 0, Math.ceil((deadline * 1000 - now) / 60_000));
     }
@@ -204,12 +223,17 @@ export class EfsFileEditor extends EfsElement {
    * "your own version changed" first, never sent silently over that other save.
    */
   async #plan(base: RevisionRef, afterRace = false): Promise<void> {
-    if (this.host.saving.availability.get().status !== 'READY' || this.#hold().hold) {
+    if (this.host.saving.availability.get().status !== 'READY') {
+      this.#phase.set({ phase: 'editing' });
+      return;
+    }
+    this.#phase.set({ phase: 'planning' });
+    // Another tab may have a save open for this account: read the journal before planning.
+    if (!(await this.#relist()) || this.#hold().hold) {
       this.#phase.set({ phase: 'editing' });
       return;
     }
     this.#base = base;
-    this.#phase.set({ phase: 'planning' });
     const signal = this.#controller.signal;
     try {
       const writer = await this.host.saving.writer();
@@ -268,14 +292,33 @@ export class EfsFileEditor extends EfsElement {
     }
   }
 
+  /**
+   * The routine read before a new send: the journal only (no chain reads), so a save opened in
+   * another tab counts. False when it couldn't be read: the hold then says so, and stays.
+   */
+  async #relist(): Promise<boolean> {
+    const result = await this.host.saving.refresh({ settle: false });
+    if (result === 'read') return true;
+    this.#holding.set(result === 'no-journal' ? 'no-journal' : 'failed');
+    return false;
+  }
+
+  /** "Check again", and the re-read after a send that threw: journal and chain. */
+  async #recheck(): Promise<void> {
+    this.#holding.set('checking');
+    const result = await this.host.saving.refresh();
+    this.#holding.set(result === 'read' ? 'no' : result === 'no-journal' ? 'no-journal' : 'failed');
+  }
+
   /** Sends the reviewed plan; a save that wasn't sent before is continued, not started again. */
   async #send(plan: Planned, writer: EfsWriter, again?: Hex): Promise<void> {
-    // Checked again at Send: a save may have become unsettled since the plan was made.
-    if (this.#hold(again).hold) {
+    this.#phase.set({ phase: 'sending', plan });
+    // Checked again at Send, from the journal: a save may have opened (here or in another tab)
+    // since the plan was made.
+    if (!(await this.#relist()) || this.#hold(again).hold) {
       this.#phase.set({ phase: 'editing' });
       return;
     }
-    this.#phase.set({ phase: 'sending', plan });
     let progress: SequenceProgress;
     try {
       const opts = this.#progressOpts(plan);
@@ -294,10 +337,15 @@ export class EfsFileEditor extends EfsElement {
         this.#phase.set({ phase: 'review', plan, writer, sent });
         return;
       }
-      // It may have been sent: never "nothing was saved", and no new send until the re-read
-      // this starts has finished (then the banner's list decides).
-      this.#holding.set(true);
-      void this.host.saving.refresh().finally(() => this.#holding.set(false));
+      // It may have been sent: never "nothing was saved". Saving this file pauses until a
+      // successful check finds the save (then the banner's list decides); a failed or timed-out
+      // check never releases it.
+      this.host.saving.markUnconfirmed(
+        thrown.sequenceId
+          ? { file: this.file.file, sequenceId: thrown.sequenceId }
+          : { file: this.file.file },
+      );
+      void this.#recheck();
       this.#phase.set({ phase: 'unconfirmed', noJournal: thrown.noJournal });
       return;
     }
@@ -500,6 +548,41 @@ export class EfsFileEditor extends EfsElement {
     </wa-dialog>`;
   }
 
+  #holdNotice(hold: Hold, t: Translator['t']) {
+    const message: MessageId =
+      hold.kind === 'confirming'
+        ? 'files.edit.unconfirmed'
+        : hold.kind === 'check-failed'
+          ? 'files.edit.checkFailed'
+          : hold.kind === 'no-journal'
+            ? 'save.noJournal'
+            : hold.kind === 'paused'
+              ? 'files.edit.paused'
+              : hold.kind === 'unsettled'
+                ? 'files.edit.blocked'
+                : hold.minutes === undefined
+                  ? 'files.edit.waiting'
+                  : 'files.edit.waitingFor';
+    // A way out wherever the hold waits on a read: never released without one succeeding.
+    const canCheck =
+      hold.kind === 'check-failed' ||
+      hold.kind === 'paused' ||
+      (hold.kind === 'waiting' && hold.minutes === undefined);
+    return html`<wa-callout variant="neutral" size="small" class="efs-edit-blocked" data-hold=${hold.kind}>
+      <span slot="icon">${appIcon('circle-info')}</span>
+      <div class="wa-split wa-gap-s">
+        <p>${hold.kind === 'waiting' && hold.minutes !== undefined ? t(message, { minutes: hold.minutes }) : t(message)}</p>
+        ${
+          canCheck
+            ? html`<wa-button size="s" class="efs-edit-check-again" @click=${() => void this.#recheck()}
+                >${t('files.edit.checkAgain')}</wa-button
+              >`
+            : nothing
+        }
+      </div>
+    </wa-callout>`;
+  }
+
   #notices(s: Phase, t: Translator['t']) {
     switch (s.phase) {
       case 'base-changed':
@@ -578,18 +661,7 @@ export class EfsFileEditor extends EfsElement {
       ${this.#walletNotice(t)}
       ${
         hold
-          ? html`<wa-callout variant="neutral" size="small" class="efs-edit-blocked" data-hold=${hold.kind}>
-              <span slot="icon">${appIcon('circle-info')}</span>
-              <p>${
-                hold.kind === 'confirming'
-                  ? t('files.edit.unconfirmed')
-                  : hold.kind === 'unsettled'
-                    ? t('files.edit.blocked')
-                    : hold.minutes === undefined
-                      ? t('files.edit.waiting')
-                      : t('files.edit.waitingFor', { minutes: hold.minutes })
-              }</p>
-            </wa-callout>`
+          ? this.#holdNotice(hold, t)
           : lapsed
             ? html`<wa-callout variant="warning" size="small" class="efs-edit-lapsed">
                 <span slot="icon">${appIcon('triangle-exclamation')}</span>

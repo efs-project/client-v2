@@ -266,7 +266,12 @@ export function saveAction(o: SaveOutcome): SaveAction | undefined {
 /** What the editor does when runSequence/resume throws instead of returning progress. */
 export type ThrownOutcome =
   /** It may have been sent: "We couldn't confirm this save yet", re-read, hold new sends. */
-  | { readonly kind: 'unconfirmed'; readonly noJournal: boolean }
+  | {
+      readonly kind: 'unconfirmed';
+      readonly noJournal: boolean;
+      /** The save's record, when the SDK says it exists: the hold lasts until a check finds it. */
+      readonly sequenceId?: `0x${string}`;
+    }
   /** This call sent nothing: the same save is offered again (continued when its record exists). */
   | { readonly kind: 'again'; readonly outcome: SaveOutcome; readonly sequenceId?: `0x${string}` };
 
@@ -279,7 +284,11 @@ export function thrownOutcome(error: unknown): ThrownOutcome {
   const noJournal = isFault(error, 'JOURNAL_UNAVAILABLE');
   const fault =
     error instanceof Error && error.name === 'EfsFault' ? (error as Error & ThrownSave) : undefined;
-  if (fault?.mayHaveSent !== false) return { kind: 'unconfirmed', noJournal };
+  if (fault?.mayHaveSent !== false) {
+    return fault?.sequenceId
+      ? { kind: 'unconfirmed', noJournal, sequenceId: fault.sequenceId }
+      : { kind: 'unconfirmed', noJournal };
+  }
   const code = (fault as { code?: unknown }).code;
   const outcome: SaveOutcome = noJournal
     ? { kind: 'no-journal' }

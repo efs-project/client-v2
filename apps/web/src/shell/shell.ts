@@ -213,8 +213,10 @@ export class EfsShell extends EfsElement {
         const s = saves.state.get();
         return s.status === 'READY' ? s.saves : [];
       }),
-      refresh: () => saves.refresh(),
-      deadlineOf: (id) => saves.deadlineOf(id),
+      refresh: (o) => saves.refresh(o),
+      deadlineOf: (progress) => saves.deadlineOf(progress),
+      unconfirmed: saves.unconfirmed,
+      markUnconfirmed: (u) => saves.markUnconfirmed(u),
       track: (progress, draft) => saves.track(progress, draft),
       reopening: saves.reopening,
       takeReopen: (link) => saves.takeReopen(link),

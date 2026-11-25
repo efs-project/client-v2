@@ -259,7 +259,11 @@ describe('saveOutcome', () => {
     const mayHave = new EfsFault('JOURNAL_UNAVAILABLE', 'IndexedDB dropped after broadcast', {
       sequence: { sequenceId: id, mayHaveSent: true, sequenceMayHaveSent: true },
     });
-    expect(thrownOutcome(mayHave)).toEqual({ kind: 'unconfirmed', noJournal: true });
+    expect(thrownOutcome(mayHave)).toEqual({
+      kind: 'unconfirmed',
+      noJournal: true,
+      sequenceId: id,
+    });
     // Older faults and plain errors carry no proof.
     expect(thrownOutcome(new EfsFault('INVARIANT', 'no sequence facts'))).toEqual({
       kind: 'unconfirmed',

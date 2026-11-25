@@ -40,10 +40,12 @@ export interface Draft {
 export interface SavesSession {
   readonly state: ReadonlySignal<SavesState>;
   /**
-   * Re-reads and settles open saves (after a reconnect, an unconfirmed send, "Check again").
-   * Resolves once a check started by this call (or a later one) has finished reading.
+   * Re-reads open saves (after an unconfirmed send, "Check again", or before a new send, so a
+   * save from another tab counts). `settle: false` reads the journal only, with no chain reads.
+   * Resolves with how the check went once it (or a later one) has finished, or 'timeout' after
+   * `timeoutMs`: a hung IndexedDB never resolves anything as "read".
    */
-  refresh(): Promise<void>;
+  refresh(o?: { readonly settle?: boolean; readonly timeoutMs?: number }): Promise<CheckResult>;
   /** A save's latest progress, straight from the writer: shown now, settled from here on. */
   track(progress: SequenceProgress, draft?: Draft): void;
   /** Hides a finished ("Saved") save. */
@@ -55,8 +57,22 @@ export interface SavesSession {
   reopen(draft: Draft): void;
   /** Takes the pending reopen if it is for `link`. */
   takeReopen(link: string): Draft | undefined;
-  /** When an in-flight save's current part expires (unix seconds), as its plan says. */
-  deadlineOf(sequenceId: Hex): number | undefined;
+  /** When an in-flight save's current part expires (unix seconds), as that part's plan says. */
+  deadlineOf(progress: SequenceProgress): number | undefined;
+  /** Sends that threw before anything could be confirmed, until a check shows their save. */
+  readonly unconfirmed: ReadonlySignal<readonly Unconfirmed[]>;
+  markUnconfirmed(u: Unconfirmed): void;
+}
+
+/** How a check went: the journal (and chain) answered, the journal is off here, or not. */
+export type CheckResult = 'read' | 'no-journal' | 'failed' | 'timeout';
+
+/** A send that threw and may have gone out: saving that file pauses until a check finds it. */
+export interface Unconfirmed {
+  /** The edited file's SubjectId. */
+  readonly file: string;
+  /** The save's record, when the SDK said it exists. */
+  readonly sequenceId?: Hex;
 }
 
 type JournalModule = typeof import('@efs/sdk/web/journal');
@@ -111,25 +127,41 @@ export function createSavesSession(
   let generation = 0;
   /** The open saves, in display order. */
   let open: SequenceProgress[] = [];
-  /** Each in-flight save's current part deadline (unix seconds), read from its journaled plan. */
+  /** Each in-flight part's deadline (unix seconds) by plan id, read from its journaled plan. */
   const deadlines = new Map<Hex, number>();
+  const unconfirmed = state<readonly Unconfirmed[]>([]);
   /** Checks started and finished, so `refresh()` can wait for the one it started. */
   let started = 0;
   let finished = 0;
-  let waiters: { readonly at: number; readonly resolve: () => void }[] = [];
+  let lastResult: CheckResult = 'failed';
+  let waiters: { readonly at: number; readonly resolve: (r: CheckResult) => void }[] = [];
   const settleWaiters = (): void => {
     const ready = waiters.filter((w) => w.at <= finished);
     waiters = waiters.filter((w) => w.at > finished);
-    for (const w of ready) w.resolve();
+    for (const w of ready) w.resolve(lastResult);
   };
-  const finish = (id: number): void => {
-    finished = Math.max(finished, id);
+  const finish = (id: number, result: CheckResult): void => {
+    if (id < finished) return;
+    finished = id;
+    lastResult = result;
     settleWaiters();
   };
   scope.defer(() => {
     finished = started;
+    lastResult = 'failed';
     settleWaiters();
   });
+  /**
+   * A successful check found these saves (listed, or settled since): their sends are known now,
+   * and the banner holds them as usual. A send that left no record id (an older SDK's fault) is
+   * settled by any successful listing: what it shows is all that can exist.
+   */
+  const found = (ids: ReadonlySet<Hex>): void => {
+    const left = unconfirmed
+      .get()
+      .filter((u) => u.sequenceId !== undefined && !ids.has(u.sequenceId));
+    if (left.length !== unconfirmed.get().length) unconfirmed.set(left);
+  };
 
   const publish = (): void => {
     for (const p of open) watched.add(p.sequenceId);
@@ -144,7 +176,6 @@ export function createSavesSession(
     watched.delete(id);
     tracked.delete(id);
     drafts.delete(id);
-    deadlines.delete(id);
   };
 
   const schedule = (efs: Efs): void => {
@@ -175,7 +206,7 @@ export function createSavesSession(
     return [...newer.filter(needsAttention), ...listing.filter((p) => !ids.has(p.sequenceId))];
   };
 
-  const check = (efs: Efs): void => {
+  const check = (efs: Efs, settleSaves = true): void => {
     run?.dispose();
     const mine = scope.child();
     run = mine;
@@ -193,7 +224,8 @@ export function createSavesSession(
           open = merge([], since);
           publish();
           schedule(efs);
-          finish(id);
+          found(new Set());
+          finish(id, 'read');
           return;
         }
         if (mine.signal.aborted) return;
@@ -205,7 +237,7 @@ export function createSavesSession(
         // reading the chain at once, rather than finishing against the old one. One save that
         // can't be read right now keeps its last known progress; it never hides the others.
         const settle = (p: SequenceProgress) =>
-          settlesByItself(p)
+          settleSaves && settlesByItself(p)
             ? view.reconcileSequence(p.sequenceId, { signal: mine.signal }).catch((error) => {
                 if (!mine.signal.aborted) console.warn('save not settled yet', p.sequenceId, error);
                 return p;
@@ -215,7 +247,7 @@ export function createSavesSession(
         // A watched save no longer listed finished (or was abandoned) since the last look.
         const gone = await Promise.all(
           unresolved
-            .filter((id) => !listed.some((p) => p.sequenceId === id))
+            .filter((id) => settleSaves && !listed.some((p) => p.sequenceId === id))
             .map((id) =>
               view.reconcileSequence(id, { signal: mine.signal }).catch((error) => {
                 if (!mine.signal.aborted) console.warn('save not found again', id, error);
@@ -230,17 +262,27 @@ export function createSavesSession(
           else forget(p.sequenceId);
         }
         open = merge(settled.filter(needsAttention), since);
-        // The deadline of each in-flight part, from its journaled plan: how long a hold lasts.
+        // Each in-flight part's deadline, from its own journaled plan (a later part, or a part
+        // sent again, has a later one): how long a hold lasts.
         for (const p of open) {
           const planId = p.state === 'IN_FLIGHT' ? p.current?.planId : undefined;
-          if (!planId || deadlines.has(p.sequenceId)) continue;
-          const record = await journal.get(planId).catch(() => undefined);
-          if (record) deadlines.set(p.sequenceId, Number(record.plan.deadline));
+          if (!planId || deadlines.has(planId)) continue;
+          const record = await journal.get(planId).catch((error: unknown) => {
+            console.warn('plan deadline not read', planId, error);
+            return undefined;
+          });
+          if (record) deadlines.set(planId, Number(record.plan.deadline));
         }
         if (mine.signal.aborted) return;
         publish();
         schedule(efs);
-        finish(id);
+        found(
+          new Set([
+            ...listed.map((p) => p.sequenceId),
+            ...gone.flatMap((p) => (p ? [p.sequenceId] : [])),
+          ]),
+        );
+        finish(id, 'read');
       } catch (error) {
         if (mine.signal.aborted) return;
         if (isFault(error, 'JOURNAL_UNAVAILABLE')) {
@@ -251,12 +293,12 @@ export function createSavesSession(
           open = merge(open, since);
           publish();
           if (open.length > 0) schedule(efs);
-          finish(id);
+          finish(id, 'no-journal');
           return;
         }
         console.error(error);
         current.set({ status: 'LOAD_FAILED' });
-        finish(id);
+        finish(id, 'failed');
       }
     })();
   };
@@ -273,6 +315,7 @@ export function createSavesSession(
       tracked.clear();
       drafts.clear();
       deadlines.clear();
+      unconfirmed.set([]);
       open = [];
       if (efs) check(efs);
       else {
@@ -280,6 +323,7 @@ export function createSavesSession(
         if (timer !== undefined) clearTimeout(timer);
         current.set({ status: 'IDLE' });
         finished = started;
+        lastResult = 'failed';
         settleWaiters();
       }
     });
@@ -288,16 +332,34 @@ export function createSavesSession(
   return {
     state: current,
     reopening,
-    refresh() {
-      if (!active) return Promise.resolve();
-      check(active);
+    refresh({ settle = true, timeoutMs = 15_000 } = {}) {
+      if (!active) return Promise.resolve<CheckResult>('failed');
+      check(active, settle);
       const at = started;
-      return new Promise<void>((resolve) => {
-        waiters.push({ at, resolve });
+      return new Promise<CheckResult>((resolve) => {
+        const timeout = setTimeout(() => resolve('timeout'), timeoutMs);
+        waiters.push({
+          at,
+          resolve: (r) => {
+            clearTimeout(timeout);
+            resolve(r);
+          },
+        });
         settleWaiters();
       });
     },
-    deadlineOf: (sequenceId) => deadlines.get(sequenceId),
+    deadlineOf(progress) {
+      // The SDK's own figure when it has one (sdk-v2: current.deadline), else the journaled plan's.
+      const fromSdk = (progress.current as { deadline?: number } | undefined)?.deadline;
+      if (fromSdk !== undefined) return fromSdk;
+      const planId = progress.current?.planId;
+      return planId ? deadlines.get(planId) : undefined;
+    },
+    unconfirmed,
+    markUnconfirmed(u) {
+      unconfirmed.set([...unconfirmed.get(), u]);
+      if (u.sequenceId) watched.add(u.sequenceId);
+    },
     track(progress, draft) {
       const efs = active;
       if (!efs) return;
