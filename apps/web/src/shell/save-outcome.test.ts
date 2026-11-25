@@ -24,7 +24,7 @@ const p = (over: Partial<SequenceProgress>): SequenceProgress =>
     ...over,
   }) as SequenceProgress;
 
-// Only (code, retry) pairs the SDK emits (sdk-v2 f839fca, src/actions): never invented ones.
+// Only (code, retry) pairs the SDK emits (sdk-v2 57f76f0, src/actions): never invented ones.
 const R = {
   userRejected: { code: 'USER_REJECTED', retry: 'never' },
   busy: { code: 'BUSY', retry: 'transient' },
@@ -63,7 +63,7 @@ const R = {
   // sdk-v2 #32: a reorged part proven dropped, and the decline made transient.
   reorgedDropped: { code: 'REORGED_DROPPED', retry: 'transient' },
   userRejectedTransient: { code: 'USER_REJECTED', retry: 'transient' },
-  // The SDK's next PR (accepted): a part sent but proven not committed past its deadline.
+  // sdk-v2 #33 (src/actions/reconcile): a part sent but proven not committed past its deadline.
   expired: { code: 'EXPIRED', retry: 'transient' },
   notVerified: { code: 'NOT_VERIFIED_DEPLOYMENT', retry: 'never' },
   aborted: { code: 'ABORTED', retry: 'never' },
@@ -218,6 +218,17 @@ describe('saveOutcome', () => {
     const never = saveOutcome(p({ reason: reason(R.notVerified) }));
     expect(never).toEqual({ kind: 'not-sent', code: 'NOT_VERIFIED_DEPLOYMENT', canRetry: false });
     expect(saveAction(never)).toBeUndefined();
+  });
+
+  it('a wallet that lost its connection mid-send is "checking whether it went out", no action', () => {
+    // sdk-v2 #33: 4900/4901 stay AMBIGUOUS (a wallet can disconnect after relaying).
+    for (const code of ['WALLET_DISCONNECTED', 'WALLET_CHAIN_DISCONNECTED']) {
+      const o = saveOutcome(
+        p({ state: 'IN_FLIGHT', reason: { code, retry: 'after-reconcile' } as never }),
+      );
+      expect(o).toEqual({ kind: 'wallet-lost' });
+      expect(saveAction(o)).toBeUndefined();
+    }
   });
 
   it('no action while the network decides, or once saved', () => {

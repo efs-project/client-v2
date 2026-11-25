@@ -181,7 +181,8 @@ export class EfsFileEditor extends EfsElement {
     for (const p of this.host.saving.saves.get()) {
       if (p.sequenceId === except || !unsettled(p)) continue;
       if (p.account.toLowerCase() !== a.account.toLowerCase()) continue;
-      const file = (p as { effect?: { file?: string } }).effect?.file;
+      // Per file when the save says which (SDK 0.1 records); older records hold every file.
+      const file = p.effect?.kind === 'files.edit' ? p.effect.file : undefined;
       if (file && file.toLowerCase() !== mine) continue;
       if (p.state !== 'IN_FLIGHT') return { hold: { kind: 'unsettled' }, lapsed: false };
       // In flight: it can still land until its deadline. Past it at the latest block (the SDK's

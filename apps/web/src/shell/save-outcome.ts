@@ -33,6 +33,8 @@ export type SaveOutcome =
     }
   /** Sent; the network hasn't answered yet (or the answer was lost). Settles by itself. */
   | { readonly kind: 'checking' }
+  /** The wallet lost its connection mid-send: it may have relayed. Settles by itself. */
+  | { readonly kind: 'wallet-lost' }
   /** A reorg took a committed part back and it was dropped. Sending again is the person's choice. */
   | { readonly kind: 'undone' }
   /** A reorg took a committed part back; it's in flight again and may still land. Settles itself. */
@@ -94,7 +96,11 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
     case 'COMPLETE':
       return p.final ? { kind: 'saved' } : { kind: 'confirming' };
     case 'IN_FLIGHT':
-      return code === 'REORGED' ? { kind: 'undone-checking' } : { kind: 'checking' };
+      return code === 'REORGED'
+        ? { kind: 'undone-checking' }
+        : code === 'WALLET_DISCONNECTED' || code === 'WALLET_CHAIN_DISCONNECTED'
+          ? { kind: 'wallet-lost' }
+          : { kind: 'checking' };
     case 'ABANDONED':
       return { kind: 'abandoned' };
     case 'PARTIAL':
@@ -182,6 +188,7 @@ export const SAVE_MESSAGE: Readonly<Record<SaveOutcome['kind'], MessageId>> = {
   partial: 'save.partial',
   declined: 'save.declinedPart',
   checking: 'save.checking',
+  'wallet-lost': 'save.walletLost',
   undone: 'save.undone',
   'undone-checking': 'save.undoneChecking',
   expired: 'save.expired',

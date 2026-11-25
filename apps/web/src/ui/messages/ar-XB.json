@@ -198,7 +198,7 @@
   "save.saved": "‮Saved‬",
   "save.confirming": "‮Saved · confirming‬",
   "save.partial": "‮Partially saved (‬{$committed :integer}‮ of ‬{$total :integer}‮)‬",
-  "save.checking": "‮Sent. Checking the network for the result…‬",
+  "save.checking": "‮Checking the network for your save…‬",
   "save.undone": "‮This save was undone by the network.‬",
   "save.refused": "‮You declined in your wallet. Nothing was saved.‬",
   "save.changed": "‮This file changed since you opened it. Nothing was saved.‬",
@@ -285,5 +285,6 @@
   "files.edit.lapsed": "‮Your earlier save didn't confirm in time. If it somehow still does, this new save will be refused as changed.‬",
   "files.edit.checkFailed": "‮We couldn't check your earlier save, so saving waits.‬",
   "files.edit.paused": "‮Saving is paused until we can check your last save.‬",
-  "files.edit.checkAgain": "‮Check again‬"
+  "files.edit.checkAgain": "‮Check again‬",
+  "save.walletLost": "‮Your wallet lost its connection. Checking whether the save went out…‬"
 }

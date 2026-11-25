@@ -371,7 +371,7 @@ describe('createSavesSession', () => {
     // The SDK's own figure wins when it reports one.
     const reported = {
       ...inFlight,
-      current: { index: 0, planId, deadline: 1_950_000_000 },
+      current: { index: 0, planId, deadline: 1_950_000_000n },
     } as never;
     expect(session.deadlineOf(reported)).toBe(1_950_000_000);
   });

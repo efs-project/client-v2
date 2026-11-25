@@ -165,9 +165,11 @@ export class EfsSavesBanner extends EfsElement {
     const settling =
       outcome.kind === 'confirming' ||
       outcome.kind === 'checking' ||
+      outcome.kind === 'wallet-lost' ||
       outcome.kind === 'undone-checking';
-    const variant =
-      done || (settling && outcome.kind !== 'undone-checking') ? 'success' : 'warning';
+    // A reorg or a lost wallet connection is worth a warning while it settles.
+    const calm = outcome.kind !== 'undone-checking' && outcome.kind !== 'wallet-lost';
+    const variant = done || (settling && calm) ? 'success' : 'warning';
     const values = saveValues(outcome, shortAccount, (id) => this.#chainName(id, t));
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).

@@ -350,8 +350,8 @@ export function createSavesSession(
     },
     deadlineOf(progress) {
       // The SDK's own figure when it has one (sdk-v2: current.deadline), else the journaled plan's.
-      const fromSdk = (progress.current as { deadline?: number } | undefined)?.deadline;
-      if (fromSdk !== undefined) return fromSdk;
+      const fromSdk = (progress.current as { deadline?: bigint | number } | undefined)?.deadline;
+      if (fromSdk !== undefined) return Number(fromSdk);
       const planId = progress.current?.planId;
       return planId ? deadlines.get(planId) : undefined;
     },
