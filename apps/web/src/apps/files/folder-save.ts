@@ -24,6 +24,7 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { approvalsLine } from './approvals.ts';
 import { shortId } from './editor.ts';
 import type { PickerSelection } from './folder-picker.ts';
 import {
@@ -857,7 +858,7 @@ export class EfsFolderSave extends EfsElement {
           const sending = s.phase === 'sending';
           const sent = s.sent;
           const { hold, lapsed } = this.#hold(s.request, s.writer, sent?.sequenceId);
-          const prompts = s.plan.review.prompts.sequential;
+          const prompts = s.plan.review.prompts;
           const isRemove = ask.kind === 'remove';
           // Sent again (continued) only when the SDK says this same save can go as planned.
           const canSendAgain =
@@ -884,7 +885,7 @@ export class EfsFolderSave extends EfsElement {
           body = html`<div class="wa-stack wa-gap-s">
               ${this.#reviewLines(ask, s.plan)}
               <p class="efs-review-prompts">
-                ${prompts === 1 ? t('review.promptsOne') : t('review.promptsMany', { count: prompts })}
+                ${approvalsLine(t, prompts)}
               </p>
               ${
                 sending

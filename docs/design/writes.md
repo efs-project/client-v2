@@ -48,7 +48,7 @@ saves session <── journal (non-creating check) <── every verified sessio
       - The SDK gives BASE_CHANGED `headAuthor` and `headAdmission` (sdk-v2, compare with `Basis.admissions`).
 - **Review copy.**
   - Who sees the edit: "Your edit appears to anyone whose lens includes you."
-  - How many approvals: one, or one per part (one if the wallet sends batches).
+  - How many approvals, from `review.prompts` only: one, or one per part; when a wallet that sends batches would be asked fewer times (`prompts.atomicBatch`, packed by gas), that count too (`apps/files/approvals.ts`).
   - Size, SHA-256, layout, author, the new revision, and the overwrite protection from `review.guard`. `own-head` means the ledger refuses the save if the person's own version moved. `lens` means they are editing someone else's version, and the save becomes their own.
 - **Never "saved" before COMPLETE.** "Saved · confirming" lasts until every part is at a finalized block, then "Saved". Outcomes branch on the state, then on `reason.code`, `reason.retry` and the structured fields (`reason.revert`, `reason.wallet`), never on `detail` text.
 - **Continue only when the same plan can finish.** That means `retry` is transient or after-reconcile (or there's no reason yet, after a reload). After-replan means continuing would fail the same way every time:
