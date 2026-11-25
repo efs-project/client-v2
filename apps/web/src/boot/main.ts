@@ -14,7 +14,10 @@ import { openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
 import { createOsState } from '../shell/os-state.ts';
 import { createReaderSession } from '../shell/reader-state.ts';
+import { createSavesSession } from '../shell/saves-state.ts';
 import type { EfsShell } from '../shell/shell.ts';
+import { createWalletSession } from '../shell/wallet-state.ts';
+import { createWriterSession } from '../shell/writer-state.ts';
 import { computed } from '../state/signals.ts';
 import { AVAILABLE_LOCALES, loadTranslator, PSEUDO_LOCALES, SOURCE_LOCALE } from '../ui/i18n.ts';
 import { registerIconLibraries, watchIconSprite } from '../ui/wa/define.ts';
@@ -103,6 +106,13 @@ async function boot(): Promise<void> {
   const shell = document.createElement('efs-shell') as EfsShell;
   shell.os = os;
   shell.reader = reader;
+  // Touches no wallet until the person clicks Connect.
+  const wallet = createWalletSession(scope);
+  shell.wallet = wallet;
+  // Write code loads only when the person saves, or (wallet-free) when this browser has a save
+  // to settle from an earlier visit.
+  shell.writer = createWriterSession(reader.state, wallet.state, os.network);
+  shell.saves = createSavesSession(reader.state, scope);
   shell.translator = translator;
   shell.apps = APPS;
   document.getElementById('efs-boot')?.replaceWith(shell);

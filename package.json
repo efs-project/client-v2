@@ -27,13 +27,16 @@
     "build": "node tools/build/check-runtime.ts && node tools/build/check-messages.ts && node tools/build/icons.ts && vite build apps/web && node tools/build/postbuild.ts",
     "build:repro": "node tools/build/repro.ts",
     "test:e2e": "playwright test",
+    "test:e2e:live": "EFS_CHAIN=live playwright test tests/e2e/edit.spec.ts --project=chromium",
+    "transcripts:record": "EFS_CHAIN=record playwright test tests/e2e/edit.spec.ts --project=chromium --workers=1",
     "preview:static": "node tools/serve/static-serve.ts --dir apps/web/dist",
     "icons": "node tools/build/icons.ts --write"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@biomejs/biome": "2.5.14",
-    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz",
+    "@efs/fixture": "file:vendor/efs-fixture-0.0.0-88bfc0c.tgz",
+    "@efs/sdk": "file:vendor/efs-sdk-0.0.0-57f76f0.tgz",
     "@playwright/test": "1.63.0",
     "@types/node": "24.13.6",
     "acorn": "8.15.0",

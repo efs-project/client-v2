@@ -121,6 +121,7 @@ main.efs-main {
 /* On the narrowest phones the network indicator keeps only its icon; the text stays as the
    button's accessible name. */
 @container efs-header (max-width: 22rem) {
+  .efs-wallet-text,
   .efs-network-text {
     position: absolute;
     inline-size: 1px;
@@ -262,6 +263,27 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* On a phone the value column gets too narrow for hashes: stack each term above its value. */
+@media (max-width: 30rem) {
+  .efs-facts {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+  }
+
+  .efs-facts dd {
+    margin-block-end: var(--wa-space-2xs);
+  }
+}
+
+/* The file editor: the same face as the preview, as wide as the pane. */
+.efs-edit-text {
+  inline-size: 100%;
+  min-block-size: 12lh;
+  font-family: var(--wa-font-family-code);
+  font-size: var(--wa-font-size-s);
+  resize: vertical;
+}
+
 .efs-hash,
 .efs-outcome-code {
   font-family: var(--wa-font-family-code);
@@ -318,4 +340,20 @@ code {
   font-family: var(--wa-font-family-code);
   font-size: var(--wa-font-size-s);
   overflow-wrap: anywhere;
+}
+
+/* ---------- wallet ---------- */
+.efs-wallet-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.efs-wallet-option {
+  inline-size: 100%;
+}
+
+.efs-wallet-option img {
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
 }

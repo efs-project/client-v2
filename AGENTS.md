@@ -4,13 +4,13 @@ The EFS v2 web client: a static, IPFS-hostable SPA that grows into a modular Web
 
 ## Status
 
-**C0 (foundation) + slice A (OS shell) + slice B (verified reads).** The repo builds, statically hosts, localizes and tests the OS shell: `<wa-page>` layout, the File Browser as its first app, settings (appearance, per-network RPC and gateway lists, export/import), themes, CSP and Trusted Types. Through the EFS SDK it pins the deployment and previews files opened by object and revision links (`#/r/<realm>/…`). It does not yet list folders, write, connect wallets or run a dev chain. Design: `docs/design/shell.md`, `docs/design/reads.md`. The plan and slice definitions live in the EFS planning vault: `Reviews/2026-09-26-client-v2-initialization-plan/`.
+**C0 (foundation) + slice A (OS shell) + slice B (verified reads) + slice C (write foundation).** The repo builds, statically hosts, localizes and tests the OS shell: `<wa-page>` layout, the File Browser as its first app, settings (appearance, per-network RPC and gateway lists, export/import), themes, CSP and Trusted Types. Through the EFS SDK it pins the deployment and previews files opened by object and revision links (`#/r/<realm>/…`). It connects a wallet only on click (EIP-6963), edits text files from the Preview (review, one approval), and carries saves to "Saved" in the page banner, across reloads and wallet-free on start. It does not yet list folders or create files. Design: `docs/design/shell.md`, `docs/design/reads.md`, `docs/design/writes.md`. The plan and slice definitions live in the EFS planning vault: `Reviews/2026-09-26-client-v2-initialization-plan/`.
 
 ## Setup and commands
 
 Requires Node 24 (`.node-version`) and pnpm 12.6.0 (`packageManager`). Corepack 0.34 can't launch pnpm 12, so install it directly: `npm i -g pnpm@12.6.0`.
 
-The EFS SDK has no public release yet, so `vendor/` holds its packed tarball, pinned by integrity in the lockfile. `vendor/README.md` says where it came from and how to bump it.
+The EFS SDK has no public release yet, so `vendor/` holds its packed tarballs (`@efs/sdk`, and `@efs/fixture` for the live-chain tests), pinned by integrity in the lockfile. `vendor/README.md` says where it came from and how to bump it.
 
 | Command | What it does |
 |---|---|
@@ -20,6 +20,8 @@ The EFS SDK has no public release yet, so `vendor/` holds its packed tarball, pi
 | `pnpm build` | Builds `apps/web/dist` and runs every output check (see below) |
 | `pnpm build:repro` | Builds twice and fails unless every shipped byte matches |
 | `pnpm test:e2e` | Playwright against the **built** output, at `/` and under a deep prefix |
+| `pnpm test:e2e:live` | The write tests against a fresh `@efs/fixture` chain (needs `anvil` 1.8.3 on PATH, or `ANVIL_PATH`) |
+| `pnpm transcripts:record` | Re-records the write tests' transcripts from a live chain (never edit them by hand; see `docs/design/writes.md`) |
 | `pnpm preview:static` | Serves `apps/web/dist` as plain files (`--prefix /x/y/` to test path hosting) |
 | `pnpm messages` | Regenerates the pseudo-locale catalogs after editing `en.json` |
 | `pnpm icons` | Regenerates the icon sprite and its typed ids after editing `APP_ICONS` in `tools/build/icons.ts` |
@@ -52,6 +54,6 @@ Evidence goes to `apps/web/dist-evidence/`.
 ## Don'ts
 
 - Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the PR.
-- Don't add a Service Worker, manifest, public link format, or storage beyond the user's settings record; those are deliberately deferred. Remote requests go only through the SDK to endpoints the user can see in Settings.
+- Don't add a Service Worker, manifest, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred. Remote requests go only through the SDK to endpoints the user can see in Settings.
 - Don't widen the CSP. If something needs it, say why in the PR (`docs/design/shell.md` lists every exception and its reason).
 - Don't guess a dev server URL or kill processes by port. (C1 adds owned dev instances.)
