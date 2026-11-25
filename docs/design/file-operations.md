@@ -94,6 +94,7 @@ Draft flows and copy for the integration owner's (PM's) review. Revised for the 
   - **A path from a folder by its id opens** (`~efs/o/<folder>/<name>/…`, sdk-v2 db9dc26). The app reads it, and still never gives one out:
     - `openPath` looks the names up: under the link's own Lens, else you first, then the start folder's creator, then the default.
     - What the names lead to opens by its own object link, which replaces the path in the URL, as clicking through the names would. A folder gets the trail of the folders the names passed through (a start other than the shared root comes first, by its short id). A file is read in the Lens its row was chosen in.
+    - **So a pasted path link becomes the object link once it resolves** (PM, 2026-11-25). An object link is permanent, while a path is a lookup that a rename can break, and the rest of the app routes by object links. A copied URL is therefore the object link, never the path.
     - A path that leads nowhere stays in the URL and says which name, and why: nothing by that name, hidden by an author in the Lens, or a file in the middle of the path. An id that isn't a folder (a file included) is INVALID; an id nothing has is "Confirmed not present".
     - `~root` and `~home` are reserved names: refused as links before any read.
 - **The breadcrumb.**
