@@ -4,8 +4,11 @@
 // - Each folder is listed when first opened, folders only, through its place Lens (the listing's
 //   reads, folder-model.ts); what a node can honestly say is tree-model.ts's.
 // - An unread node holds one "Reading…" item, so it can be opened; reading replaces it with its
-//   folders, or with nothing for a folder read completely without any (then a leaf). Web
-//   Awesome's own lazy mode isn't used: a lazy item that loads no children never stops loading.
+//   folders, or with nothing for a folder read completely without any (then a leaf).
+// - Don't switch this to Web Awesome's `lazy` mode. In 3.15 a lazy item clears its loading state
+//   only when its children slot changes (WaTreeItem.handleChildrenSlotChange), so a folder that
+//   reads as empty would spin forever. The "Reading…" item avoids that, and says so to screen
+//   readers too.
 // - It follows the trail: the folders on it open, and the folder on screen is selected. Choosing a
 //   folder sets the trail to the names from the root and opens the folder's link.
 // - A save touching a listed folder lists it again, once it lands; another account or session
