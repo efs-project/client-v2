@@ -8,7 +8,7 @@
 - **Waits for a contracts release:** tags, homes, and hiding another author's entry (`tags.md`).
 
 **Sources:**
-- SDK draft PR #36 (`docs/design/files-folders-tags-0.1.md`): read and planner shapes, and hard cases 1–3 and 7;
+- the read and planner shape agreed by the SDK dev and the PM (2026-11-25, below), and SDK draft PR #36's hard cases 1–3 and 7;
 - planning `Designs/clientv2/file-browser-requirements.md`: A1 organize, A2 ingest, A7 and B4 honest removal, A9 keyboard, L1–L5 lenses;
 - `writes.md`: review, the banner, and the copy rules, which every flow here reuses unchanged.
 
@@ -25,10 +25,12 @@
    - Hiding another author's entry waits on contracts.
 4. **Pending isn't done.**
    - Until the banner says "Saved", the listing shows the change with a "Saving" badge (A1's optimistic UI over the journal).
+   - **Which rows are pending comes from the save's effect,** not from the client's guess. Each effect (`files.create`, `files.createFolder`, `files.move`, `files.remove`, `files.restore`) lists the (folder, name) positions it touches, and those rows carry the badge. A second operation on a held position waits, as a second edit of the same file does.
    - A stop shown in the banner (partial, "undone by the network") also shows on the row.
    - A pending entry is never shown as a settled one.
 5. **Names are checked by the SDK, as the person types.**
    - `checkName` (files-name/2) is already exported, and its rule picks the inline message. The client has no name rules of its own.
+   - Review is offered only for a VALID name. The planners treat an invalid name as MISUSE before any read, so a MISUSE here is a client bug: it's reported as one, never shown as a refusal.
    - A name that isn't in NFC form is allowed, as the profile allows it. The dialog says so: "This name isn't in the usual Unicode form, so a name that looks the same could be a different name. It will be saved exactly as typed."
 6. **A listing never reads as empty when it isn't known.**
    - Pages are COMPLETE or PARTIAL (#36 hard case 1). An empty PARTIAL page says "Nothing in the first 200 entries. [Keep looking]".
@@ -68,13 +70,20 @@
     - The person can take the creator out for this view, as with an address.
   - The lens line, the "everyone" switch and the media gate are the ones in `tags.md`.
   - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, newest first. James: oldest first would make public views static.
-- **What a path that doesn't resolve shows:**
+- **What a path that doesn't resolve shows** (`resolvePath`, one call per segment, no depth cap):
   - **ABSENT_PROVEN at a segment:** "Nothing is called "2026" in /photos now. It may have been renamed or moved." When the SDK offers `files.placements`, it adds "Find it by its permanent link".
-  - **MASKED:** "Removed by an author in your lens."
-  - **CONFLICT:** the existing "Authors in your lens disagree".
-- **Rows.**
+  - **MASKED at a segment:** "Removed and blocked by someone in your lens."
+  - **NOT_A_FOLDER:** "photos/2026 is a file, not a folder." It offers to open the file.
+  - **UNKNOWN:** the reason, with Try again. **INVALID:** "This link isn't a folder path this version can read."
+- **Several people's entries under one name** (`lookupEntry`):
+  - `selected` is the row shown.
+  - `candidates` (in lens order, each with `firstBound`) feed the row's "also: …" marker and its list of versions. With public on, the client sorts the versions from everyone newest first by `firstBound`.
+  - A `conflict` shows the existing "Authors in your lens disagree".
+- **Rows** (`listFolder`, 50 a page). There's one row per name, by the lens law.
   - Folders come first, then files, each in the SDK's order, plus Type and size.
   - The author is shown only when it isn't the person (lens requirement L1: no lens chrome until it changes an answer).
+  - **An entry of kind `invalid`** gets a row saying "This entry can't be read." It's never hidden, and never shown as a file.
+  - **Skipped rows are counted:** `skipped.hidden` says "3 hidden by a block in your lens", and `skipped.filtered` is the kind filter's count (below).
 - **Opening.**
   - A folder opens its listing.
   - A file opens in the Preview, by its object link. That keeps the permanent link in the address bar, and keeps the Preview's existing verified-read path.
@@ -96,15 +105,15 @@ It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2
 - **New text file**
   1. **Name** (`checkName` as typed), in a small dialog.
   2. **Write:** the Preview opens the existing editor on an empty document.
-  3. **Save:** "Review and save" plans `planCreateFile({ parent, name, content })`.
+  3. **Save:** "Review and save" plans `planCreateFile({ folder, name, content })`.
   - The unsaved-edit rules of slice H apply from the first keystroke. A new file's draft is kept under its folder and name until saved.
 - **Upload files**
   - Upload uses a file picker, or drag and drop onto the Entries pane.
   - The media type comes from the bytes' signature, never from the extension alone. The Preview already checks signatures.
   - Size limits are the SDK's. A file too large for one save shows its part count in the review, before Send.
 - **A name that's already taken** in this folder:
-  - **By the person's own entry:** the plan is refused at Review with "You already have something called "notes.txt" here. Choose another name, or open it to save a new version." That's the skip / new version / rename choice of A2.
-  - **By another author's entry:** allowed, because entries are per author. The review warns as edits do: "Your file will be saved, but this view shows <author>'s "notes.txt" first."
+  - **By the person's own entry:** the planner refuses it with `NAME_TAKEN_MINE`, and the dialog says "You already have something called "notes.txt" here. Choose another name, or open it to save a new version." That's the skip / new version / rename choice of A2.
+  - **By another author's entry:** planned, because entries are per author. `review.visibleInLens` is false and `review.shownInstead` names who the view shows, so the review warns as edits do: "Your file will be saved, but this view shows <author>'s "notes.txt" first."
 - **After Send:**
   - the row appears with "Saving";
   - the banner says "Saved · confirming", then "Saved";
@@ -112,7 +121,7 @@ It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2
 
 ## Create a folder
 
-- **New folder** opens a name dialog, then a review of `planCreateFolder({ parent, name })`, then Send. The SDK sketch's `planCreateNode` becomes a directory planner under T-1.
+- **New folder** opens a name dialog, then a review of `planCreateFolder({ folder, name })`, then Send.
 - **The same name rules and the same name-taken handling** as files apply.
 - **An empty new folder says** "This folder is empty". That copy is used only when the SDK reports COMPLETE.
 
@@ -137,9 +146,10 @@ They are one SDK operation: one atomic change of placement. It releases the entr
   - Object and revision links are unaffected, because a link names the file and not its place.
   - A folder path link (under an address, once those exist) to the old place answers ABSENT_PROVEN, with the copy above.
 - **Several at once.**
-  - Selecting several entries and choosing Move, or Remove, makes one review and one prompt (A1: "reorganizing 50 items is one ceremony").
+  - Selecting several entries and choosing Move, or Remove, makes one review and one prompt (A1: "reorganizing 50 items is one ceremony"). `planMoveEntries` and `planRemoveEntries` take the whole selection.
   - The SDK splits the batch by gas, and a partial batch uses the banner's existing Continue / Stop.
-  - *Multi-select may ship after single-item operations if the SDK's batch planner lands later.*
+  - **A batch is all or nothing at plan time.** If any item is refused, nothing is planned. The answer is REFUSED, with each refused item's `index` and `code`.
+  - The dialog then lists those items with their reasons, and offers "Leave these out and review the rest", which plans again without them. It never sends a part of the selection silently.
 
 ## Remove and restore
 
@@ -156,7 +166,7 @@ Remove "pet.jpg" from 0x12…ab?
                                          [ Keep it ]  [ Remove ]
 ```
 
-- **This dialog is the review.** It's planned first, so it also shows the gas figure, and Remove sends it: one approval, with no second dialog.
+- **This dialog is the review.** It's planned first, with `planRemoveEntries`, so it also shows the gas figure, and Remove sends it: one approval, with no second dialog.
 - **Remove releases the person's own entry by default** (SDK dev, 2026-11-25).
   - The next author's file with the same name, in the view's lens order, shows through, as in v1.
   - A mask would also have hidden the owner's `pet.jpg` from the person's view, and from everyone who trusts them.
@@ -170,7 +180,7 @@ Remove "pet.jpg" from 0x12…ab?
   - It removes the folder's entry from its parent. Its contents stay inside it, still reachable by its link.
   - The dialog adds: "Items inside it stay inside it."
 - **Restore.**
-  - Restore plans a bind at the same place and name, after either a removal or a block.
+  - Restore plans a bind at the same place and name (`planRestoreEntries`), after either a removal or a block.
   - **Right after a removal,** the banner offers it: "Removed · Restore".
   - **Later,** "Show removed" in the listing's menu shows the person's own removed entries, greyed, each with Restore (L5: shadowing is inspectable).
   - If someone else's entry now holds the name, Restore says so before the review.
@@ -221,35 +231,78 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.list.keepLooking` | Keep looking |
 | `files.list.empty` | This folder is empty. |
 | `files.list.absent` | Nothing is called {$name} in {$folder} now. It may have been renamed or moved. |
-| `files.list.masked` | Removed by an author in your lens. |
+| `files.list.masked` | Removed and blocked by someone in your lens. |
 | `files.filter.label` | Kind |
 | `files.filter.all` / `.folders` / `.files` / `.other` | All / Folders / Files / Other |
 | `files.filter.hidden` | {$count} other entries hidden by the filter |
 | `files.filter.partialEmpty` | No {$type} in the first {$count} entries. |
 | `saves.removed` | Removed |
 | `files.pending` | Saving |
+| `files.refused.folderAbsent` | That folder isn't there any more. |
+| `files.refused.entryAbsent` | {$name} isn't here any more. |
+| `files.refused.notRemoved` | {$name} isn't removed, so there's nothing to restore. |
+| `files.refused.unknown` | Couldn't plan this ({$code}). |
+| `files.refused.leaveOut` | Leave these out and review the rest |
+| `files.list.invalid` | This entry can't be read. |
+| `files.list.hidden` | {$count} hidden by a block in your lens |
+| `files.list.notAFolder` | {$path} is a file, not a folder. |
 
 ## What the client needs from the SDK
 
-These are already in #36's sketch, except where a line says otherwise.
-- `parseLink` for folder paths under an address, and `files.resolve(path, { lens })` with the status set above.
-- **A folder by its object link** (the parent as a parameter; the realm root is only a fixture stand-in, SDK dev).
-- `nodes.children(folder, { lens, cursor, limit, kinds })` → a `Page` with `coverage`, `skipped`, `next`, and each row's author and Type.
-- **The planners,** each returning `PLANNED { parts, review }` for `runSequence`:
-  - `planCreateFile`;
-  - `planCreateFolder` (the directory planner);
-  - `planRenameFile` (including moves, and for folders too);
-  - `planDeleteFile`;
-  - a restore.
-- **Confirmed by the SDK dev (2026-11-25):**
-  - Remove releases by default, and `hide: true` masks;
-  - Move is a release plus a bind, atomic;
-  - Restore works after either;
-  - `shownAfter` (`{ author }` or null) is in every removal and move review;
-  - a folder move takes its destination chain (`via`);
-  - batch forms exist.
-- **Asked, via the PM:** a refusal reason code for "name taken by your own entry", so the copy can branch on the code and not on text.
-- `files.placements(object)` later, for "find it by its permanent link".
+The shape agreed by the SDK dev and the PM (2026-11-25), all from `@efs/sdk/files`. It's wired only when these exports land.
+
+**Reads:**
+- `listFolder(efs, folder, { lens?, kinds?, limit = 50, cursor? })` returns one of:
+  - PRESENT `{ rows, skipped { hidden, filtered }, coverage, next?, basis }`;
+  - UNKNOWN;
+  - INVALID.
+
+  It gives one row per name, by the lens law. `kinds` is any of folder, file, other or invalid. An empty PARTIAL page means keep reading.
+- `lookupEntry(efs, { folder, name }, { lens? })` returns one of:
+  - PRESENT `{ selected, candidates, conflict }`;
+  - MASKED;
+  - ABSENT_PROVEN;
+  - UNKNOWN;
+  - INVALID.
+
+  Candidates come in lens order, each with `firstBound`, and the client chooses the display order.
+- `resolvePath(efs, { from: folder, segments })` returns one of:
+  - PRESENT `{ target, entry, chain }`;
+  - ABSENT_PROVEN or MASKED `{ segment }`;
+  - NOT_A_FOLDER;
+  - UNKNOWN;
+  - INVALID.
+
+  There's no depth cap; it takes one call per segment.
+
+**Writes,** each `PLANNED { parts, review }` for `runSequence`:
+- `planCreateFile({ folder, name, content, mediaType?, lens? })` and `planCreateFolder({ folder, name })`.
+  - `mediaType` is set only from Upload's checked type, validated with `normalizeMediaType` as it's typed.
+  - A new text file sends none.
+- `planMoveEntries({ moves: [{ from, to: { folder?, name?, via? } }] })`: a release plus a bind, atomic. Rename is a move with only `name`. `via` is required for a folder move.
+- `planRemoveEntries({ entries, hide? })`: releases by default, and `hide` masks (offered only to the place's owner).
+- `planRestoreEntries({ entries })`.
+
+**Refusals** are REFUSED `{ refused: [{ index, code }] }`, with nothing planned if any part is refused. Each code has its own copy:
+
+| Code | Copy (proposed) |
+|---|---|
+| `NAME_TAKEN_MINE` | `files.name.taken.mine` |
+| `NOT_YOURS` | `files.notYours` |
+| `FOLDER_ABSENT` | "That folder isn't there any more." |
+| `ENTRY_ABSENT` | "{$name} isn't here any more." |
+| `NOT_REMOVED` | "{$name} isn't removed, so there's nothing to restore." |
+
+An unrecognised code is shown as "Couldn't plan this ({$code})", with its raw code, and never as success.
+
+**In every review:**
+- `visibleInLens` and `shownInstead`, for a name someone else holds;
+- `shownAfter` on remove and move;
+- the gas figure.
+
+**Effects:** `files.create`, `files.createFolder`, `files.move`, `files.remove` and `files.restore`, each listing its positions. They drive the per-name "Saving" badges and holds.
+
+**Not in this shape yet:** `files.placements(object)`, later, for "find it by its permanent link".
 
 ## Testing
 
@@ -263,6 +316,10 @@ Each operation is recorded once against the SDK's fixture chain (`pnpm transcrip
   - Restore from the banner brings it back, and "Show removed" lists it.
   - "Remove and block this name" is offered only to the place's owner.
 - **Another author's entry:** actions disabled, with the reason.
+- **Batch refusals:** a selection with one refused item plans nothing and lists the item with its code's copy. "Leave these out" plans the rest; an unknown code shows raw.
+- **Pending rows** come from the effect's positions: only the touched names show "Saving", and a second operation on a held name waits.
+- **`resolvePath` statuses:** NOT_A_FOLDER, MASKED and ABSENT_PROVEN each name their segment.
+- **An `invalid` entry** shows as "can't be read", never as a file and never hidden.
 - **Filter by kind:** a PARTIAL filtered page shows "Keep looking", never "No folders".
 - **Name rules:** each `checkName` rule maps to its message. A mutation check confirms a rule's message is the one shown.
 - **Accessibility and layout:** keyboard-only rename (F2, Enter, Escape) and remove; axe in light and dark; 320 px with no sideways scroll.
