@@ -15,6 +15,7 @@ The EFS SDK has no public release yet, so `vendor/` holds its packed tarballs (`
 | Command | What it does |
 |---|---|
 | `pnpm install` | Frozen, supply-chain-checked install (1-day minimum release age; no install scripts allowed) |
+| `pnpm dev` | This worktree's own local EFS: an `@efs/fixture` chain (needs `anvil`) plus Vite, with a generated config pointing at it. Prints the app URL, wallet settings and an "Edit me" link. `dev:status`, `dev:stop` and `dev:reset` act only on this worktree's `.efs-dev/` |
 | `pnpm bootstrap` | Installs Playwright's Chromium, Firefox and WebKit |
 | `pnpm check` | Biome, typecheck (browser and Node configs), message catalogs, unit and source-rule tests |
 | `pnpm build` | Builds `apps/web/dist` and runs every output check (see below) |
@@ -56,4 +57,4 @@ Evidence goes to `apps/web/dist-evidence/`.
 - Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the PR.
 - Don't add a Service Worker, manifest, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred. Remote requests go only through the SDK to endpoints the user can see in Settings.
 - Don't widen the CSP. If something needs it, say why in the PR (`docs/design/shell.md` lists every exception and its reason).
-- Don't guess a dev server URL or kill processes by port. (C1 adds owned dev instances.)
+- Don't guess a dev server URL or kill processes by port: `pnpm dev:status` gives this worktree's URLs, and `pnpm dev:stop` stops only what this worktree started.

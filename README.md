@@ -2,9 +2,13 @@
 
 The web client for the [Ethereum File System](https://github.com/efs-project) v2: a static, IPFS-hostable app that opens EFS links without a wallet or backend, and grows into a modular, user-owned Web OS.
 
-**Status: OS shell (slice A).** The shell runs with its first app, the File Browser (placeholder panes), plus settings for appearance and RPC/gateway endpoints, cypher and paper themes that follow the system's light/dark setting, and mobile layout. It can't read or write EFS yet.
+**Status: shell, verified reads and edits (slices A–C).** The File Browser opens files by EFS link and shows only verified contents; a connected wallet can edit text files (review, then one approval), and saves carry through reloads to "Saved". Settings cover appearance and RPC/gateway endpoints, with themes that follow the system's light/dark setting and a mobile layout. Folder listings come next.
 
 To point a deployment at a network, replace `efs.config.json` beside `index.html` (format `efs-config/1`, see `apps/web/src/platform/settings/model.ts`). Users can then reorder, disable or add their own RPC endpoints and gateways in Settings.
+
+## Try it
+
+`pnpm install && pnpm dev` starts this checkout's own EFS chain (needs `anvil`, Foundry 1.8.3) and the app. Add the printed network and public test account to your wallet, open the printed "Edit me" link, then Edit → Review and save → approve once. `pnpm dev:stop` stops both.
 
 ## Quick start
 
