@@ -302,6 +302,14 @@ An unrecognised code is shown as "Couldn't plan this ({$code})", with its raw co
 
 **Effects:** `files.create`, `files.createFolder`, `files.move`, `files.remove` and `files.restore`, each listing its positions. They drive the per-name "Saving" badges and holds.
 
+**Answers so far** (PM, 2026-11-25; the SDK dev confirms when the exports land):
+- **What a row carries:** author, position, kind, Type id and size. Size may sit behind an option if it costs a read per row.
+  - A count of other candidates comes only if the page reader gives it cheaply.
+  - Otherwise the client calls `lookupEntry` lazily, for visible rows only, to draw the "also: …" marker. A row whose lookup hasn't answered shows no marker yet, never "no others".
+- **Lens order belongs to the SDK.** A pure helper applies reader, then the place's owner, then the named lens. The client never splices principals itself.
+- **Single-item planners refuse with the same REFUSED shape,** at index 0.
+- **"Public" can't be in the lens yet.** It waits for the view-all lists in the contracts release, so the "everyone" switch is shown off and disabled ("Everyone's entries aren't readable on this network yet").
+
 **Not in this shape yet:** `files.placements(object)`, later, for "find it by its permanent link".
 
 ## Testing
