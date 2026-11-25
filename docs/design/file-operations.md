@@ -1,9 +1,9 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** draft flows and copy for the integration owner's (PM's) review, revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder adds its creator to the lens). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
+**Status:** draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
 
 **Scope:**
-- **In scope:** list a folder from the realm root; create a file; create a folder; rename and move; remove your own entry and restore it; filter by Type.
+- **In scope:** list a folder; create a file; create a folder; rename and move; remove your own entry and restore it; filter by kind.
 - **Needs no contracts change.** Under T-1 a folder is a Files directory, so all of this needs only the SDK (planning M1 integration brief, 2026-11-25 row "Tag work order, split by the T-2 re-check").
 - **Waits for a contracts release:** tags, homes, and hiding another author's entry (`tags.md`).
 
@@ -52,15 +52,22 @@
 - **Links** (decision-sheet default, 2026-11-25).
   - **Folder paths live under an address:** `#/r/<realm>/0x…/photos/2026`. A bare path is a topic, never a folder.
   - **The realm's shared root folder gets no link of its own.** So until addresses are places (contracts C8), a folder opens by its permanent object link (`~efs/o/<id>`), like a file.
-  - **The File Browser shares only permanent links until then:** no folder path link is shared (PM, 2026-11-25).
+  - **Object links stay the default for sharing** (PM, 2026-11-25).
+    - Until addresses are places, no folder path link is shared at all.
+    - Once they are, a folder path link can be shared, labelled as a lookup that a rename can break: "This link finds whatever is called this here, and can break if it's renamed."
+    - No link ever addresses a named file through a topic. Whether a file's name is its own mechanism or a path's last word is still open.
+  - **No depth limit** on folder paths under an address (James, 2026-11-25). The only cap is the router's 8,192 characters, and a longer route is refused visibly, never cut.
   - The canonical form replaces a typed link, as object links do today.
 - **The breadcrumb.**
   - **For a folder path under an address,** it comes from the resolved chain, with each segment's author, so "whose `/photos`" is answerable (#36 hard case 4).
   - **For a folder opened by its object link,** it shows how the person got there in this tab, because folders form a graph and have no single parent (#36 hard case 5). Opened fresh from a link, it shows only the folder's own name.
+  - **Deep paths collapse visually, never by depth.** The first segment and the last two stay visible, and the middle folds into a "…" menu listing every segment (Web Awesome's breadcrumb, with a dropdown). Nothing is dropped.
 - **Whose entries.**
-  - A folder view reads through the lens with the folder's creator inserted after "you" (decision-sheet default: a folder adds its creator, as an address does), and public last, on by default.
+  - A folder view reads through the lens with the folder's creator inserted right after "you", and public last, on by default.
+    - So a folder opened from a link shows its creator's files even when the creator isn't in the reader's view (decision-sheet default). Without that, a shared folder link would open empty.
+    - The person can take the creator out for this view, as with an address.
   - The lens line, the "everyone" switch and the media gate are the ones in `tags.md`.
-  - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, oldest first (decision-sheet default).
+  - **With public on, several versions from everyone** of one name, none from the lens, show as one row that opens a list, newest first. James: oldest first would make public views static.
 - **What a path that doesn't resolve shows:**
   - **ABSENT_PROVEN at a segment:** "Nothing is called "2026" in /photos now. It may have been renamed or moved." When the SDK offers `files.placements`, it adds "Find it by its permanent link".
   - **MASKED:** "Removed by an author in your lens."
@@ -74,8 +81,9 @@
 - **The tree** (the navigation pane) shows folders only, loaded one level at a time when expanded, never recursively (#36 hard case 5: folders form a graph, not a tree).
 - **Phone.** Choosing an entry moves to the next pane (`shell.md`'s planned drill-in, which arrives with real data).
 
-## Filter by Type
+## Filter by kind
 
+It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2026-11-25).
 - **The SDK filters on each row's header Type id.** The chain enforced that Type, so it can't be spoofed, and no contracts work is needed.
 - **The menu offers All, Folders, Files and Other.** "Files" is every Files content Type. "Other" covers Types the File Browser doesn't show, such as a chess app's.
 - **Rows the filter removed are counted, never hidden silently:** "Showing folders · 14 other entries hidden by the filter". An empty filtered page says "No folders in the first 200 entries. [Keep looking]", never "No folders".
@@ -110,16 +118,21 @@
 
 ## Rename and move
 
-They are one SDK operation: one atomic change of placement (#36's `planRenameFile`, which also moves).
+They are one SDK operation: one atomic change of placement. It releases the entry at the old place and binds it at the new one in a single publication (SDK dev, 2026-11-25).
 
 - **Rename.**
   - It starts from the entry's ⋯ menu or F2, and edits the name in place (A9).
   - Enter goes to the review, and Escape cancels.
   - The review says: "Rename "notes.txt" to "plans.txt". Links to this file keep working. Links that use its old path won't find it there."
+  - **It also says what the old name shows afterwards,** from the review's `shownAfter`: "After this, "notes.txt" here shows Alice's file" or "…shows nothing".
 - **Move.**
   - It starts from "Move to…" in the ⋯ menu, which opens a folder picker (the tree, folders only).
   - The person can move an entry into any folder, including one another author made. The review says who will see it there: "Your entry appears in /team/plans for you, for anyone whose lens names you, and for everyone with public on."
-  - A folder can't be moved into itself or below itself. The picker greys those out, and the SDK refuses them too.
+  - **A folder can't be moved into itself or below itself.**
+    - The picker greys those out, and the SDK refuses them too.
+    - Moving a folder passes the destination's chain (`via`), the folders the person went through to get there.
+    - Folders form a graph seen through a lens, so the review says how far the check goes: "Checked under this lens: the destination isn't inside this folder."
+  - **The review says what the old place shows at that name afterwards** (`shownAfter`), as for a rename.
 - **Links:**
   - Object and revision links are unaffected, because a link names the file and not its place.
   - A folder path link (under an address, once those exist) to the old place answers ABSENT_PROVEN, with the copy above.
@@ -133,22 +146,31 @@ They are one SDK operation: one atomic change of placement (#36's `planRenameFil
 The words are "Remove" and "Restore", never "Delete" or "Hide" (A7, B4). Removing takes an entry out of a place. It doesn't destroy anything.
 
 ```text
-Remove "notes.txt" from /photos/2026?
+Remove "pet.jpg" from 0x12…ab?
 
- · It stops appearing here for anyone who sees your entries.
+ · Your pet.jpg stops appearing here.
+ · After this, this view shows 0x12…ab's pet.jpg here.
  · The file and its history stay on the network, and anyone with its
    link can still open it.
  · This removal is itself public. You can restore it.
                                          [ Keep it ]  [ Remove ]
 ```
 
-- **This dialog is the review.** It's planned first, with `planDeleteFile({ file, at })` (an unbind of the person's own entry, a mask), so it also shows the gas figure, and Remove sends it: one approval, with no second dialog.
+- **This dialog is the review.** It's planned first, so it also shows the gas figure, and Remove sends it: one approval, with no second dialog.
+- **Remove releases the person's own entry by default** (SDK dev, 2026-11-25).
+  - The next author's file with the same name, in the view's lens order, shows through, as in v1.
+  - A mask would also have hidden the owner's `pet.jpg` from the person's view, and from everyone who trusts them.
+- **The second line comes from the review's `shownAfter`** (`{ author }` or null): "After this, this view shows <author>'s <name> here" or "After this, nothing is called <name> here in this view".
+- **Removing and blocking the name** is the masking form (`hide: true`).
+  - It's offered only to the place's owner (the address, or the folder's creator), to stop someone squatting a name they removed.
+  - It's labelled "Remove and block this name", with the line "Other people's files called <name> won't show here either, for anyone whose view puts you first".
+  - The word "hide" is still never used (A7).
 - **Keep it is focused first,** as in the discard dialog, so Enter or Escape keeps the entry.
 - **Removing a folder:**
   - It removes the folder's entry from its parent. Its contents stay inside it, still reachable by its link.
   - The dialog adds: "Items inside it stay inside it."
 - **Restore.**
-  - Restore plans a bind at the same place and name.
+  - Restore plans a bind at the same place and name, after either a removal or a block.
   - **Right after a removal,** the banner offers it: "Removed · Restore".
   - **Later,** "Show removed" in the listing's menu shows the person's own removed entries, greyed, each with Restore (L5: shadowing is inspectable).
   - If someone else's entry now holds the name, Restore says so before the review.
@@ -175,11 +197,17 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.name.rule.space` | A name can't start or end with a space. |
 | `files.name.notNfc` | This name isn't in the usual Unicode form, so a name that looks the same could be a different name. It will be saved exactly as typed. |
 | `files.rename.review` | Rename {$from} to {$to}. Links to this file keep working. Links that use its old path won't find it there. |
+| `files.shownAfter.author` | After this, this view shows {$author}'s {$name} here. |
+| `files.shownAfter.none` | After this, nothing is called {$name} here in this view. |
+| `files.move.checkedUnderLens` | Checked under this lens: the destination isn't inside this folder. |
+| `files.link.lookup` | This link finds whatever is called this here, and can break if it's renamed. |
 | `files.move.picker` | Move to… |
 | `files.move.review` | Your entry appears in {$folder} for you, for anyone whose lens names you, and for everyone with public on. |
 | `files.move.intoSelf` | A folder can't be moved into itself. |
 | `files.remove.title` | Remove {$name} from {$folder}? |
-| `files.remove.here` | It stops appearing here for anyone who sees your entries. |
+| `files.remove.here` | Your {$name} stops appearing here. |
+| `files.remove.block` | Remove and block this name |
+| `files.remove.blockDetail` | Other people's files called {$name} won't show here either, for anyone whose view puts you first. |
 | `files.remove.stays` | The file and its history stay on the network, and anyone with its link can still open it. |
 | `files.remove.public` | This removal is itself public. You can restore it. |
 | `files.remove.folder` | Items inside it stay inside it. |
@@ -194,7 +222,7 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.list.empty` | This folder is empty. |
 | `files.list.absent` | Nothing is called {$name} in {$folder} now. It may have been renamed or moved. |
 | `files.list.masked` | Removed by an author in your lens. |
-| `files.filter.label` | Type |
+| `files.filter.label` | Kind |
 | `files.filter.all` / `.folders` / `.files` / `.other` | All / Folders / Files / Other |
 | `files.filter.hidden` | {$count} other entries hidden by the filter |
 | `files.filter.partialEmpty` | No {$type} in the first {$count} entries. |
@@ -204,17 +232,23 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 ## What the client needs from the SDK
 
 These are already in #36's sketch, except where a line says otherwise.
-- `parseLink` for realm-root paths, and `files.resolve(path, { lens })` with the status set above.
-- `nodes.children(folder, { lens, cursor, limit, types })` → a `Page` with `coverage`, `skipped`, `next`, and each row's author and Type.
+- `parseLink` for folder paths under an address, and `files.resolve(path, { lens })` with the status set above.
+- **A folder by its object link** (the parent as a parameter; the realm root is only a fixture stand-in, SDK dev).
+- `nodes.children(folder, { lens, cursor, limit, kinds })` → a `Page` with `coverage`, `skipped`, `next`, and each row's author and Type.
 - **The planners,** each returning `PLANNED { parts, review }` for `runSequence`:
   - `planCreateFile`;
   - `planCreateFolder` (the directory planner);
   - `planRenameFile` (including moves, and for folders too);
   - `planDeleteFile`;
   - a restore.
-- **Not in #36:**
-  - a batch form of rename/move and remove for multi-select;
-  - a refusal reason code for "name taken by your own entry", so the copy can branch on the code and not on text.
+- **Confirmed by the SDK dev (2026-11-25):**
+  - Remove releases by default, and `hide: true` masks;
+  - Move is a release plus a bind, atomic;
+  - Restore works after either;
+  - `shownAfter` (`{ author }` or null) is in every removal and move review;
+  - a folder move takes its destination chain (`via`);
+  - batch forms exist.
+- **Asked, via the PM:** a refusal reason code for "name taken by your own entry", so the copy can branch on the code and not on text.
 - `files.placements(object)` later, for "find it by its permanent link".
 
 ## Testing
@@ -224,8 +258,11 @@ Each operation is recorded once against the SDK's fixture chain (`pnpm transcrip
 - **Create a file, then a folder:** each appears with "Saving", then settled, with one send each.
 - **Rename:** the object link still opens the file; the old path answers ABSENT_PROVEN with the copy above.
 - **Move into another folder:** the entry leaves one listing and joins the other. A folder can't be moved into itself.
-- **Remove:** "Keep it" is focused and Escape keeps the entry. Removing hides it; Restore from the banner brings it back; "Show removed" lists it.
+- **Remove:** "Keep it" is focused and Escape keeps the entry.
+  - Removing takes it out, and the dialog's `shownAfter` line matches what the view then shows: another author's same-named file showing through, or nothing.
+  - Restore from the banner brings it back, and "Show removed" lists it.
+  - "Remove and block this name" is offered only to the place's owner.
 - **Another author's entry:** actions disabled, with the reason.
-- **Filter by Type:** a PARTIAL filtered page shows "Keep looking", never "No folders".
+- **Filter by kind:** a PARTIAL filtered page shows "Keep looking", never "No folders".
 - **Name rules:** each `checkName` rule maps to its message. A mutation check confirms a rule's message is the one shown.
 - **Accessibility and layout:** keyboard-only rename (F2, Enter, Escape) and remove; axe in light and dark; 320 px with no sideways scroll.

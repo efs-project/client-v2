@@ -1,6 +1,6 @@
 # Tags, topics and homes in the File Browser: design note
 
-**Status:** draft design note, no code. Revised for James's ruling that addresses are places, the PM's answers of 2026-11-25, and the tag decision sheet. Nothing here is built. The file-operation flows (create, rename, move, remove, filter by Type) are a separate note, `file-operations.md`, because they need no contracts change and don't wait on anything below.
+**Status:** draft design note, no code. Revised for James's ruling that addresses are places, the PM's answers of 2026-11-25, and the tag decision sheet (as of planning b6245f6). Nothing here is built. The file-operation flows (create, rename, move, remove, filter by Type) are a separate note, `file-operations.md`, because they need no contracts change and don't wait on anything below.
 
 **Sources:**
 - planning `Designs/efsv2/owner-rulings.md`, 2026-11-25: T-1 to T-5, view-all, and "Homes follow the lens like any other place";
@@ -24,10 +24,12 @@ Rounds 2 and 3 of the tag discussion are background only. Where this note still 
 **The PM's defaults, unless James objects** (decision sheet):
 - roll-up along a path is automatic, once measured;
 - lowercasing is done by apps, not the chain;
-- a path is at most 8 words deep;
+- **no small depth limit** (James rejected 8 words):
+  - folder paths under an address have none;
+  - a topic path may be at least 64 words deep, and its real maximum is what one transaction can hold;
 - tag suggestions show counts across everyone;
-- a folder adds its creator to the view, as an address does;
-- with public on, several same-named files in one place show as a list, oldest first;
+- **opening a folder from a link shows its creator's files,** even when the creator isn't in the reader's view (the owner-in-the-lens rule below);
+- **with public on, several same-named files in one place show as a list, newest first.** James: oldest first would make public views *"static and nearly useless"*;
 - **a bare path is a topic,** and folders and named files live under an address:
   - `/cars/tesla` is always topic words;
   - `/0x1234…/photos/cat.jpg` is a folder path;
@@ -35,12 +37,14 @@ Rounds 2 and 3 of the tag discussion are background only. Where this note still 
   - first segments starting with `0x` or `~` are reserved.
 
 **Still open, so this note works with every answer:**
-- **The one real choice: what is the shared tag?** The decision sheet's options are:
+- **What is the shared tag?** The decision sheet's options are:
   1. **the path** (ruled 2026-11-25, before the research);
   2. **the word;**
-  3. **both:** the word is the shared tag, and the path is where a thing was filed. This is the PM's recommendation.
-
-  Until James answers, the PM holds topic id derivation, registration and listing (M1 brief, D6).
+  3. **both:** the word is the shared tag, and the path is where a thing was filed.
+- **The sentence waiting on James:** *"paths tell tags apart, and a word's page shows every place that word is used."* A yes rules out option 2.
+  - Options 1 and 3 then behave the same for a person: `/cars/tesla` and `/people/tesla` stay apart, and a word's page shows every place the word is used, grouped by place.
+  - The difference between them is plumbing, and the contracts dev's measurement settles it.
+- Until James answers, the PM holds topic id derivation, registration and listing (M1 brief, D6).
 - **Can wait:**
   - who is in a newcomer's lens;
   - whether a file's name is its own mechanism or the last word of a path. Until that's settled, no link addresses a named file through a topic, and files shown in a topic open by their permanent link.
@@ -65,13 +69,13 @@ A topic link is a route like any other realm link, `#/r/<realm>/<topic link>[?le
 |---|---|---|---|
 | `/cars/tesla` (the path view) | what was tagged exactly `/cars/tesla`, and below it once roll-up is built | things tagged both `cars` and `tesla` (a narrowing query) | what was filed at `/cars/tesla` and below it |
 | Sub-entries to browse into | topics registered under it | none built in; "tesla is under cars" is a lens statement | paths filed under it |
-| `tesla` (the word view) | the topics whose last word is `tesla`, with counts | one pool, mixed together | one pool, grouped by where each was filed |
+| `tesla` (the word view) | every place that uses the word, grouped by place (from a directory of the paths that use it) | one pool, mixed together | every place that uses the word, grouped by place (from one list per word) |
 | Permanent? | yes (nobody can rename it) | yes | yes |
 
 **Two views cover all three columns:** the path view (next section) and the word view (the section after).
 - **Only what fills a view differs.** The screens stay the same.
-- **Under option 2,** the word view has no places to group by, so "By place" is unavailable and the list is flat.
-- **Under option 3,** the client gains one link kind (a word) and the grouped pool.
+- **Options 1 and 3 look identical to a person** (decision sheet). The client reads whatever the SDK returns for the word.
+- **Under option 2,** which a yes to the sentence above rules out, the word view would have no places to group by, so the list would be flat.
 
 **What the client asks of either form:**
 1. **Readable words in the URL**, as James asked. No numeric id in the address bar for topics.
@@ -79,9 +83,14 @@ A topic link is a route like any other realm link, `#/r/<realm>/<topic link>[?le
    - A bare path is a topic.
    - A first segment starting with `0x` is an address, and folders and named files live under it.
    - A first segment starting with `~` is the system's (`~efs` object and revision links).
-   - The realm's shared root folder gets no link of its own, so folder links wait for addresses (homes, C8). Until then the File Browser shares folders and files only by their permanent object links (`file-operations.md`).
+   - The realm's shared root folder gets no link of its own, so folder links wait for addresses (homes, C8).
+   - **Object links stay the default for sharing.** Once addresses exist, a folder path link can be shared too, labelled as a lookup that a rename can break.
+   - **No link addresses a named file through a topic,** because whether a file's name is its own mechanism or a path's last word is still open. Files in a topic view open by their permanent object link.
 3. **A canonical form.** The client replaces a typed link with the SDK's canonical one, as it does for object links today. So `/Cars/Tesla` becomes `/cars/tesla`, using the SDK's fold rule.
-4. **A depth limit.** At most 8 words (decision sheet), which keeps a path plus a 64-entry `?lens=` well under the router's 8,192-character limit.
+4. **No small depth limit** (James, 2026-11-25).
+   - A topic path allows at least 64 words, and folder paths under an address have no limit.
+   - The router's 8,192-character limit is the only cap the client adds, and a longer route is refused visibly, never cut.
+   - Long paths and breadcrumbs collapse visually: the first word and the last two stay visible, and the middle folds into a "…" menu that lists every word. Nothing is ever truncated by depth.
 5. **`?lens=` works as it does on object links.** A shared topic link can carry the sharer's lens.
 
 ## The path view (a topic page)
@@ -173,15 +182,18 @@ Also: "tesla" in your lens is the same as "テスラ" (said by carol.eth) · [ I
 - **"Group: All in one list"** merges the groups into one list in lens order, then newest first. Round 3's zipper merge (background) does this in time order with no Graph. Each row then shows its place and its tagger: "cat.jpg · /cars/tesla · tagged by alice.eth".
 
 **Under each answer:**
-- **Option 1 (the path is the tag):** the chain lists every topic whose last word is `tesla`, using the exact-word list from round 2 (background). The view shows those places with their counts, so the groups and Open work.
-  - The pooled items need one read per place. For a handful of places the client asks the SDK to merge them, since each extra list costs one read. Past a stated limit, the groups show only their counts, with Open.
-  - Places where `tesla` isn't the last word (`/cars/tesla/model_y`) aren't found by a last-word list. Under option 1 they show only as sub-entries of `/cars/tesla`.
-- **Option 2 (the word is the tag):** one list, read once, shown flat. There are no places to group by.
-- **Option 3 (both):** the word's own list holds every tag filed under any path using it. The SDK reads one list and returns it already grouped. Nothing is merged on the client.
+- **Options 1 and 3 look the same here.** Every place that uses the word, wherever it sits in the path, is a group.
+  - **Option 1** gathers them from a directory of the paths that use the word, one read per place. For a handful of places the SDK merges them. Past a stated limit, the groups show only their counts, with Open.
+  - **Option 3** reads one list per word, which the SDK returns already grouped.
+  - Either way, nothing is merged on the client.
+- **Option 2** would be one list shown flat. A yes to the decision sheet's sentence rules it out.
 
 **Synonyms, translations and "moved to":**
 - These are optional lens statements, and the system works with none of them.
-- When the person's lens says another word or place is the same as this one, the view says so in one line, with who said it, and offers **Include**. Include adds that word's places as more groups, marked with the word they came from.
+- **They come at two levels** (decision sheet):
+  - a word-level one (`car` = `cars`, `汽车` = `cars`) fixes every path that uses the word;
+  - a path-level one (`/cars/tesla` = `/companies/tesla_motors`) joins two specific places.
+- When the person's lens says another word or place is the same as this one, the view says so in one line, with who said it, and offers **Include**. Include adds that word's (or that place's) groups, marked with where they came from.
 - Include is never automatic. A synonym is somebody's opinion (D-A still holds for opinions), and each included word costs another read. The SDK bounds how many words can be followed.
 - **"Moved to" works the same way.** "/cars/tesla says it moved to /vehicles/tesla (said by alice.eth) · [ Go there ]". The old place keeps its items, because a topic's contents never move.
 
@@ -200,10 +212,10 @@ Also: "tesla" in your lens is the same as "テスラ" (said by carol.eth) · [ I
 
 The first of these with a stance on an entry decides it (the lens law). A "not this" from anyone named in 1–3 hides that item, even when public has it.
 
-**Where the owner goes** *(my reading)*:
-- The ruling says the owner goes after the reader and before public. Between those, I put the owner right after "you", ahead of the people the lens names.
-- James's reason was *"we should see that address' data unless we overrode it"*, and only "you" can override it.
-- If the PM reads it the other way, only the order changes.
+**Where the owner goes** (our reading of the ruling, agreed with the PM; James can correct it in one line):
+- James: *"automatically add vitalik to our lens list automatically in the middle because we should see that address' data unless we overrode it."*
+- **Only the reader overrides,** so the owner goes right after "you", ahead of the people the lens names. At vitalik's address, vitalik's `pet.jpg` beats one from someone in your lens.
+- **The reader can switch the inserted owner off for a view,** which is his "unless we overrode it" escape (below).
 
 **What the person sees and can change:**
 - **The lens line:** "Showing: you · 0x12…ab · 2 people · everyone [on]". It's always visible on path, word and address views, because there it changes the answer by design (requirement L1 keeps lens chrome hidden only until it does).
@@ -215,11 +227,14 @@ The first of these with a stance on an entry decides it (the lens law). A "not t
 - **"Show what's marked 'not this'"** reveals hidden items, greyed, with who marked them. It's the old "Raw" view as one switch (requirement L5: hiding is inspectable). Raw stays available from the chain, which is what makes the design censorship-resistant. James called view-all *"important for censorship resistance and UX"*.
 - **Public can't be on until the all-authors lists exist** (the view-all contracts work). Until then the switch is shown off and disabled: "Everyone's tags aren't readable on this network yet."
 
-**"You" first, and the save path:**
-- James's example puts the reader first, so connecting a wallet now changes what a place shows: your own entries come first.
-- That replaces `writes.md`'s "the view never switches by itself" rule for place views.
-- It also makes its "this view shows <author>'s version first" warning rarer, because your own save is then first in your own view.
-- It touches the save path's copy, so it's listed for the PM below, and `writes.md` is changed only with that answer.
+**"You" first when a wallet is connected** (PM, 2026-11-25: yes; it's James's own example). Three conditions:
+1. **An unsaved edit keeps its base** when connecting or disconnecting reorders the view (slice H's rule). A test covers it: start an edit on the owner's version as a guest, connect a wallet that has its own version, and the edit still targets the owner's version.
+2. **A reorder is never silent.** When connecting changes what's shown, the row or the Preview says so: "Showing your version · also: …".
+3. **Order changes only on an identity change** (connect, disconnect, account switch) **or a lens change the person makes.**
+   - "The view never switches by itself" stays true otherwise.
+   - The review's "this view shows <author>'s version first" is computed from the lens at review time.
+
+`writes.md` takes this change in its own commit, reviewed by the PM first, because it touches the save path's copy.
 
 **Media gate** (PM, 2026-11-25: yes):
 - The list loads no file bytes; there are no thumbnails in the first build.
@@ -237,14 +252,14 @@ Showing: you · 0x12…ab · 2 people · everyone [on]
 ───────────────────────────────────────────────────────────────────────────
   pet.jpg        Image · yours                  also: 0x12…ab's, 3 others
   talk.pdf       File  · 0x12…ab
-  ▾ dog.png      2 versions from everyone, oldest first
-      dog.png    Image · 0x9f…01 · 2 Oct
+  ▾ dog.png      2 versions from everyone, newest first
       dog.png    Image · 0x44…7c · 20 Nov
+      dog.png    Image · 0x9f…01 · 2 Oct
 ```
 
 - **Each name shows its first answer in lens order,** which is James's pet.jpg example: yours, else the address's, else others'.
   - "also: …" marks a name that others in the lens or public also have (requirement L2: a marker, never a merge). It opens the list of versions.
-- **With public on, several versions from everyone** of the same name, none from the lens, show as a list, oldest first (decision-sheet default).
+- **With public on, several versions from everyone** of the same name, none from the lens, show as a list, newest first (decision sheet; James: oldest first would make public views static).
 - **The address is what's shown and what's checked.** An ENS name, when one is shown, is display only, looked up at view time, and held behind the PM's ENS privacy question.
 - **Your own address:** "you" and the owner are the same entry in the lens line, shown once. New file and New folder work there once homes and the folder operations land.
 - **An address with nothing of its own** shows whatever the lens finds, plus the line "0x12…ab hasn't put anything here." UNKNOWN stays UNKNOWN.
@@ -347,7 +362,7 @@ Each ask names the shape, not the implementation. The SDK sketch (#36) already c
 8. **Planners** for tag, remove my tag, and "not this", with the number, and attach to an address. Each returns the usual `PLANNED { parts, review }`, with the gas figure in the review (T-3).
 9. **Place reads with the owner inserted:**
    - a lens helper that inserts an address, or a folder's creator, after the reader;
-   - a name read that, with public on and nobody in the lens answering, returns every version in one place, oldest first.
+   - a name read that, with public on and nobody in the lens answering, returns every version in one place, newest first.
 
    The client never assembles a lens order or walks authors itself.
 
@@ -391,16 +406,21 @@ None of this starts before its row is clear. The folder operations proceed now (
   - an address view shows yours, then the address's, then public's, for one name (James's pet.jpg example, as a test).
 - **At 320 px,** keyboard and axe in light and dark, as the other slices do.
 
-## Decided by the PM (2026-11-25)
+## Decided (2026-11-25)
 
-1. **The bare path is a topic.** Folders and named files live under an address (decision-sheet default). Until that's settled for good, no folder path links are shared; object links are fine.
+By the PM, or by James where marked:
+1. **The bare path is a topic.** Folders and named files live under an address (decision-sheet default). Object links stay the default for sharing. Folder path links come once addresses exist, labelled as lookups a rename can break.
 2. **Whose entries:** one lens ending in public, with public on by default (this is a test chain).
-3. **The media gate:** yes, for items reached only through public.
-4. **Rows are tags for now,** so an item can appear more than once, provided each row names who tagged it.
-5. **Copy:** "tag" in the interface, "topic" only internally.
-6. **Type-ahead:** from this tab only.
+3. **The owner's place in the lens:** right after the reader, ahead of the named lens. The reader can switch it off for a view.
+4. **"You" first when connected,** with the three conditions above.
+5. **The media gate:** yes, for items reached only through public.
+6. **Rows are tags for now,** so an item can appear more than once, provided each row names who tagged it.
+7. **Copy:** "tag" in the interface, "topic" only internally.
+8. **Type-ahead:** from this tab only.
+9. **(James) Public lists are newest first,** and there are no small depth limits.
 
-## For the PM
+## Open
 
-1. **Where the owner goes in the lens.** I read "after the reader and before public" as right after the reader, ahead of the people the lens names, because only "you" overrides the address's data. Agree?
-2. **"You" first when a wallet is connected.** James's example puts the reader first, which replaces `writes.md`'s "the view never switches by itself" for place views and changes when the edit review's "this view shows <author>'s version first" appears. It touches the save path's copy, so I'll change `writes.md` only with your yes. I recommend yes.
+- **James's yes on the sentence** *"paths tell tags apart, and a word's page shows every place that word is used"*, or a different pick.
+- **Whether a file's name is its own mechanism** or a path's last word. Until then, no link addresses a named file through a topic.
+- **Who is in a newcomer's lens.** It can wait.
