@@ -2,7 +2,7 @@
 // (parseLink; object `~efs/o/<id>`, path `~efs/o/<folder>/<name>…`, revision `~efs/v/…`);
 // nothing here parses it by hand.
 
-import type { Lens, PathLink } from '@efs/sdk';
+import type { Address, Lens, PathLink } from '@efs/sdk';
 import { parseLink } from '@efs/sdk/links';
 import type { AppLocation } from '../../shell/apps.ts';
 import type { PreviewTarget } from './preview-model.ts';
@@ -25,18 +25,46 @@ export type LinkState =
   | { readonly status: 'path'; readonly link: PathLink; readonly canonical: string }
   | { readonly status: 'invalid'; readonly rule: string }
   /**
-   * An address (home) or topic link: readable once homes and tags land in a contracts release,
-   * never guessed before then.
+   * A tag (a topic: a path of words, `cars/tesla`), as typed: the SDK checks each word against the
+   * chain's grammar when it reads it (no fold until James rules on one).
    */
-  | { readonly status: 'soon'; readonly kind: 'home' | 'topic' };
+  | {
+      readonly status: 'topic';
+      readonly segments: readonly string[];
+      readonly lens?: Lens;
+      readonly canonical: string;
+    }
+  /** An address (a home), and names below it (readable once homes are folders' parents). */
+  | {
+      readonly status: 'home';
+      readonly address: Address;
+      readonly names: readonly string[];
+      readonly lens?: Lens;
+      readonly canonical: string;
+    };
 
 export function linkState(location: AppLocation): LinkState {
   if (location.kind !== 'realm' || location.link === '') return { status: 'none' };
   const parsed = parseLink(location.link);
   if (parsed.status === 'INVALID') return { status: 'invalid', rule: parsed.rule };
   const { target, canonical } = parsed;
-  if (target.kind === 'home' || target.kind === 'topic')
-    return { status: 'soon', kind: target.kind };
+  if (target.kind === 'topic') {
+    return {
+      status: 'topic',
+      segments: target.segments,
+      ...(target.lens ? { lens: target.lens } : {}),
+      canonical,
+    };
+  }
+  if (target.kind === 'home') {
+    return {
+      status: 'home',
+      address: target.address,
+      names: target.names,
+      ...(target.lens ? { lens: target.lens } : {}),
+      canonical,
+    };
+  }
   if (target.kind === 'path') return { status: 'path', link: target, canonical };
   if (target.kind === 'revision') {
     return { status: 'target', target: { kind: 'revision', recordId: target.recordId }, canonical };

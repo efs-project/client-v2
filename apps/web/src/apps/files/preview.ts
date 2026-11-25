@@ -272,8 +272,13 @@ export class EfsFilesPreview extends EfsElement {
             this.#noteReorder(efs, link.canonical, s.open.file.author);
           }
         };
+        // The media gate: a file opened from a tag's public tier fetches nothing until asked.
+        const gated =
+          link.target.kind === 'file' &&
+          (this.nav?.gated.get().has(link.target.subject.toLowerCase()) ?? false);
         return runPreview(reads, efs, link.target, run.signal, show, {
           force,
+          ...(gated ? { gated } : {}),
           ...(opened ? { opened } : {}),
           ...(lens ? { lens } : {}),
           ...(allowOrigins ? { allowOrigins } : {}),
@@ -727,6 +732,22 @@ export class EfsFilesPreview extends EfsElement {
           retryable
           @efs-retry=${retry}
         ></efs-outcome>`;
+      case 'gated':
+        return html`${this.#facts(s.open, t)}
+          <div class="wa-stack wa-gap-xs efs-preview-gated">
+            <p>${t('files.preview.gated')}</p>
+            <div>
+              <wa-button
+                size="s"
+                class="efs-preview-show"
+                @click=${() => {
+                  this.nav?.ungate(s.open.file.file);
+                  this.#reload();
+                }}
+                >${t('files.preview.showPreview')}</wa-button
+              >
+            </div>
+          </div>`;
       case 'too-large':
         return html`${this.#facts(s.open, t)}
           <div class="wa-stack wa-gap-xs">
@@ -856,10 +877,9 @@ export class EfsFilesPreview extends EfsElement {
     const composing = this.composer?.current.get();
     if (composing) return readerNotice(this, this.host, t) ?? this.#compose(composing);
     if (link.status === 'none') return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
-    if (link.status === 'soon') {
-      return html`<p class="efs-quiet efs-preview-soon">
-        ${t(link.kind === 'topic' ? 'files.preview.topicSoon' : 'files.preview.homeSoon')}
-      </p>`;
+    // A tag or an address lists in Entries; a row opened from it shows here.
+    if (link.status === 'topic' || link.status === 'home') {
+      return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
     }
     if (link.status === 'invalid') {
       return html`<wa-callout variant="warning">

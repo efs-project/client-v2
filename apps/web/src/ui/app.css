@@ -449,3 +449,24 @@ span.efs-entry-open {
   inline-size: 1.5rem;
   block-size: 1.5rem;
 }
+
+/* A tag's or an address's list (topic.ts): the title reads as the pane's heading, each tier's
+   heading as a quiet label above its rows. */
+.efs-topic-title {
+  margin: 0;
+  font-size: var(--wa-font-size-l);
+  overflow-wrap: anywhere;
+}
+
+.efs-topic-heading {
+  margin: 0;
+  font-size: var(--wa-font-size-s);
+  font-weight: var(--wa-font-weight-semibold);
+  color: var(--wa-color-text-quiet);
+}
+
+.efs-topic-mark,
+.efs-topic-count,
+.efs-topic-not-address {
+  margin: 0;
+}

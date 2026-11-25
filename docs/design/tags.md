@@ -1,6 +1,20 @@
 # Tags, topics and homes in the File Browser: design note
 
-**Status:** draft design note, no code. Rewritten for James's yes to the tag model (2026-11-25) and the working spec that applies it. Nothing here is built.
+**Status:** being built on sdk-v2 7fe5e95 (the tag release). Rewritten for James's yes to the tag model (2026-11-25) and the working spec that applies it.
+
+**Built (stage 1, `apps/files/topic.ts`, `topic-model.ts`):**
+- Tag links (`cars/tesla`) and address links (`0x…`) are routed: the Entries pane lists them in place of a folder, and the location bar names the tag's words (each opens its own tag) or the address.
+- The list: Mine, Everyone (the default, D11) and Unfiltered, as one control, for the tab; for a tag, "Here and below" (the default) or "Only here".
+  - Rows by who decided them (`decider`): the Lens's first ("tagged by …", "tagged by you"), then the public tier under its label, each with how many say it applies. Unfiltered shows "N of M say it applies".
+  - A row filed below the tag says where ("filed at /cars/tesla/model_y", read once per topic with `topicPath`).
+  - At an address, the address's own rows carry no label; every other row says whose.
+  - Only `finished` ends a list ("Keep looking" otherwise); an empty page that isn't the end says "None found yet". UNKNOWN shows why, with Try again. A list longer than the cursor remembers says an item may repeat.
+  - "About N tagged things": the tag's own count, plus the count strictly below it in a roll-up (the chain's `below` count leaves the place itself out), so a thing filed at both is counted twice; it's only ever "about".
+  - A word the chain's grammar refuses (words go as typed until a fold is ruled) is named with its rule before any read. A one-word tag ending `.eth` says it is a tag, not an address.
+- The media gate: a row opened from the public tier opens in Preview on its Type, size and author, with nothing fetched until "Show preview" (tab memory, per file).
+- Names under an address (`0x…/photos/cat.jpg`) say they can't be read yet, with "Open the address"; they wait for homes as folders' parents in the SDK.
+- **No display names yet** (SDK tags-0.1 §5.5 isn't built): a row shows the thing's short id. The client never invents one.
+- **A file opened from a tag (or any file link) whose versions are all by people outside the view's Lens** is read in its own place, as a folder is: you, then its creator, then that Lens. It never reads "Confirmed not present" for that alone. A link carrying its own Lens is read in that Lens only.
 
 **Build order:**
 - The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.

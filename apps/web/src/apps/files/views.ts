@@ -6,6 +6,7 @@ import type { AppHost } from '../../shell/apps.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import { shortId } from './editor.ts';
 import type { FolderNav } from './navigation.ts';
+import type { PlaceLink } from './topic.ts';
 
 export type FilesViewKind = 'location';
 
@@ -17,10 +18,13 @@ export class EfsFilesView extends EfsElement {
     kind: { attribute: false },
     host: { attribute: false },
     nav: { attribute: false },
+    place: { attribute: false },
   };
   declare kind: FilesViewKind;
   declare host: AppHost;
   declare nav: FolderNav;
+  /** A tag or an address shown in Entries: the bar names it instead of the folder trail. */
+  declare place: { get(): PlaceLink | undefined } | undefined;
 
   protected override createRenderRoot() {
     return this;
@@ -33,25 +37,62 @@ export class EfsFilesView extends EfsElement {
     this.host.openLink(folder ? link({ kind: 'object', subject: folder.directory as never }) : '');
   }
 
-  #breadcrumb() {
+  /** A tag's words (each opens its own tag), or an address. The first crumb says which it is. */
+  #placeCrumbs(place: PlaceLink) {
     const t = this.host.translator.t.bind(this.host.translator);
-    const path = this.nav.path.get();
-    const crumbs = [
-      { name: t('files.location.root'), depth: 0, data: false },
-      // A folder opened by its link has no name here (names belong to its parent): its short id.
-      ...path.map((step, i) => ({
-        name: step.name || shortId(step.folder.directory),
+    if (place.status === 'home') {
+      return [
+        { name: t('files.home.mark'), depth: 0, data: false, go: undefined },
+        { name: shortId(place.address), depth: 1, data: true, go: undefined },
+      ];
+    }
+    return [
+      { name: t('files.topic.mark'), depth: 0, data: false, go: undefined },
+      ...place.segments.map((word, i) => ({
+        name: word,
         depth: i + 1,
         data: true,
+        go: () => {
+          // The words as typed are the words (no fold until one is ruled): the SDK builds the link.
+          const words = place.segments.slice(0, i + 1);
+          try {
+            this.host.openLink(link({ kind: 'topic', segments: words, words }));
+          } catch (error) {
+            console.error(error);
+          }
+        },
       })),
     ];
+  }
+
+  #breadcrumb() {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const place = this.place?.get();
+    const path = this.nav.path.get();
+    const crumbs: {
+      readonly name: string;
+      readonly depth: number;
+      readonly data: boolean;
+      readonly go: (() => void) | undefined;
+    }[] = place
+      ? this.#placeCrumbs(place)
+      : [
+          { name: t('files.location.root'), depth: 0, data: false, go: () => this.#go(0) },
+          // A folder opened by its link has no name here (names belong to its parent): its short id.
+          ...path.map((step, i) => ({
+            name: step.name || shortId(step.folder.directory),
+            depth: i + 1,
+            data: true,
+            go: () => this.#go(i + 1),
+          })),
+        ];
     const last = crumbs.length - 1;
     const item = (c: (typeof crumbs)[number]) =>
       c.depth === last
         ? html`<wa-breadcrumb-item aria-current="location"
             ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
           >`
-        : html`<wa-breadcrumb-item @click=${() => this.#go(c.depth)}
+        : html`<wa-breadcrumb-item @click=${() => c.go?.()}
             ><span translate=${c.data ? 'no' : nothing} dir=${c.data ? 'auto' : nothing}>${c.name}</span></wa-breadcrumb-item
           >`;
     if (crumbs.length <= BREADCRUMB_MAX) {
@@ -71,7 +112,7 @@ export class EfsFilesView extends EfsElement {
           placeholder="…"
           @change=${(event: Event) => {
             const depth = Number((event.target as HTMLSelectElement).value);
-            if (Number.isInteger(depth)) this.#go(depth);
+            if (Number.isInteger(depth)) crumbs[depth]?.go?.();
           }}
         >
           ${middle.map(

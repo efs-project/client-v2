@@ -40,8 +40,25 @@ describe('linkState', () => {
     expect(at('~efs/o/0x1234')).toMatchObject({ status: 'invalid' });
     expect(at('~efs/o/0x1?lens=alice.eth')).toMatchObject({ status: 'invalid' });
     // A bare path is a topic; a first segment of 0x + 40 hex is an address (home).
-    expect(at('cars/tesla')).toEqual({ status: 'soon', kind: 'topic' });
-    expect(at(`0x${'ab'.repeat(20)}/photos/cat.jpg`)).toEqual({ status: 'soon', kind: 'home' });
+    expect(at('cars/tesla')).toEqual({
+      status: 'topic',
+      segments: ['cars', 'tesla'],
+      canonical: 'cars/tesla',
+    });
+    expect(at(`0x${'ab'.repeat(20)}/photos/cat.jpg`)).toEqual({
+      status: 'home',
+      address: `0x${'ab'.repeat(20)}`,
+      names: ['photos', 'cat.jpg'],
+      canonical: `0x${'ab'.repeat(20)}/photos/cat.jpg`,
+    });
+    // Words go to the SDK as typed (no fold yet): the read checks them against the grammar.
+    expect(at('Cars')).toMatchObject({ status: 'topic', segments: ['Cars'] });
+    // A bare address is a home with no names; the sharer's Lens travels with it.
+    const home = at(`0x${'AB'.repeat(20)}?lens=0x${'12'.repeat(20)}`);
+    if (home.status !== 'home') throw new Error('expected a home');
+    expect(home.address).toBe(`0x${'ab'.repeat(20)}`);
+    expect(home.names).toEqual([]);
+    expect(home.lens?.principals).toHaveLength(1);
     // Anything else starting with ~ is the system's, and refused.
     expect(at('~other/x')).toMatchObject({ status: 'invalid' });
     // ~root and ~home are reserved names, never a link of their own.
