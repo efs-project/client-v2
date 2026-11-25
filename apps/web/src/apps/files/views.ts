@@ -1,50 +1,95 @@
-// The File Browser's placeholder views. Until listings land (after the tags-vs-folders ruling)
-// they show honest states driven by the network and the reader session. Pane content is keyed on "entries of X", never on directory-only fields,
-// so nothing here assumes folders and tags are separate things.
+// The File Browser's smaller views: the Overview placeholder, the location bar (a breadcrumb of
+// the folders opened in this tab) and the navigation pane. The Entries pane is listing.ts.
 
 import type { AppHost } from '../../shell/apps.ts';
-import { EfsElement, html } from '../../ui/element.ts';
-import type { MessageId } from '../../ui/i18n.ts';
+import { EfsElement, html, nothing } from '../../ui/element.ts';
 import { appIcon } from '../../ui/icons.ts';
+import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 
-export type FilesViewKind = 'overview' | 'entries' | 'navigation' | 'location';
+export type FilesViewKind = 'overview' | 'navigation' | 'location';
 
-const EMPTY: Readonly<Record<'overview' | 'entries', MessageId>> = {
-  overview: 'files.overview.empty',
-  entries: 'files.entries.empty',
-};
+/** Breadcrumbs longer than this collapse their middle into a "…" item (never drop a folder). */
+const BREADCRUMB_MAX = 4;
 
 export class EfsFilesView extends EfsElement {
   static override properties = {
     kind: { attribute: false },
     host: { attribute: false },
+    nav: { attribute: false },
   };
   declare kind: FilesViewKind;
   declare host: AppHost;
+  declare nav: FolderNav;
 
   protected override createRenderRoot() {
     return this;
   }
 
-  override render() {
+  #breadcrumb() {
     const t = this.host.translator.t.bind(this.host.translator);
-    if (this.kind === 'location') {
+    const path = this.nav.path.get();
+    const crumbs = [
+      { name: t('files.location.root'), depth: 0, data: false },
+      ...path.map((step, i) => ({ name: step.name, depth: i + 1, data: true })),
+    ];
+    const last = crumbs.length - 1;
+    const item = (c: (typeof crumbs)[number]) =>
+      c.depth === last
+        ? html`<wa-breadcrumb-item aria-current="location"
+            ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+          >`
+        : html`<wa-breadcrumb-item @click=${() => this.nav.back(c.depth)}
+            ><span translate=${c.data ? 'no' : nothing}>${c.name}</span></wa-breadcrumb-item
+          >`;
+    if (crumbs.length <= BREADCRUMB_MAX) {
       return html`<wa-breadcrumb label=${t('files.location.label')}>
-        <wa-breadcrumb-item>${t('files.location.root')}</wa-breadcrumb-item>
+        ${crumbs.map(item)}
       </wa-breadcrumb>`;
     }
+    // First, "…" (every folder in between, as a menu), then the last two: nothing is dropped.
+    const middle = crumbs.slice(1, -2);
+    return html`<wa-breadcrumb label=${t('files.location.label')}>
+      ${item(crumbs[0] as (typeof crumbs)[number])}
+      <wa-breadcrumb-item>
+        <wa-select
+          size="s"
+          class="efs-breadcrumb-more"
+          label=${t('files.location.more')}
+          placeholder="…"
+          @change=${(event: Event) => {
+            const depth = Number((event.target as HTMLSelectElement).value);
+            if (Number.isInteger(depth)) this.nav.back(depth);
+          }}
+        >
+          ${middle.map(
+            (c) =>
+              html`<wa-option value=${String(c.depth)}
+                ><span translate="no">${c.name}</span></wa-option
+              >`,
+          )}
+        </wa-select>
+      </wa-breadcrumb-item>
+      ${crumbs.slice(-2).map(item)}
+    </wa-breadcrumb>`;
+  }
+
+  override render() {
+    const t = this.host.translator.t.bind(this.host.translator);
+    if (this.kind === 'location') return this.#breadcrumb();
     if (this.kind === 'navigation') {
       return html`<div class="wa-stack wa-gap-s efs-files-navigation">
         <wa-tree selection="single" aria-label=${t('files.navigation.label')}>
-          <wa-tree-item disabled>${appIcon('folder')} ${t('files.location.root')}</wa-tree-item>
+          <wa-tree-item @click=${() => this.nav.back(0)}
+            >${appIcon('folder')} ${t('files.location.root')}</wa-tree-item
+          >
         </wa-tree>
         <p class="efs-quiet">${t('files.navigation.empty')}</p>
       </div>`;
     }
     const notice = readerNotice(this, this.host, t);
     return html`<div class="wa-stack wa-gap-m efs-files-empty">
-      ${notice ?? html`<p class="efs-quiet">${t(EMPTY[this.kind])}</p>`}
+      ${notice ?? html`<p class="efs-quiet">${t('files.overview.empty')}</p>`}
     </div>`;
   }
 }

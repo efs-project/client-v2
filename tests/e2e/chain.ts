@@ -49,6 +49,21 @@ type WalletAnswer =
   | { readonly result: unknown }
   | { readonly error: { readonly code?: number; readonly message: string } };
 
+/** What a Node-side actor gets: the real SDK, as one anvil account. */
+export interface ActAs {
+  readonly efs: import('@efs/sdk').Efs;
+  readonly writer: import('@efs/sdk/actions').EfsWriter;
+  readonly files: typeof import('@efs/sdk/files');
+  /** The account, lowercase. */
+  readonly account: string;
+  /** This account first, then the default Lens. */
+  readonly lens: import('@efs/sdk').Lens;
+  /** The realm's shared root folder (the stand-in parent). */
+  readonly root: import('@efs/sdk/files').FolderRef;
+  /** Sends a PLANNED plan to COMPLETE and returns its review; throws otherwise. */
+  save(plan: { status: string; parts?: unknown }): Promise<unknown>;
+}
+
 export interface TestChain {
   readonly mode: ChainMode;
   /** The deployment document the page is served. */
@@ -76,6 +91,16 @@ export interface TestChain {
   breakJournalAfterSend(page: Page): Promise<void>;
   /** All modes: let `page` write to IndexedDB again. */
   restoreJournal(page: Page): Promise<void>;
+  /**
+   * Live and record: act on the chain from Node as anvil account `index`, through the real SDK.
+   * Whatever ids `act` returns join the transcript's ids, so replay knows them.
+   */
+  readonly actAs:
+    | ((
+        index: number,
+        act: (sdk: ActAs) => Promise<Record<string, string> | void>,
+      ) => Promise<void>)
+    | undefined;
   /** Live and record: replace the seeded readme's contents from Node as anvil account `index`. */
   readonly editAs:
     | ((
@@ -185,6 +210,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   const breakAfterSend = new Set<Page>();
   const broadcasts: string[] = [];
   let editAs: TestChain['editAs'];
+  let actAs: TestChain['actAs'];
 
   let answerRpc: (body: unknown) => Promise<unknown>;
   let askWallet: (r: WalletRequest) => Promise<unknown>;
@@ -219,6 +245,49 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     if (!readme) throw new Error('the fixture seed has no readme.txt');
     deployment = `${JSON.stringify(chain.deployment, null, 2)}\n`;
     ids = { file: readme.subjectId, account };
+    actAs = async (index, act) => {
+      const [{ createEfs }, { createWriter, memoryJournal }, files] = await Promise.all([
+        import('@efs/sdk'),
+        import('@efs/sdk/actions'),
+        import('@efs/sdk/files'),
+      ]);
+      const efs = createEfs({ rpcs: [chain.rpcUrl], deployment: chain.deployment as never });
+      const who = (chain.accounts.unlocked[index] as string).toLowerCase();
+      const wallet = anvilWallet(rpc, who, { drop: false, refuse: new Set(), sends: 0 });
+      const writer = await createWriter(efs, {
+        authorizer: { kind: 'eip1193', profile: 'direct', provider: wallet, account: who as never },
+        journal: memoryJournal(),
+      });
+      const root = (
+        chain.deployment as unknown as {
+          root: { directoryRecordId: string; subjectId: string; principalId: string };
+        }
+      ).root;
+      const save = async (plan: { status: string; parts?: unknown }) => {
+        if (plan.status !== 'PLANNED')
+          throw new Error(
+            `actAs: ${JSON.stringify(plan, (_, v) => (typeof v === 'bigint' ? `${v}` : v))}`,
+          );
+        const done = await writer.runSequence(plan.parts as never);
+        if (done.state !== 'COMPLETE') throw new Error(`actAs: ${done.state}`);
+        return (plan as unknown as { review: unknown }).review;
+      };
+      const out = await act({
+        efs,
+        writer,
+        files,
+        account: who,
+        lens: efs.lens.mineFirst(who as never),
+        root: {
+          kind: 'folder',
+          directory: root.directoryRecordId,
+          subject: root.subjectId,
+          owner: root.principalId,
+        } as never,
+        save,
+      });
+      if (out) Object.assign(ids, out);
+    };
     editAs = async (index, contentIn, opts = {}) => {
       const [{ createEfs }, { createWriter, memoryJournal }, { openFile, planEditFile }] =
         await Promise.all([
@@ -324,6 +393,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       });
     },
     editAs,
+    actAs,
     broadcasts,
     async idle(ms = 300) {
       for (;;) {

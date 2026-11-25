@@ -157,6 +157,8 @@ test('only the expected custom elements are registered', async ({ page }) => {
   expect(names.filter((n) => n.startsWith('efs-')).sort()).toEqual([
     'efs-endpoint-list',
     'efs-file-editor',
+    'efs-files-folder-save',
+    'efs-files-listing',
     'efs-files-preview',
     'efs-files-view',
     'efs-network-indicator',

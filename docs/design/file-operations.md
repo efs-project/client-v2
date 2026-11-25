@@ -1,6 +1,21 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first, labelled "recently added"; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
+**Status:** partly built on branch `feat/folder-ops` (2026-11-25), on sdk-v2 74a4d5e.
+- **Built:**
+  - listing from the realm root, with whose-labels, the kind filter and honest coverage;
+  - in-tab navigation and the breadcrumb;
+  - per-(folder, name) holds;
+  - New folder, Rename, and Remove (a release), with Restore offered right after;
+  - one review-and-send dialog (`apps/files/folder-save.ts`).
+- **Not yet:**
+  - Move, with the picker and `via`;
+  - New text file and Upload;
+  - "Remove and block this name";
+  - "Show removed";
+  - multi-select batches;
+  - the lazy "also: …" marker.
+
+Draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first, labelled "recently added"; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
 
 **Scope:**
 - **In scope:** list a folder; create a file; create a folder; rename and move; remove your own entry and restore it; filter by kind.
