@@ -2,6 +2,10 @@
 // and blocked), each with Restore. One author's scope list, read through listRemoved; never the
 // Lens, so it shows what *you* removed, not what anyone hid.
 //
+// What a row offers follows its history (`last`): KNOWN puts its last target back (Restore); a
+// block with nothing of yours before it (NEVER_BOUND: someone else's entry) offers Unblock; a
+// history too deep to read (UNKNOWN) offers nothing and says why, for that row only.
+//
 // - An empty list is said only for a COMPLETE read; anything not vouched for is UNKNOWN from the
 //   SDK, shown as "can't be listed right now" with Try again, never as "nothing removed"
 //   (removed-model.ts holds those rules).
@@ -17,10 +21,12 @@ import { appIcon } from '../../ui/icons.ts';
 import { fromRemovedPage, type RemovedListState, removedNotice } from './removed-model.ts';
 
 export const RESTORE_REMOVED_EVENT = 'efs-restore-removed';
-/** The event's detail: the removed row the person chose to restore, and the folder it's in. */
+/** The event's detail: the removed row the person chose, what to do with it, and its folder. */
 export interface RestoreRemovedDetail {
   readonly folder: FolderRef;
   readonly row: RemovedRow;
+  /** Restore its last target (KNOWN rows), or unblock the name (NEVER_BOUND rows). */
+  readonly action: 'restore' | 'unhide';
 }
 
 const loadListRemoved = async () => (await import('@efs/sdk/files')).listRemoved;
@@ -47,7 +53,7 @@ export class EfsFilesRemoved extends EfsElement {
   declare translator: Translator;
   /** Bumped by the listing when a save touching this folder lands: read again. */
   declare generation: number;
-  /** Whether a row can be restored now, and if not, why (e.g. a folder needs its path). */
+  /** Whether a row's action can be taken now, and if not, why (e.g. a folder needs its path). */
   declare restorable: (row: RemovedRow) => MessageId | undefined;
 
   #state = state<RemovedListState>({ phase: 'loading' });
@@ -112,11 +118,19 @@ export class EfsFilesRemoved extends EfsElement {
 
   #row(row: RemovedRow) {
     const t = this.translator.t.bind(this.translator);
-    const label = STATE_LABEL[row.state];
-    const why = this.restorable?.(row);
-    return html`<li class="efs-entry efs-entry-removed" data-state=${row.state}>
+    const label =
+      row.last === 'NEVER_BOUND'
+        ? 'files.removed.neverBound'
+        : row.last === 'UNKNOWN'
+          ? 'files.removed.historyUnknown'
+          : STATE_LABEL[row.state];
+    const action = row.last === 'KNOWN' ? 'restore' : row.last === 'NEVER_BOUND' ? 'unhide' : null;
+    const why = action ? this.restorable?.(row) : undefined;
+    const icon =
+      row.last === 'KNOWN' ? (row.target.kind === 'folder' ? 'folder' : 'file') : 'circle-info';
+    return html`<li class="efs-entry efs-entry-removed" data-state=${row.state} data-last=${row.last}>
       <span class="efs-entry-open">
-        ${appIcon(row.target.kind === 'folder' ? 'folder' : 'file')}
+        ${appIcon(icon)}
         <span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>
       </span>
       <span class="efs-entry-meta efs-quiet">
@@ -124,21 +138,27 @@ export class EfsFilesRemoved extends EfsElement {
         ${why ? html`<span>${t(why)}</span>` : nothing}
       </span>
       <span class="efs-entry-actions">
-        <wa-button
-          size="s"
-          class="efs-removed-restore"
-          ?disabled=${why !== undefined}
-          @click=${() =>
-            this.folder &&
-            this.dispatchEvent(
-              new CustomEvent<RestoreRemovedDetail>(RESTORE_REMOVED_EVENT, {
-                detail: { folder: this.folder, row },
-                bubbles: true,
-                composed: true,
-              }),
-            )}
-          >${t('files.removed.restore', { name: row.name })}</wa-button
-        >
+        ${
+          action
+            ? html`<wa-button
+              size="s"
+              class=${action === 'restore' ? 'efs-removed-restore' : 'efs-removed-unhide'}
+              ?disabled=${why !== undefined}
+              @click=${() =>
+                this.folder &&
+                this.dispatchEvent(
+                  new CustomEvent<RestoreRemovedDetail>(RESTORE_REMOVED_EVENT, {
+                    detail: { folder: this.folder, row, action },
+                    bubbles: true,
+                    composed: true,
+                  }),
+                )}
+              >${t(action === 'restore' ? 'files.removed.restore' : 'files.removed.unhide', {
+                name: row.name,
+              })}</wa-button
+            >`
+            : nothing
+        }
       </span>
     </li>`;
   }

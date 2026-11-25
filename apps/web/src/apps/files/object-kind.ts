@@ -28,7 +28,7 @@ import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { effect } from '../../state/effect.ts';
 import { computed, type ReadonlySignal, state } from '../../state/signals.ts';
-import { placeLens, rootFolder } from './folder-model.ts';
+import { rootFolder } from './folder-model.ts';
 import type { FolderNav, NavStep } from './navigation.ts';
 import type { LinkState } from './target.ts';
 
@@ -217,50 +217,21 @@ export function objectKindState(
     run = mine;
     set({ status: 'pending' });
     const { signal } = mine;
-    const id = l.link.folder.toLowerCase();
     const root = rootFolder(efs);
     void (async () => {
       try {
-        const { openObject, openPath } = await loadFiles();
+        const { openPath } = await loadFiles();
         if (signal.aborted) return;
-        // The Lens the names are looked up in, and the file then opens in: the link's own; else
-        // openPath's default (you first, then the start folder's creator, then the default), made
-        // here from the folder's record, so the file's HEAD is read in the Lens its row was
-        // chosen in. The record is read only when this tab hasn't seen the folder's creator.
-        let start: FolderRef | undefined =
-          root.directory.toLowerCase() === id ? root : folders.get(id);
-        if (!l.link.lens && !start?.owner) {
-          const object = await openObject(efs, l.link.folder, { signal });
-          if (signal.aborted) return;
-          if (object.status !== 'FOLDER') {
-            // openPath's own answers for an id that isn't a folder (a file has no names below it).
-            set(
-              object.status === 'ABSENT_PROVEN'
-                ? { status: 'absent' }
-                : object.status === 'UNKNOWN'
-                  ? { status: 'unknown', reason: object.reason }
-                  : {
-                      status: 'invalid',
-                      reason:
-                        object.status === 'INVALID'
-                          ? object.reason
-                          : ({ code: 'UNSUPPORTED_PROFILE', retry: 'never' } as Reason),
-                    },
-            );
-            return;
-          }
-          folders.set(id, object.folder);
-          start = object.folder;
-        }
-        const lens = l.link.lens ?? (start ? placeLens(efs, start, reader) : undefined);
-        const answer = await openPath(efs, lens ? { ...l.link, lens } : l.link, {
+        // The Lens is openPath's: the link's own; else you first, then the start folder's
+        // creator, then the default. It comes back with the answer, and the file opens in it.
+        const answer = await openPath(efs, l.link, {
           signal,
           ...(reader ? { reader: reader as never } : {}),
           base: efs.lens.default,
         });
         if (signal.aborted) return;
         if (answer.status === 'PRESENT') {
-          arrive(l, answer, start ?? { kind: 'folder', directory: l.link.folder }, root, lens);
+          arrive(l, answer, root);
           return;
         }
         set(pathKind(answer, l.link.names));
@@ -273,24 +244,24 @@ export function objectKindState(
   };
   /**
    * Opens what a path led to by its own link, in place of the path in the URL. A folder: the trail
-   * becomes the folders the names came through (a start other than the realm's root comes first,
-   * by its id). A file: the trail stays as it is (as for any file link), and the file is read in
-   * the Lens its row was chosen in (the link's own Lens travels in the new link instead).
+   * becomes the folders the names came through, each with its creator (a start other than the
+   * realm's root comes first, by its id). A file: the trail stays as it is (as for any file link),
+   * and the file is read in the Lens its row was chosen in (the link's own Lens travels in the new
+   * link instead).
    */
   const arrive = (
     l: Extract<LinkState, { status: 'path' }>,
     answer: Extract<PathOpen, { status: 'PRESENT' }>,
-    start: FolderRef,
     root: FolderRef,
-    lens: Lens | undefined,
   ) => {
     const target = answer.target;
     const own = l.link.lens ? { lens: l.link.lens } : {};
     if (target.kind === 'file') {
-      if (!l.link.lens && lens) nav.rememberLens(target.subject, lens);
+      if (!l.link.lens) nav.rememberLens(target.subject, answer.lens);
       host.openLink(linkOf({ kind: 'object', subject: target.subject, ...own }), { replace: true });
       return;
     }
+    const start = answer.chain[0]?.folder ?? { kind: 'folder', directory: l.link.folder };
     const fromRoot = start.directory.toLowerCase() === root.directory.toLowerCase();
     const trail: NavStep[] = fromRoot ? [] : [{ folder: start, name: '' }];
     for (const step of answer.chain) {

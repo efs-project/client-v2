@@ -67,6 +67,10 @@ describe('placesOf', () => {
     ];
     expect(placesOf({ kind: 'remove', entries, hide: false })).toHaveLength(2);
     expect(placesOf({ kind: 'restore', entries })).toHaveLength(2);
+    expect(placesOf({ kind: 'unhide', entries })).toEqual([
+      { folder: folder.directory.toLowerCase(), name: 'a' },
+      { folder: folder.directory.toLowerCase(), name: 'b' },
+    ]);
   });
 });
 
@@ -77,6 +81,25 @@ describe('planRequest', () => {
     planMoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planRemoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planRestoreEntries: vi.fn(async () => ({ status: 'PLANNED' })),
+    planUnhideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
+  });
+
+  it("Unblock releases the person's own blocks through planUnhideEntries, in the view's Lens", async () => {
+    const p = planners();
+    const entries = [{ folder, name: 'a' }];
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'unhide', entries },
+      lens,
+      signal,
+    );
+    expect((p.planUnhideEntries.mock.calls[0] as unknown[] | undefined)?.[2]).toEqual({
+      entries,
+      lens,
+    });
+    expect(p.planRestoreEntries).not.toHaveBeenCalled();
   });
 
   it("a rename is a move with only a new name, in the view's Lens", async () => {
@@ -203,6 +226,12 @@ describe('withoutIndices: "Leave these out and review the rest"', () => {
       to,
     });
   });
+  it('drops refused unblocks too', () => {
+    expect(withoutIndices({ kind: 'unhide', entries }, [1])).toEqual({
+      kind: 'unhide',
+      entries: [entries[0], entries[2]],
+    });
+  });
   it('nothing left, or a request that is not a selection: nothing to review', () => {
     expect(withoutIndices({ kind: 'remove', entries, hide: false }, [0, 1, 2])).toBeUndefined();
     expect(withoutIndices({ kind: 'createFolder', folder, name: 'x' }, [0])).toBeUndefined();
@@ -214,6 +243,10 @@ describe('copy', () => {
     expect(refusalMessage('NAME_TAKEN_MINE')).toBe('files.name.takenMine');
     expect(refusalMessage('PATH_CHANGED')).toBe('files.refused.pathChanged');
     expect(refusalMessage('NOT_REMOVED')).toBe('files.refused.notRemoved');
+    // The tag release's restore and unhide refusals.
+    expect(refusalMessage('NEVER_BOUND')).toBe('files.refused.neverBound');
+    expect(refusalMessage('HISTORY_UNKNOWN')).toBe('files.refused.historyUnknown');
+    expect(refusalMessage('NOT_HIDDEN')).toBe('files.refused.notHidden');
     expect(refusalMessage('SOMETHING_NEW')).toBe('files.refused.unknown');
     expect(refusalMessage('toString')).toBe('files.refused.unknown');
   });

@@ -127,6 +127,8 @@ export class EfsFilesListing extends EfsElement {
   #synced = new Map<string, 'committed' | 'final'>();
   /** A removal sent from here, until its save is complete (or fails). */
   #pendingRemoval: Removal | undefined;
+  /** Saves sent from here whose record names no effect (Unblock), by the folder they touch. */
+  #unnamed = new Map<string, string>();
   /**
    * The entry the person removed here, offered back with Restore (this tab only): shown only once
    * the removal's save is complete, and cleared if it fails or the network undoes it.
@@ -181,11 +183,7 @@ export class EfsFilesListing extends EfsElement {
       const folder = browsing ? this.#folder(efs) : undefined;
       const kind = this.#kind.get();
       const reader = this.#reader();
-      // The owner too: a trail step can gain its creator (and so its place Lens) once read.
-      const key =
-        efs && folder
-          ? `${folder.directory}|${folder.owner ?? ''}|${kind}|${reader ?? ''}`
-          : undefined;
+      const key = efs && folder ? `${folder.directory}|${kind}|${reader ?? ''}` : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => this.#load(efs, folder, kind));
@@ -197,7 +195,12 @@ export class EfsFilesListing extends EfsElement {
       const dir = s?.phase === 'page' ? s.folder.directory : undefined;
       for (const p of this.host.saving.saves.get()) {
         this.#watchRemoval(p);
-        if (!dir || !touchesFolder(p.effect, dir)) continue;
+        // A save the SDK records without an effect (an Unblock, until it names one) touches the
+        // folder it was sent from here: the only one this tab knows it for.
+        const touches = p.effect
+          ? touchesFolder(p.effect, dir ?? '')
+          : this.#unnamed.get(p.sequenceId) === dir?.toLowerCase();
+        if (!dir || !touches) continue;
         const stage = p.final
           ? 'final'
           : p.total > 0 && p.committed === p.total
@@ -278,9 +281,10 @@ export class EfsFilesListing extends EfsElement {
     };
   }
 
-  /** Why a removed row can't be restored now, if it can't. */
+  /** Why a removed row's Restore (or Unblock) can't be taken now, if it can't. */
   #unrestorable(folder: FolderRef, row: RemovedRow, pending: ReadonlySet<string>) {
     if (pending.has(placeKey(folder.directory, row.name) ?? '')) return 'files.pending' as const;
+    if (row.last !== 'KNOWN') return undefined;
     const entry = { folder, name: row.name };
     return this.#restoreAsk([{ entry, isFolder: row.target.kind === 'folder' }])
       ? undefined
@@ -289,9 +293,16 @@ export class EfsFilesListing extends EfsElement {
 
   #onRestoreRemoved = (event: Event): void => {
     event.stopPropagation();
-    const { folder, row } = (event as CustomEvent<RestoreRemovedDetail>).detail;
+    const { folder, row, action } = (event as CustomEvent<RestoreRemovedDetail>).detail;
+    const entry = { folder, name: row.name };
+    // A lone block of someone else's entry has nothing of yours to put back: Unblock it.
+    if (action === 'unhide') {
+      if (row.last === 'NEVER_BOUND') this.#ask({ kind: 'unhide', entries: [entry] });
+      return;
+    }
+    if (row.last !== 'KNOWN') return;
     const ask = this.#restoreAsk(
-      [{ entry: { folder, name: row.name }, isFolder: row.target.kind === 'folder' }],
+      [{ entry, isFolder: row.target.kind === 'folder' }],
       row.state === 'MASKED',
     );
     if (ask) this.#ask(ask);
@@ -406,9 +417,7 @@ export class EfsFilesListing extends EfsElement {
     const folder = this.#folder(efs);
     const kind = this.#kind.get();
     this.#loaded =
-      efs && folder
-        ? `${folder.directory}|${folder.owner ?? ''}|${kind}|${this.#reader() ?? ''}`
-        : undefined;
+      efs && folder ? `${folder.directory}|${kind}|${this.#reader() ?? ''}` : undefined;
     return this.#load(efs, folder, kind);
   }
 
@@ -964,8 +973,12 @@ export class EfsFilesListing extends EfsElement {
         blocked: ask.hide,
       };
       this.#removed.set(undefined);
-    } else if (ask?.kind === 'restore') {
+    } else if (ask?.kind === 'restore' || ask?.kind === 'unhide') {
       this.#removed.set(undefined);
+    }
+    if (ask?.kind === 'unhide') {
+      const folder = ask.entries[0]?.folder.directory.toLowerCase();
+      if (folder) this.#unnamed.set(detail.sequenceId, folder);
     }
   };
 }
