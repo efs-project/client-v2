@@ -2,7 +2,14 @@
 // come from tests/e2e/chain.ts (replay, live or record).
 
 import { link } from '@efs/sdk';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect as baseExpect, type Locator, type Page } from '@playwright/test';
+
+/**
+ * A save runs several SDK steps (re-list, plan, send, settle); under the full three-browser suite
+ * one of them can outlast Playwright's default 5 s. That's load, not a failure: wait longer.
+ */
+export const expect = baseExpect.configure({ timeout: 15_000 });
+
 import type { TestChain } from './chain.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 

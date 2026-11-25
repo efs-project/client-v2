@@ -83,6 +83,8 @@ export interface SavesSessionOptions {
   readonly confirmEveryMs?: number;
   /** How often a sent save the network hasn't decided yet is re-checked (ms). */
   readonly settleEveryMs?: number;
+  /** False on a shared IPFS path gateway: the journal there can't be trusted, so it's never opened. */
+  readonly enabled?: boolean;
 }
 
 /**
@@ -108,6 +110,7 @@ export function createSavesSession(
     loadActions = () => import('@efs/sdk/actions'),
     confirmEveryMs = 12_000,
     settleEveryMs = 4_000,
+    enabled = true,
   }: SavesSessionOptions = {},
 ): SavesSession {
   const current = state<SavesState>({ status: 'IDLE' });
@@ -289,7 +292,7 @@ export function createSavesSession(
   };
 
   effect(scope, () => {
-    const efs = verifiedEfs(reader.get());
+    const efs = enabled ? verifiedEfs(reader.get()) : undefined;
     if (efs === active) return;
     active = efs;
     queueMicrotask(() => {

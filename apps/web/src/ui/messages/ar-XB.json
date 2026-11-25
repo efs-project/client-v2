@@ -286,5 +286,9 @@
   "files.edit.checkFailed": "‮We couldn't check your earlier save, so saving waits.‬",
   "files.edit.paused": "‮Saving is paused until we can check your last save.‬",
   "files.edit.checkAgain": "‮Check again‬",
-  "save.walletLost": "‮Your wallet lost its connection. Checking whether the save went out…‬"
+  "save.walletLost": "‮Your wallet lost its connection. Checking whether the save went out…‬",
+  "shared.saveOff": "‮Saving is off on this copy: it's served from a shared IPFS gateway, where other sites share its storage.‬",
+  "shared.openIsolated": "‮Open the isolated copy to save‬",
+  "shared.noIsolated": "‮To save, open this app from its own address (for example a subdomain gateway) instead.‬",
+  "settings.data.sharedGateway": "‮This copy is served from a shared IPFS gateway, where other sites share its storage, so settings last only until this tab closes.‬"
 }

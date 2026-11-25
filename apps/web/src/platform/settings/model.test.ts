@@ -139,6 +139,33 @@ describe('readConfig', () => {
     expect(read.issues).toHaveLength(2);
   });
 
+  it('reads delivery: a stable origin (an origin exactly) and an isolated copy (https)', () => {
+    const ok = readConfig({
+      schema: 'efs-config/1',
+      networks: [],
+      delivery: { stableOrigin: 'https://efs.example', isolatedCopy: 'https://efs.example/app/' },
+    });
+    expect(ok.status === 'OK' && ok.config.delivery).toEqual({
+      stableOrigin: 'https://efs.example',
+      isolatedCopy: 'https://efs.example/app/',
+    });
+    const bad = readConfig({
+      schema: 'efs-config/1',
+      networks: [],
+      delivery: { stableOrigin: 'https://efs.example/app/', isolatedCopy: 'http://efs.example/' },
+    });
+    expect(bad.status === 'OK' && bad.config.delivery).toBeUndefined();
+    expect(bad.status === 'OK' && bad.issues).toHaveLength(2);
+    const local = readConfig({
+      schema: 'efs-config/1',
+      networks: [],
+      delivery: { stableOrigin: 'http://127.0.0.1:5173' },
+    });
+    expect(local.status === 'OK' && local.config.delivery).toEqual({
+      stableOrigin: 'http://127.0.0.1:5173',
+    });
+  });
+
   it('rejects documents that are not efs-config/1', () => {
     expect(readConfig({ networks: [] }).status).toBe('INVALID');
   });

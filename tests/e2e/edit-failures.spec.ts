@@ -3,12 +3,13 @@
 // send and what it broadcast. Replayed on every PR (all browsers), live in CI's live-chain job,
 // recorded with `pnpm transcripts:record` (see tests/e2e/chain.ts).
 
-import { expect, test } from '@playwright/test';
+import { test } from '@playwright/test';
 import { CHAIN_MODE, testChain } from './chain.ts';
 import {
   editAndConnect,
   editAndReview,
   editor,
+  expect,
   openReview,
   preview,
   reviewDialog,

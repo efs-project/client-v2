@@ -11,6 +11,8 @@ import { type ReaderState, verifiedEfs } from './reader-state.ts';
 import type { WalletState } from './wallet-state.ts';
 
 export type WriterAvailability =
+  /** Served from a shared IPFS path gateway: saving is off (docs/design/offline-brief.md §2). */
+  | { readonly status: 'SHARED_GATEWAY' }
   /** No verified reader session: nothing can be saved. */
   | { readonly status: 'NO_SESSION' }
   | { readonly status: 'NO_WALLET' }
@@ -29,6 +31,8 @@ type JournalModule = typeof import('@efs/sdk/web/journal');
 export interface WriterSessionOptions {
   readonly loadActions?: () => Promise<ActionsModule>;
   readonly loadJournal?: () => Promise<JournalModule>;
+  /** True on a shared IPFS path gateway: never a writer. */
+  readonly sharedGateway?: boolean;
 }
 
 export function createWriterSession(
@@ -38,9 +42,11 @@ export function createWriterSession(
   {
     loadActions = () => import('@efs/sdk/actions'),
     loadJournal = () => import('@efs/sdk/web/journal'),
+    sharedGateway = false,
   }: WriterSessionOptions = {},
 ): WriterSession {
   const availability = computed<WriterAvailability>(() => {
+    if (sharedGateway) return { status: 'SHARED_GATEWAY' };
     if (!verifiedEfs(reader.get())) return { status: 'NO_SESSION' };
     const w = wallet.get();
     if (w.status !== 'CONNECTED') return { status: 'NO_WALLET' };

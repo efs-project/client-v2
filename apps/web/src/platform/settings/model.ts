@@ -69,6 +69,53 @@ export interface OperatorConfig {
   readonly schema: typeof CONFIG_SCHEMA;
   readonly defaultNetwork?: string;
   readonly networks: readonly NetworkDefinition[];
+  /** How this deployment is delivered (docs/design/offline-brief.md). */
+  readonly delivery?: DeliveryConfig;
+}
+
+export interface DeliveryConfig {
+  /**
+   * The one origin where the app may be installed and keep state for good (`https://host[:port]`,
+   * no path). The install manifest is linked only there.
+   */
+  readonly stableOrigin?: string;
+  /** A copy of this app on its own origin, to send people to from a shared IPFS path gateway. */
+  readonly isolatedCopy?: string;
+}
+
+/** An https URL, or http on this computer only (as for endpoints). */
+function webUrl(value: unknown): URL | undefined {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const url = new URL(value);
+    const local =
+      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+      url.hostname.endsWith('.localhost');
+    return url.protocol === 'https:' || (url.protocol === 'http:' && local) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readDelivery(raw: unknown, issues: string[]): DeliveryConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    issues.push('delivery was malformed and ignored');
+    return undefined;
+  }
+  const delivery: { stableOrigin?: string; isolatedCopy?: string } = {};
+  if (raw.stableOrigin !== undefined) {
+    const url = webUrl(raw.stableOrigin);
+    // An origin exactly: no path, query or fragment.
+    if (url && url.origin === raw.stableOrigin) delivery.stableOrigin = url.origin;
+    else issues.push('delivery.stableOrigin must be an origin (https://host) and was ignored');
+  }
+  if (raw.isolatedCopy !== undefined) {
+    const url = webUrl(raw.isolatedCopy);
+    if (url) delivery.isolatedCopy = url.href;
+    else issues.push('delivery.isolatedCopy must be an https URL and was ignored');
+  }
+  return Object.keys(delivery).length > 0 ? delivery : undefined;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -275,9 +322,15 @@ export function readConfig(raw: unknown): ConfigRead {
     typeof raw.defaultNetwork === 'string' && seen.has(raw.defaultNetwork)
       ? raw.defaultNetwork
       : undefined;
+  const delivery = readDelivery(raw.delivery, issues);
   return {
     status: 'OK',
-    config: { schema: CONFIG_SCHEMA, networks, ...(defaultNetwork ? { defaultNetwork } : {}) },
+    config: {
+      schema: CONFIG_SCHEMA,
+      networks,
+      ...(defaultNetwork ? { defaultNetwork } : {}),
+      ...(delivery ? { delivery } : {}),
+    },
     issues,
   };
 }
