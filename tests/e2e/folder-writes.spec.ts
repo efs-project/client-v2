@@ -517,6 +517,8 @@ test('New text file: name it, write it, leave and come back to it, save it, and 
     await dialog(page).locator('wa-button.efs-folder-write').click();
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(editorFor(page)).toContainText('A new text file in');
+    // Focus lands in the text, not back on the toolbar (the dialog gives focus back as it closes).
+    await expect(editorFor(page).locator('textarea.efs-edit-text')).toBeFocused();
     await expect(editorFor(page).locator('wa-input.efs-new-name')).toHaveJSProperty(
       'value',
       'hello.txt',
@@ -577,6 +579,93 @@ test('New text file with a name you already use here: refused in its own words, 
     await review.locator('wa-button', { hasText: 'Cancel' }).first().click();
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Renamed in place to fresh.txt: it plans; Cancel sends nothing');
+  } finally {
+    await chain.finish();
+  }
+});
+
+/** At the root: New text file `name`, written with `text`, then Review (the review dialog). */
+async function writeNewFile(page: Page, name: string, text: string) {
+  await entries(page).locator('wa-button.efs-new-file').click();
+  await dialog(page).locator('wa-input.efs-folder-name input').fill(name);
+  await dialog(page).locator('wa-button.efs-folder-write').click();
+  await editorFor(page).locator('textarea.efs-edit-text').fill(text);
+  await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+  const review = page.locator('wa-dialog.efs-edit-review');
+  await expect(review).toContainText(new RegExp(`Creates\\W+${name.replace('.', '\\.')}\\W+in`));
+  return review;
+}
+
+/** Two parts: the content, then the finish that binds the name. */
+const LARGE_TEXT = `${'x'.repeat(150 * 1024 - 1)}\n`;
+
+test('New text file whose save loses the name to a race: "Review changes" brings it back in the editor at its folder', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-new-text-file-reopen',
+    'A two-part new big.txt at the root as anvil #6; before Send, #6 creates big.txt elsewhere, so the finish loses the race. Review changes stops the old save and reopens the editor at the root with the text. One eth_sendTransaction.',
+  );
+  try {
+    await openRoot(page, chain);
+    const review = await writeNewFile(page, 'big.txt', LARGE_TEXT);
+    await expect(review).toContainText('2 approvals in your wallet');
+    await fileAtRoot(chain, 6, 'big.txt', 'made elsewhere\n');
+    chain.step('Elsewhere: #6 creates big.txt at the root first');
+    await review.locator('wa-button.efs-review-send').click();
+    const changed = save(page, 'changed');
+    await expect(changed.locator('wa-button.efs-save-reopen')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Send: the content lands; the finish loses the name (changed)');
+
+    await changed.locator('wa-button.efs-save-reopen').click();
+    await expect(editorFor(page).locator('.efs-edit-reopened')).toBeVisible();
+    await expect(editorFor(page).locator('wa-input.efs-new-name')).toHaveJSProperty(
+      'value',
+      'big.txt',
+    );
+    await expect(editorFor(page).locator('textarea.efs-edit-text')).toHaveValue(LARGE_TEXT);
+    await expect(save(page, 'changed')).toHaveCount(0);
+    expect(new URL(page.url()).hash).toBe('#/r/testnet/');
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Review changes: the old save stops; the editor is back at the root with the text');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('New text file, storage lost right after Send: "couldn\'t confirm", never "nothing was saved", its place held, settled once', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-new-text-file-unconfirmed',
+    'New note.txt at the root as anvil #6; IndexedDB writes fail right after the wallet broadcasts. The page says it could not confirm the save and holds the place; once storage is back the banner settles it: Saved · confirming. One eth_sendTransaction.',
+  );
+  try {
+    await openRoot(page, chain);
+    const review = await writeNewFile(page, 'note.txt', 'kept through it all\n');
+    await chain.breakJournalAfterSend(page);
+    await review.locator('wa-button.efs-review-send').click();
+    chain.step('Send: broadcast; the journal write after it fails (thrown, may have sent)');
+    await expect(review.locator('.efs-review-unconfirmed')).toContainText(
+      "We couldn't confirm this save yet.",
+    );
+    await expect(page.getByText(/nothing was saved/i)).toHaveCount(0);
+    await review.locator('wa-button[slot="footer"]').click();
+    // The text stays, and no new send while it's unconfirmed: the new file's place is held.
+    await expect(editorFor(page).locator('textarea.efs-edit-text')).toHaveValue(
+      'kept through it all\n',
+    );
+    await expect(editorFor(page).locator('.efs-edit-blocked')).toBeVisible();
+    await expect(editorFor(page).locator('wa-button.efs-edit-review-button')).toHaveAttribute(
+      'disabled',
+      '',
+    );
+    await chain.restoreJournal(page);
+    chain.step('Storage back: the banner settles the save from the ledger');
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming', { timeout: 20_000 });
+    await expect(page.getByText(/nothing was saved/i)).toHaveCount(0);
+    expect(sendRequests(chain), 'sent exactly once').toHaveLength(1);
   } finally {
     await chain.finish();
   }

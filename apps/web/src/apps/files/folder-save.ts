@@ -140,6 +140,12 @@ export class EfsFolderSave extends EfsElement {
   #pick = state<PickerSelection | undefined>(undefined);
   /** The destination's name as picked, for the move review. */
   #moveLabel = '';
+  /**
+   * "New text file", named: handed to the editor once the dialog has closed. The dialog gives
+   * focus back to its trigger as it closes, so the editor opening any sooner would lose its
+   * focus (and the first keystrokes) to the toolbar.
+   */
+  #composing: ComposeDetail | undefined;
   /** The SDK's checkName, once loaded: until then a name can't be reviewed. */
   #checkName = state<CheckName | undefined>(undefined);
   #phase = state<Phase>({ phase: 'closed' });
@@ -455,14 +461,8 @@ export class EfsFolderSave extends EfsElement {
     const review = () => {
       if (check?.status !== 'VALID' || unchanged) return;
       if (writes) {
-        // Named: the editor writes it (no wallet needed to type), so this dialog is done.
-        this.dispatchEvent(
-          new CustomEvent<ComposeDetail>(COMPOSE_EVENT, {
-            detail: { folder: ask.folder, folderName: ask.folderName, name: check.text },
-            bubbles: true,
-            composed: true,
-          }),
-        );
+        // Named: the editor writes it (no wallet needed to type), once this dialog has closed.
+        this.#composing = { folder: ask.folder, folderName: ask.folderName, name: check.text };
         this.#phase.set({ phase: 'closed' });
         return;
       }
@@ -817,6 +817,23 @@ export class EfsFolderSave extends EfsElement {
         if (event.target !== event.currentTarget) return;
         if (this.#phase.get().phase === 'sending') event.preventDefault();
         else this.#close();
+      }}
+      @wa-after-hide=${(event: Event) => {
+        if (event.target !== event.currentTarget) return;
+        const detail = this.#composing;
+        this.#composing = undefined;
+        if (!detail) return;
+        // After the dialog's own focus return (queued just before this event), so the editor's
+        // focus on its text is the last word.
+        setTimeout(() =>
+          this.dispatchEvent(
+            new CustomEvent<ComposeDetail>(COMPOSE_EVENT, {
+              detail,
+              bubbles: true,
+              composed: true,
+            }),
+          ),
+        );
       }}
     >
       ${body}
