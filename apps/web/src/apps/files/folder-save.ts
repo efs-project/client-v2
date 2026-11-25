@@ -13,7 +13,7 @@ import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { EntryRef, FolderRef } from '@efs/sdk/files';
 import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
-import { saveHold } from '../../shell/save-hold.ts';
+import { saveHold, statementKey } from '../../shell/save-hold.ts';
 import {
   type SaveOutcome,
   saveMessage,
@@ -452,7 +452,14 @@ export class EfsFolderSave extends EfsElement {
   }
 
   /** Why this reviewed save can't be sent now, if it can't: checked on the signer, never the screen. */
-  #hold(request: FolderRequest, writer: EfsWriter, except?: string) {
+  #hold(request: FolderRequest, writer: EfsWriter, plan: Planned, except?: string) {
+    // A tag save is held by the statements it makes (its review's topic and things), never by
+    // a folder name: a tag doesn't place anything.
+    const review = plan.review;
+    const statements =
+      review.kind === 'efs.tagReview'
+        ? review.statements.map((x) => statementKey(review.place.id, x.thing))
+        : undefined;
     return folderHold(
       {
         availability: this.host.saving.availability.get(),
@@ -460,6 +467,7 @@ export class EfsFolderSave extends EfsElement {
         unconfirmed: this.host.saving.unconfirmed.get(),
         saves: this.host.saving.saves.get(),
         places: placesOf(request),
+        ...(statements ? { statements } : {}),
         except,
       },
       saveHold,
@@ -490,7 +498,7 @@ export class EfsFolderSave extends EfsElement {
       return;
     }
     // Checked again here, on the signer: the screen may show another account by now.
-    if (this.#hold(request, writer, again).hold) {
+    if (this.#hold(request, writer, plan, again).hold) {
       back();
       return;
     }
@@ -1127,7 +1135,7 @@ export class EfsFolderSave extends EfsElement {
         case 'sending': {
           const sending = s.phase === 'sending';
           const sent = s.sent;
-          const { hold, lapsed } = this.#hold(s.request, s.writer, sent?.sequenceId);
+          const { hold, lapsed } = this.#hold(s.request, s.writer, s.plan, sent?.sequenceId);
           const prompts = s.plan.review.prompts;
           const isRemove = ask.kind === 'remove';
           // Sent again (continued) only when the SDK says this same save can go as planned.

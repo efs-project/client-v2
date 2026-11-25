@@ -1,6 +1,6 @@
 import type { SequenceProgress } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
-import { saveHold } from './save-hold.ts';
+import { saveHold, statementKey } from './save-hold.ts';
 
 const ME = `0x${'ab'.repeat(20)}`;
 const FILE = `0x${'f1'.repeat(32)}`;
@@ -174,6 +174,74 @@ describe('saveHold for folder operations: per (folder, name), fail-closed', () =
 
   it('a new save that names neither a file nor places is held by any unsettled save', () => {
     expect(saveHold([partial(create(DIR, 'a.txt'))], { account: ME }).hold).toEqual({
+      kind: 'unsettled',
+    });
+  });
+});
+
+describe('saveHold for tag saves: per (topic, thing) statement (sdk-v2 983d70b effects)', () => {
+  const TOPIC = `0x${'7a'.repeat(32)}`;
+  const THING = `0x${'5a'.repeat(32)}`;
+  const tagSave = (kind: string, targets: string[], topic = TOPIC) =>
+    p({
+      state: 'PARTIAL',
+      total: 2,
+      committed: 1,
+      effect: { kind, topic, number: 0, targets } as never,
+    });
+  const tagHold = (saves: SequenceProgress[], things = [THING]) =>
+    saveHold(saves, { account: ME, statements: things.map((x) => statementKey(TOPIC, x)) });
+
+  it('a tag, a "Not this" or an untag of the same (topic, thing) holds; case does not matter', () => {
+    for (const kind of ['tags.tag', 'tags.deny', 'tags.untag']) {
+      expect(tagHold([tagSave(kind, [THING.toUpperCase().replace('0X', '0x')])]).hold).toEqual({
+        kind: 'unsettled',
+      });
+    }
+  });
+
+  it('another thing, or another topic, does not wait', () => {
+    expect(tagHold([tagSave('tags.tag', [`0x${'5b'.repeat(32)}`])]).hold).toBeUndefined();
+    expect(tagHold([tagSave('tags.tag', [THING], `0x${'7b'.repeat(32)}`)]).hold).toBeUndefined();
+  });
+
+  it('a tag save and a folder or file save never hold each other; a registration holds nothing', () => {
+    const folderSave = p({
+      state: 'PARTIAL',
+      total: 2,
+      committed: 1,
+      effect: {
+        kind: 'files.create',
+        folder: `0x${'d1'.repeat(32)}`,
+        name: 'a',
+        file: '0x',
+        revision: '0x',
+      } as never,
+    });
+    expect(tagHold([folderSave]).hold).toBeUndefined();
+    expect(
+      saveHold([tagSave('tags.tag', [THING])], {
+        account: ME,
+        places: [{ folder: `0x${'d1'.repeat(32)}`, name: 'a' }],
+      }).hold,
+    ).toBeUndefined();
+    expect(
+      tagHold([
+        p({
+          state: 'PARTIAL',
+          total: 2,
+          committed: 1,
+          effect: { kind: 'tags.register', topics: [TOPIC] } as never,
+        }),
+      ]).hold,
+    ).toBeUndefined();
+  });
+
+  it('a malformed tag effect, or a save with no effect, still holds every statement (fail-closed)', () => {
+    expect(tagHold([tagSave('tags.tag', 'x' as never)]).hold).toEqual({ kind: 'unsettled' });
+    expect(
+      tagHold([p({ state: 'PARTIAL', total: 2, committed: 1, effect: undefined as never })]).hold,
+    ).toEqual({
       kind: 'unsettled',
     });
   });
