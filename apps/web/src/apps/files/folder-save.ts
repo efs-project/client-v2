@@ -33,6 +33,7 @@ import {
   placesOf,
   planRequest,
   refusalMessage,
+  type ViewPath,
 } from './folder-requests.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
@@ -67,7 +68,12 @@ export type FolderAsk =
       readonly isFolder: boolean;
       readonly hide: boolean;
     }
-  | { readonly kind: 'restore'; readonly entry: EntryRef };
+  | {
+      readonly kind: 'restore';
+      readonly entry: EntryRef;
+      /** Required when the entry is a folder: the path to its folder from the view's start. */
+      readonly via?: ViewPath;
+    };
 
 type Planned = Extract<AnyFolderPlan, { status: 'PLANNED' }>;
 type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${string}` };
@@ -173,7 +179,10 @@ export class EfsFolderSave extends EfsElement {
       case 'remove':
         return { kind: 'remove', entries: [ask.entry], hide: ask.hide };
       case 'restore':
-        return { kind: 'restore', entries: [ask.entry] };
+        return {
+          kind: 'restore',
+          entries: [{ ...ask.entry, ...(ask.via ? { via: ask.via } : {}) }],
+        };
     }
   }
 
@@ -445,7 +454,16 @@ export class EfsFolderSave extends EfsElement {
       case 'efs.restoreReview': {
         const e = r.entries[0];
         if (!e) return nothing;
+        // alsoPlaced: live placements of this target now, by anyone. Null when the index can't
+        // vouch: then nothing is said (never "0").
         return html`<p>${t('files.restore.review', { name: e.entry.name })}</p>
+          ${
+            e.alsoPlaced !== null && e.alsoPlaced > 0
+              ? html`<p class="efs-folder-also">
+                  ${t('files.restore.alsoPlaced', { count: e.alsoPlaced })}
+                </p>`
+              : nothing
+          }
           ${instead(e, e.entry.name)}`;
       }
     }
