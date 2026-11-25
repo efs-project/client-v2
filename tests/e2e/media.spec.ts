@@ -69,14 +69,28 @@ test('a verified PNG shows as an image from a blob: URL; it is not editable', as
   }
 });
 
-test('an SVG shows only as an image: its script never runs, nothing is inlined', async ({
+test('an SVG shows only as an image, from a data: URL: its script never runs, nothing is inlined, no blob: is made', async ({
   page,
 }) => {
   const chain = await testChain('client-media-svg', 'The readme holds an SVG with a script.');
   try {
+    // Records the type of every blob: URL the page makes.
+    await page.addInitScript(() => {
+      const types: string[] = [];
+      Object.defineProperty(window, '__efsBlobTypes', { value: types });
+      const create = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = (object: Blob | MediaSource) => {
+        types.push(object instanceof Blob ? object.type : 'media-source');
+        return create(object);
+      };
+    });
     await openWith(page, chain, SVG);
     const img = preview(page).locator('img.efs-preview-media');
-    await expect(img).toHaveAttribute('src', /^blob:/);
+    // data:, never blob: (a blob: URL has the app's origin if opened in a new tab).
+    await expect(img).toHaveAttribute('src', /^data:image\/svg\+xml;base64,/);
+    expect(
+      await page.evaluate(() => (window as unknown as { __efsBlobTypes: string[] }).__efsBlobTypes),
+    ).not.toContain('image/svg+xml');
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(10);
     await expect(preview(page).locator('svg rect')).toHaveCount(0);
     expect(await page.evaluate(() => (window as { __efsSvgRan?: boolean }).__efsSvgRan)).toBe(

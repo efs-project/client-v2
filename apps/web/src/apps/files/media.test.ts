@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agrees, sniffMedia } from './media.ts';
+import { agrees, dataUrl, sniffMedia } from './media.ts';
 
 const bytes = (...parts: (string | number[])[]): Uint8Array => {
   const out: number[] = [];
@@ -64,5 +64,17 @@ describe('agrees', () => {
     expect(agrees('image/jpeg', { kind: 'image', mime: 'image/png' })).toBe(true);
     expect(agrees('video/mp4', { kind: 'image', mime: 'image/png' })).toBe(false);
     expect(agrees('text/plain', { kind: 'audio', mime: 'audio/wav' })).toBe(false);
+  });
+});
+
+describe('dataUrl', () => {
+  it('base64-encodes the bytes, also past one chunk', () => {
+    expect(dataUrl('image/svg+xml', new TextEncoder().encode('<svg/>'))).toBe(
+      `data:image/svg+xml;base64,${btoa('<svg/>')}`,
+    );
+    const big = new Uint8Array(100_000).fill(65);
+    expect(dataUrl('image/svg+xml', big)).toBe(
+      `data:image/svg+xml;base64,${btoa('A'.repeat(100_000))}`,
+    );
   });
 });

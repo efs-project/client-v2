@@ -21,6 +21,25 @@ export const MEDIA_MAX_BYTES: Readonly<Record<MediaKind['kind'], number>> = {
   video: 100 * 1024 * 1024,
 };
 
+/**
+ * SVG is shown from a data: URL, never a blob: URL. A blob: URL carries this app's origin, so
+ * "Open image in new tab" would make the SVG a top-level document on our origin, one CSP
+ * inheritance rule away from its scripts reaching the app's storage. A data: URL can't be opened
+ * as a top-level page, and its document would have an opaque origin anyway. Smaller cap, since
+ * the bytes are base64-encoded into the page.
+ */
+export const SVG_MAX_BYTES = 5 * 1024 * 1024;
+export const SVG_MIME = 'image/svg+xml';
+
+/** A data: URL of `bytes` (base64), built in chunks so large inputs don't overflow the stack. */
+export function dataUrl(mime: string, bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
 const startsWith = (b: Uint8Array, sig: readonly number[], at = 0): boolean =>
   b.length >= at + sig.length && sig.every((v, i) => b[at + i] === v);
 

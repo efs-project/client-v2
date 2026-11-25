@@ -13,7 +13,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { type EditDoneDetail, shortId } from './editor.ts';
-import { MEDIA_MAX_BYTES } from './media.ts';
+import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import { readerNotice } from './notice.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
@@ -84,7 +84,10 @@ export class EfsFilesPreview extends EfsElement {
   #notInView = state<string | undefined>(undefined);
   /** The person's own text, brought back by the banner's "Review changes". */
   #draftText = state<string | undefined>(undefined);
-  /** A blob: URL of the VERIFIED bytes being shown as media; revoked when the read is replaced. */
+  /**
+   * The URL of the VERIFIED bytes being shown as media: blob: (revoked when the read is
+   * replaced), or data: for SVG.
+   */
   #mediaUrl = state<string | undefined>(undefined);
   /** The browser couldn't decode the media it was given (unsupported codec or a broken file). */
   #mediaFailed = state(false);
@@ -186,13 +189,18 @@ export class EfsFilesPreview extends EfsElement {
   }
 
   /**
-   * A blob: URL for VERIFIED media within its size cap, owned by `run` (revoked when the read is
-   * replaced or the pane goes away). Never for unverified bytes: there are none in `content`.
+   * A URL for VERIFIED media within its size cap: a blob: URL owned by `run` (revoked when the
+   * read is replaced or the pane goes away), or for SVG a data: URL. Never for unverified bytes:
+   * there are none in `content`.
    */
   #mediaUrlFor(s: PreviewState, run: OwnerScope): string | undefined {
     if (s.phase !== 'read' || s.content?.kind !== 'media' || !s.bytes.bytes) return undefined;
     if (s.bytes.grade !== 'VERIFIED') return undefined;
     const { media } = s.content;
+    // SVG: a data: URL only (see media.ts), never blob:.
+    if (media.mime === SVG_MIME) {
+      return s.bytes.bytes.length > SVG_MAX_BYTES ? undefined : dataUrl(SVG_MIME, s.bytes.bytes);
+    }
     if (s.bytes.bytes.length > MEDIA_MAX_BYTES[media.kind]) return undefined;
     const url = URL.createObjectURL(new Blob([s.bytes.bytes as BlobPart], { type: media.mime }));
     run.defer(() => URL.revokeObjectURL(url));
