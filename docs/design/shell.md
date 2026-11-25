@@ -206,7 +206,19 @@ require-trusted-types-for 'script'; trusted-types lit-html
 
 ## Time budgets
 
-`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **1.5 s**, or the first verified file text (`efs:preview-verified`) within **4 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report. Measured locally at the slice: median 160 ms and 640 ms. The budgets are provisional until CI's numbers are in, then set to about twice CI's median.
+`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **900 ms**, or the first verified file text (`efs:preview-verified`) within **4.3 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report, and the e2e-static job logs them as a `budgets: {…}` line.
+
+The budgets are 2.5× CI's median, rounded up to the next 100 ms (PM, 2026-11-25; they were a provisional 1.5 s and 4 s until CI's numbers were in). They exist to catch big regressions, not small ones: at 2× the slowest sample sat only about 1.4× under the budget, close enough to flake, and a flaky gate gets ignored. CI samples, in ms:
+
+| CI run | booted | preview-verified |
+|---|---|---|
+| 45559283511 | 390 | 1,955 |
+| 45560082736 | 283 | 1,413 |
+| 45560815916 | 294 | 1,143 |
+| 45560804448 | 488 | 2,458 |
+| **Median** | **342** | **1,684** |
+
+CI runners vary about twofold between runs: the last two rows are main with a docs change and main with slice G, which measure the same locally (480–730 ms before G, 480–510 ms after), yet CI put them at 1,143 ms and 2,458 ms. An Apple-silicon laptop measures about 130 ms and 500 ms, so set budgets from CI, never from a laptop. If a run trips a budget with no code change behind it, re-measure and record the new samples here rather than raising the number to make it pass.
 
 ## Startup budget
 
