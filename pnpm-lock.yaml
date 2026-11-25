@@ -175,9 +175,12 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.14
         version: 2.5.14
+      '@efs/fixture':
+        specifier: file:vendor/efs-fixture-0.0.0-59b0e20.tgz
+        version: file:vendor/efs-fixture-0.0.0-59b0e20.tgz(typescript@7.0.2)
       '@efs/sdk':
-        specifier: file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz
-        version: file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz(typescript@7.0.2)
+        specifier: file:vendor/efs-sdk-0.0.0-59b0e20.tgz
+        version: file:vendor/efs-sdk-0.0.0-59b0e20.tgz(typescript@7.0.2)
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -206,8 +209,8 @@ importers:
         specifier: 3.15.0
         version: 3.15.0(@floating-ui/utils@0.2.12)(@types/node@24.13.6)(@types/react@19.3.0)
       '@efs/sdk':
-        specifier: file:../../vendor/efs-sdk-0.0.0-f8fa9a6.tgz
-        version: file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz(typescript@7.0.2)
+        specifier: file:../../vendor/efs-sdk-0.0.0-59b0e20.tgz
+        version: file:vendor/efs-sdk-0.0.0-59b0e20.tgz(typescript@7.0.2)
       '@lit-labs/signals':
         specifier: 0.3.0
         version: 0.3.0
@@ -305,8 +308,13 @@ packages:
     resolution: {integrity: sha512-WyOx8cJQ+FQus4Mm4uPIZA64gbk3Wxh0so5Lcii0aJifqwoVOlfFtorjLE0Hen4OYyHZMXDWqMmaQemBhgxFRQ==}
     engines: {node: '>=14'}
 
-  '@efs/sdk@file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz':
-    resolution: {integrity: sha512-5jvqywEC5sWApaCrnPAykosDR4OHJstoglXvXrsfLOaI5BP9rwUxF3YlEGef1xSllbOlJ5RfF5Nh4ecC1JMcSw==, tarball: file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz}
+  '@efs/fixture@file:vendor/efs-fixture-0.0.0-59b0e20.tgz':
+    resolution: {integrity: sha512-j/eFdpCphHpB4s8PIWaejRq/IY4lTjTAhKGNGFNP9YcuvPGljPLeeFYE6RqolVI+E++at+x+BMuuaLVxQimJeA==, tarball: file:vendor/efs-fixture-0.0.0-59b0e20.tgz}
+    version: 0.0.0
+    engines: {node: '>=22.12'}
+
+  '@efs/sdk@file:vendor/efs-sdk-0.0.0-59b0e20.tgz':
+    resolution: {integrity: sha512-Upsc+/GA2jiCIhzOVmFq0ISDujpCJ504yuix2Zq/5KIQErYv2a9tuw2opVsT7acRfKpV9bRT91ZR4f/v4/HarA==, tarball: file:vendor/efs-sdk-0.0.0-59b0e20.tgz}
     version: 0.0.0
     engines: {node: '>=22.12'}
 
@@ -1125,7 +1133,17 @@ snapshots:
 
   '@ctrl/tinycolor@4.1.0': {}
 
-  '@efs/sdk@file:vendor/efs-sdk-0.0.0-f8fa9a6.tgz(typescript@7.0.2)':
+  '@efs/fixture@file:vendor/efs-fixture-0.0.0-59b0e20.tgz(typescript@7.0.2)':
+    dependencies:
+      viem: 2.58.4(typescript@7.0.2)
+    transitivePeerDependencies:
+      - bufferutil
+      - mppx
+      - typescript
+      - utf-8-validate
+      - zod
+
+  '@efs/sdk@file:vendor/efs-sdk-0.0.0-59b0e20.tgz(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 1.8.0
       viem: 2.58.4(typescript@7.0.2)
