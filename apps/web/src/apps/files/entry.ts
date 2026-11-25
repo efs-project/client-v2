@@ -95,8 +95,10 @@ function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   list.object = shared.object;
   list.composer = shared.composer;
   list.shown = shared.shown;
-  const placed = computed(() => shared.place.get() !== undefined);
-  list.suspended = placed;
+  // Only a tag replaces the folder listing: an address lists its own entries there (like a
+  // folder), with what's tagged at it below.
+  const tagged = computed(() => shared.place.get()?.status === 'topic');
+  list.suspended = tagged;
   const topic = document.createElement('efs-files-topic') as EfsFilesTopic;
   topic.host = host;
   topic.nav = shared.nav;
@@ -107,7 +109,12 @@ function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
     const p = shared.place.get();
     return p?.status === 'topic' && p.segments.length === 1 && shared.plain.get() !== p.canonical;
   });
-  topic.place = computed(() => (isWord.get() ? undefined : shared.place.get()));
+  topic.place = computed(() => {
+    const p = shared.place.get();
+    // Names under an address resolve to their own link (the object resolver): nothing lists here.
+    if (isWord.get() || (p?.status === 'home' && p.names.length > 0)) return undefined;
+    return p;
+  });
   const word = document.createElement('efs-files-word') as EfsFilesWord;
   word.host = host;
   word.nav = shared.nav;
@@ -116,11 +123,9 @@ function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   word.plain = shared.plain;
   box.append(list, topic, word);
   effect(scope, () => {
-    const on = placed.get();
-    const words = isWord.get();
-    list.hidden = on;
-    topic.hidden = !on || words;
-    word.hidden = !words;
+    list.hidden = tagged.get();
+    topic.hidden = topic.place.get() === undefined;
+    word.hidden = !isWord.get();
   });
   // Leaving the plain tag (another place, or none) ends it.
   effect(scope, () => {

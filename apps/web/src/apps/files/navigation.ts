@@ -3,9 +3,13 @@
 // The URL says which folder is shown (its object link, routed through openObject); this keeps the
 // trail of folders the person came through, for the breadcrumb. A folder opened by its link with
 // no trail (a reload, a shared link) starts a new trail with just itself.
+//
+// The trail starts at the realm's shared root, or at an address (a home: `base`) when the person
+// came in through one: its entries are listed like a folder's, and folders opened below it keep it
+// as their start.
 
 import type { Lens } from '@efs/sdk';
-import type { FolderRef } from '@efs/sdk/files';
+import type { FolderRef, HomeRef, ParentRef } from '@efs/sdk/files';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import type { ViewPath } from './folder-requests.ts';
 
@@ -16,8 +20,12 @@ export interface NavStep {
 }
 
 export interface FolderNav {
-  /** The folders opened below the realm's root, in order. Empty: at the root. */
+  /** The folders opened below the trail's start (the realm's root, or `base`), in order. */
   readonly path: ReadonlySignal<readonly NavStep[]>;
+  /** Where the trail starts when it isn't the realm's root: an address (a home), with its owner. */
+  readonly base: ReadonlySignal<HomeRef | undefined>;
+  /** The URL arrived at an address: its entries are listed, and the trail starts there. */
+  arriveHome(home: HomeRef): void;
   /**
    * Whether the person has been browsing folders in this tab (they opened the realm's root). Until
    * then a file link opened fresh lists nothing: no reads it doesn't need.
@@ -31,8 +39,11 @@ export interface FolderNav {
   back(depth: number): void;
   /** A folder opened by its link (a reload, a shared link): it becomes the only folder opened. */
   resetTo(step: NavStep): void;
-  /** A folder chosen in the tree: the trail becomes the names from the root to it. */
-  goTo(steps: readonly NavStep[]): void;
+  /**
+   * A folder chosen in the tree, or reached by a path: the trail becomes the names from its start
+   * to it (the realm's root, or the address `base`).
+   */
+  goTo(steps: readonly NavStep[], base?: HomeRef): void;
   /**
    * The URL arrived at `folder` (undefined: the realm's root): back along the trail to it when it's
    * there (Back, the breadcrumb), else a trail of its own (resetTo). Nothing when it's the last.
@@ -62,13 +73,27 @@ export interface FolderNav {
  * once the trail starts at a folder opened by its link (its name, and its parents, aren't known
  * here). The SDK checks the path against the chain, so a stale trail is refused, not trusted.
  */
-export function viewPath(path: readonly NavStep[], root: FolderRef): ViewPath | undefined {
+export function viewPath(path: readonly NavStep[], root: ParentRef): ViewPath | undefined {
   if (path.some((step) => step.name === '')) return undefined;
   return { from: root, segments: path.map((step) => step.name) };
 }
 
+/** The same place, whatever the case of its id: a folder by its record, a home by its address. */
+export function sameParent(a: ParentRef | undefined, b: ParentRef | undefined): boolean {
+  if (!a || !b || a.kind !== b.kind) return false;
+  return a.kind === 'folder'
+    ? a.directory.toLowerCase() === (b as FolderRef).directory.toLowerCase()
+    : a.address.toLowerCase() === (b as HomeRef).address.toLowerCase();
+}
+
+/** A place's id for the client's own maps (never a chain key): a folder's record, or "home:0x…". */
+export function parentKey(p: ParentRef): string {
+  return p.kind === 'folder' ? p.directory.toLowerCase() : `home:${p.address.toLowerCase()}`;
+}
+
 export function createFolderNav(): FolderNav {
   const path = state<readonly NavStep[]>([]);
+  const base = state<HomeRef | undefined>(undefined);
   const browsing = state(false);
   const lenses = new Map<string, Lens>();
   const gated = state<ReadonlySet<string>>(new Set());
@@ -93,6 +118,19 @@ export function createFolderNav(): FolderNav {
       return lenses.get(subject.toLowerCase());
     },
     path,
+    base,
+    arriveHome(home) {
+      browsing.set(true);
+      const now = base.get();
+      if (
+        !now ||
+        now.address.toLowerCase() !== home.address.toLowerCase() ||
+        now.owner !== home.owner
+      ) {
+        base.set(home);
+      }
+      if (path.get().length > 0) path.set([]);
+    },
     browsing,
     startBrowsing() {
       if (!browsing.get()) browsing.set(true);
@@ -102,11 +140,14 @@ export function createFolderNav(): FolderNav {
       path.set([...path.get(), step]);
     },
     resetTo(step) {
+      // A folder opened by its own link: where it hangs isn't known, so the trail is just it.
       browsing.set(true);
+      if (base.get()) base.set(undefined);
       path.set([step]);
     },
-    goTo(steps) {
+    goTo(steps, home) {
       browsing.set(true);
+      if (base.get() !== home) base.set(home);
       path.set([...steps]);
     },
     back(depth) {
@@ -115,6 +156,8 @@ export function createFolderNav(): FolderNav {
     },
     arrive(folder) {
       if (!folder) {
+        // The realm's root: the trail starts there again.
+        if (base.get()) base.set(undefined);
         this.back(0);
         return;
       }

@@ -18,6 +18,7 @@ import type {
   FolderPage,
   FolderRef,
   FolderRow,
+  ParentRef,
 } from '@efs/sdk/files';
 
 /** The realm's shared root folder, from the pinned deployment: the stand-in start. */
@@ -30,7 +31,7 @@ export function rootFolder(efs: Efs): FolderRef {
  * The Lens a folder is listed through: the SDK's place Lens (the connected account, then the
  * folder's owner, then the default). The client never splices principals itself.
  */
-export function placeLens(efs: Efs, folder: FolderRef, reader: string | undefined): Lens {
+export function placeLens(efs: Efs, folder: ParentRef, reader: string | undefined): Lens {
   return efs.lens.place({
     ...(reader ? { reader: reader as never } : {}),
     ...(folder.owner ? { owner: folder.owner } : {}),
@@ -42,7 +43,7 @@ export function placeLens(efs: Efs, folder: FolderRef, reader: string | undefine
 export interface FolderReads {
   listFolder(
     efs: Efs,
-    folder: FolderRef,
+    folder: ParentRef,
     o?: {
       lens?: Lens;
       kinds?: readonly EntryKind[];
@@ -63,7 +64,8 @@ export type ListingState =
   | {
       readonly phase: 'page';
       /** The listed folder, with its subject and owner as the SDK read them. */
-      readonly folder: FolderRef;
+      /** The place listed: a folder, or an address (a home) listed like one. */
+      readonly folder: ParentRef;
       readonly rows: readonly FolderRow[];
       /** Totals over every page read so far. */
       readonly hidden: number;
@@ -101,11 +103,6 @@ function fromPage(page: FolderPage, before?: Page): ListingState {
           : 'unknown';
     return { phase, reason: page.reason };
   }
-  // The listing reads folders only (an address isn't listed here yet): a page for anything else
-  // is a client error, never shown as a folder.
-  if (page.folder.kind !== 'folder') {
-    return { phase: 'invalid', reason: { code: 'CLIENT_ERROR', retry: 'never' } as Reason };
-  }
   return {
     phase: 'page',
     folder: page.folder,
@@ -130,7 +127,7 @@ const opts = (o: ListingOptions, signal: AbortSignal, cursor?: FolderCursor) => 
 export async function startListing(
   reads: FolderReads,
   efs: Efs,
-  folder: FolderRef,
+  folder: ParentRef,
   o: ListingOptions,
   signal: AbortSignal,
 ): Promise<ListingState | undefined> {
@@ -165,6 +162,7 @@ export async function continueListing(
  */
 export type ListingNotice =
   | { readonly id: 'files.list.empty' }
+  | { readonly id: 'files.home.empty' }
   | { readonly id: 'files.list.nothingShown' }
   | { readonly id: 'files.list.noneFound' }
   | { readonly id: 'files.list.partialEmpty'; readonly count: number }
@@ -181,9 +179,9 @@ export function listingNotice(state: ListingState): ListingNotice | undefined {
   if (rows.length > 0) return undefined;
   if (coverage.state === 'COMPLETE') {
     // Empty only when nothing was left out: a filter or a block hid what's there.
-    return state.filtered + state.hidden === 0
-      ? { id: 'files.list.empty' }
-      : { id: 'files.list.nothingShown' };
+    // An address with nothing of its own (in this Lens) says so as an address, never "folder".
+    if (state.filtered + state.hidden !== 0) return { id: 'files.list.nothingShown' };
+    return state.folder.kind === 'home' ? { id: 'files.home.empty' } : { id: 'files.list.empty' };
   }
   // PARTIAL with no rows: more to read, or a resumed listing that ended without proving the whole.
   return state.next

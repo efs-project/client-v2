@@ -276,7 +276,11 @@ test("an address lists what's attached to it, the address first: its own rows un
     });
     await open(page, chain, `./#/r/testnet/${five}`);
     await expect(topic(page).locator('.efs-topic-mark')).toContainText('Address');
-    await expect(topic(page).locator('.efs-topic-title')).toHaveText(/Everything at\W+0x/);
+    await expect(topic(page).locator('.efs-topic-title')).toHaveText(/Things tagged at\W+0x/);
+    // Its own entries list above, like a folder's: nothing placed there yet.
+    await expect(page.locator('efs-files-listing')).toContainText(
+      'Nothing is placed at this address yet, in your view.',
+    );
     await expect(topic(page).locator('wa-radio-group.efs-topic-scope')).toHaveCount(0);
     const rows = section(page, 'lens');
     await expect(rows).toHaveCount(2);
@@ -289,15 +293,84 @@ test("an address lists what's attached to it, the address first: its own rows un
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step("The address: its own row unlabelled, #0's named");
 
+    // Names under the address are looked up (openPath); nothing is named photos there.
     await go(page, `#/r/testnet/${five}/photos/cat.jpg`);
-    await expect(topic(page).locator('.efs-home-names-soon')).toContainText(
-      "Names under an address can't be read yet.",
+    await expect(preview(page).locator('.efs-preview-no-path')).toContainText(
+      /Nothing named\W+photos\W+is on this path/,
     );
-    await topic(page).locator('wa-button.efs-home-open').click();
-    await expect.poll(() => new URL(page.url()).hash).toBe(`#/r/testnet/${five}`);
-    await expect(section(page, 'lens')).toHaveCount(2);
+    expect(new URL(page.url()).hash).toContain('/photos/cat.jpg');
     await chain.idle(500);
-    chain.step('Names under the address: not readable yet; Open the address');
+    chain.step('Names under the address: photos is not there; it says which, and the path stays');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("an address lists its own entries like a folder: yours first, the owner's unlabelled; names under it open by their own link", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-home-entries',
+    'anvil #5 places docs/ (with note.txt) and pet.txt at its own address; anvil #6 places its own pet.txt there too.',
+  );
+  try {
+    await chain.actAs?.(5, async ({ files, lens, writer, efs, account, save }) => {
+      const home = { kind: 'home' as const, address: account as `0x${string}` };
+      const docs = (
+        (await save(
+          await files.planCreateFolder(efs, writer, { folder: home, name: 'docs', lens }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      for (const [folder, name] of [
+        [docs, 'note.txt'],
+        [home, 'pet.txt'],
+      ] as const) {
+        await save(
+          await files.planCreateFile(efs, writer, {
+            folder,
+            name,
+            content: new TextEncoder().encode(`${name} by #5\n`),
+            lens,
+          }),
+        );
+      }
+      return { account5: account };
+    });
+    const five = chain.ids.account5 as string;
+    await chain.actAs?.(6, async ({ files, lens, writer, efs, save }) => {
+      await save(
+        await files.planCreateFile(efs, writer, {
+          folder: { kind: 'home', address: five as `0x${string}` },
+          name: 'pet.txt',
+          content: new TextEncoder().encode('pet.txt by #6\n'),
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await go(page, `#/r/testnet/${five}`);
+    // You first, then the address: your pet.txt ("yours"), its docs/ (unlabelled).
+    await expect(row(page, 'docs')).toBeVisible();
+    await expect(row(page, 'docs').locator('.efs-entry-whose')).toHaveCount(0);
+    await expect(row(page, 'pet.txt').locator('.efs-entry-whose')).toHaveText('yours');
+    // Read-only here for now: no create or remove at an address.
+    await expect(page.locator('efs-files-listing wa-button.efs-new-folder')).toHaveCount(0);
+    await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-remove')).toHaveCount(0);
+    chain.step("The address: its entries, yours first, the owner's unlabelled; read-only");
+
+    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await expect(row(page, 'note.txt')).toBeVisible();
+    const crumbs = page.locator('wa-breadcrumb wa-breadcrumb-item');
+    await expect(crumbs).toHaveCount(2);
+    await expect(crumbs.first()).toContainText(/0x/);
+    await expect(crumbs.last()).toContainText('docs');
+    chain.step('docs/ opens below the address: the bar starts at the address');
+
+    await go(page, `#/r/testnet/${five}/docs/note.txt`);
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('note.txt by #5');
+    await expect.poll(() => new URL(page.url()).hash).toMatch(/~efs\/o\/0x[0-9a-f]{64}$/);
+    await chain.idle(500);
+    chain.step('A name under the address opens the file by its own link');
   } finally {
     await chain.finish();
   }

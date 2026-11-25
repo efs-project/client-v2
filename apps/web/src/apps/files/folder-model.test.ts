@@ -64,6 +64,11 @@ describe('startListing', () => {
       signal(),
     );
     expect(listingNotice(s as ListingState)).toEqual({ id: 'files.list.empty' });
+    // An address with nothing of its own says so as an address.
+    const home = { kind: 'home' as const, address: `0x${'ab'.repeat(20)}` as never };
+    expect(
+      listingNotice({ ...(s as Extract<ListingState, { phase: 'page' }>), folder: home }),
+    ).toEqual({ id: 'files.home.empty' });
   });
 
   it('a COMPLETE page whose rows were all filtered or blocked is never "empty"', async () => {

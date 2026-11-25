@@ -69,6 +69,7 @@ export class EfsFilesView extends EfsElement {
     const t = this.host.translator.t.bind(this.host.translator);
     const place = this.place?.get();
     const path = this.nav.path.get();
+    const base = this.nav.base.get();
     const crumbs: {
       readonly name: string;
       readonly depth: number;
@@ -77,7 +78,18 @@ export class EfsFilesView extends EfsElement {
     }[] = place
       ? this.#placeCrumbs(place)
       : [
-          { name: t('files.location.root'), depth: 0, data: false, go: () => this.#go(0) },
+          // The trail's start: the realm's root, or the address the person came in through.
+          base
+            ? {
+                name: shortId(base.address),
+                depth: 0,
+                data: true,
+                go: () => {
+                  this.nav.back(0);
+                  this.host.openLink(link({ kind: 'home', address: base.address, names: [] }));
+                },
+              }
+            : { name: t('files.location.root'), depth: 0, data: false, go: () => this.#go(0) },
           // A folder opened by its link has no name here (names belong to its parent): its short id.
           ...path.map((step, i) => ({
             name: step.name || shortId(step.folder.directory),
