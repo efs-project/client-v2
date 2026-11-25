@@ -254,6 +254,8 @@ test("Remove releases: the dialog says the owner's same-named file will show; it
     await expect(dialog(page)).toContainText(/Your\W+shared\.txt\W+stops appearing here/);
     await expect(dialog(page)).toContainText(/After this, this view shows .+shared\.txt\W+here/);
     await expect(dialog(page)).toContainText('This removal is itself public. You can restore it.');
+    // The root is anvil #0's: blocking the name is offered only to a place's owner.
+    await expect(dialog(page).locator('wa-button.efs-folder-block')).toHaveCount(0);
     // Keep it is first: Escape keeps the entry, and nothing is sent.
     await expect(dialog(page).locator('wa-button.efs-folder-keep')).toBeFocused();
     await page.keyboard.press('Escape');
@@ -1024,6 +1026,131 @@ test("the Overview shows a folder's README formatted (verified text only), links
     );
     await chain.idle(500);
     chain.step('Its EFS link opens the root, in the app');
+  } finally {
+    await chain.finish();
+  }
+});
+
+/**
+ * mine/ by anvil #6 at the root, holding note.txt by #6 (and, with `other`, one by anvil #0: the
+ * default Lens's author, so this view would show it through).
+ */
+async function withMine(chain: TestChain, other: boolean): Promise<void> {
+  await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+    const mine = (
+      (await done(
+        await files.planCreateFolder(efs, writer, { folder: root, name: 'mine', lens }),
+      )) as {
+        created: import('@efs/sdk/files').FolderRef & { owner: string };
+      }
+    ).created;
+    await done(
+      await files.planCreateFile(efs, writer, {
+        folder: mine,
+        name: 'note.txt',
+        content: new TextEncoder().encode('mine\n'),
+        lens,
+      }),
+    );
+    return { mine: mine.directory, mineOwner: mine.owner };
+  });
+  if (!other) return;
+  await chain.actAs?.(0, async ({ files, lens, writer, efs, save: done }) => {
+    const mine = {
+      kind: 'folder',
+      directory: chain.ids.mine,
+      owner: chain.ids.mineOwner,
+    } as unknown as import('@efs/sdk/files').FolderRef;
+    await done(
+      await files.planCreateFile(efs, writer, {
+        folder: mine,
+        name: 'note.txt',
+        content: new TextEncoder().encode('theirs\n'),
+        lens,
+      }),
+    );
+  });
+}
+
+test("Remove and block this name: only the place's owner is offered it; the review says what it blocks; nothing shows after", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-remove-block',
+    'mine/ by anvil #6, holding note.txt by #6 and note.txt by #0 (in the default Lens).',
+  );
+  try {
+    await withMine(chain, true);
+    await openRoot(page, chain);
+    await row(page, 'mine').locator('button.efs-entry-open').click();
+    await expect(row(page, 'note.txt').locator('.efs-entry-whose')).toHaveCount(0);
+    await row(page, 'note.txt').locator('wa-button.efs-entry-remove').click();
+    // A plain removal first: #0's note.txt (in this view's Lens) would show through.
+    await expect(dialog(page)).toContainText(/After this, this view shows .+note\.txt\W+here/);
+    await dialog(page).locator('wa-button.efs-folder-block').click();
+    await expect(dialog(page)).toContainText(/Remove and block\W+note\.txt\W+in\W+mine/);
+    await expect(dialog(page).locator('.efs-folder-block-detail')).toContainText(
+      /Other people's files called\W+note\.txt\W+won't show here either/,
+    );
+    await expect(dialog(page).locator('.efs-folder-block-rule')).toContainText(
+      'other apps may still show those files',
+    );
+    await expect(dialog(page)).toContainText(/After this, nothing is called\W+note\.txt\W+here/);
+    chain.step('Remove, then Remove and block this name instead: planned as a block, said in full');
+
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'note.txt')).toHaveCount(0);
+    await expect(entries(page).locator('.efs-entries-removed')).toContainText(
+      /You removed and blocked\W+note\.txt\W+here/,
+    );
+    expect(sendRequests(chain)).toHaveLength(1);
+    await chain.idle(500);
+    chain.step("Send: neither note.txt shows here now (yours removed, #0's blocked)");
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('Restore unblocks a blocked name: listed as "Removed and blocked", the review says so, one send, yours is back', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-restore-unblock',
+    'mine/ by anvil #6 with note.txt, removed and blocked by #6 from Node.',
+  );
+  try {
+    await withMine(chain, false);
+    await chain.actAs?.(6, async ({ files, lens, writer, efs, save: done }) => {
+      const mine = {
+        kind: 'folder',
+        directory: chain.ids.mine,
+        owner: chain.ids.mineOwner,
+      } as unknown as import('@efs/sdk/files').FolderRef;
+      await done(
+        await files.planRemoveEntries(efs, writer, {
+          entries: [{ folder: mine, name: 'note.txt' }],
+          hide: true,
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await row(page, 'mine').locator('button.efs-entry-open').click();
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await entries(page).locator('wa-switch.efs-show-removed').click();
+    const removed = page.locator('efs-files-removed .efs-entry');
+    await expect(removed).toContainText('Removed and blocked');
+    await removed.locator('wa-button.efs-removed-restore').click();
+    await expect(dialog(page).locator('.efs-folder-unblock')).toContainText(
+      'This also unblocks the name here.',
+    );
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'note.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    await chain.idle(500);
+    chain.step('Show removed, Restore: it unblocks the name; note.txt is back');
   } finally {
     await chain.finish();
   }

@@ -120,6 +120,8 @@ export interface MoveItem {
 export interface RestoreItem {
   readonly entry: EntryRef;
   readonly via?: ViewPath;
+  /** It was removed and blocked (a mask): restoring it unblocks the name. */
+  readonly blocked?: boolean;
 }
 
 type Planned = Extract<AnyFolderPlan, { status: 'PLANNED' }>;
@@ -228,6 +230,27 @@ export class EfsFolderSave extends EfsElement {
     else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
     else if (ask.kind === 'move') this.#pickAgain();
     else void this.#plan(this.#request(ask, ''));
+  }
+
+  /**
+   * "Remove and block this name instead": the same removal planned as a mask (`hide: true`).
+   * Offered only to the place's owner (an app rule; the chain lets anyone mask their own
+   * position), judged by the account that planned. A save prepared but never sent is dropped.
+   */
+  async #blockInstead(s: Extract<Phase, { phase: 'review' | 'sending' }>): Promise<void> {
+    const ask = this.#ask.get();
+    if (ask?.kind !== 'remove') return;
+    if (s.sent?.sequenceId) await this.#drop(s.writer, s.sent.sequenceId);
+    const blocked = { ...ask, hide: true };
+    this.#ask.set(blocked);
+    await this.#plan(this.#request(blocked, ''));
+  }
+
+  /** Whether the account that planned owns the folder these entries are in. */
+  #ownsPlace(ask: FolderAsk, writer: EfsWriter): boolean {
+    if (ask.kind !== 'remove') return false;
+    const owner = ask.entries[0]?.entry.folder.owner;
+    return owner !== undefined && owner.toLowerCase() === writer.principal.toLowerCase();
   }
 
   /** Back to the Move picker (it opens where the entry is). */
@@ -678,13 +701,24 @@ export class EfsFolderSave extends EfsElement {
                   )}
                 </ul>
               </li>`
-            : html`<li>${t('files.remove.here', { name: e.entry.name })}</li>
+            : html`<li>
+                  ${t(ask.hide ? 'files.remove.blockHere' : 'files.remove.here', { name: e.entry.name })}
+                </li>
                 <li>${after(e.shownAfter, e.entry.name)}</li>`;
+        const many = r.entries.length > 1;
         return html`<ul class="efs-folder-clauses">
           ${items}
+          ${
+            ask.hide
+              ? html`<li class="efs-folder-block-detail">
+                    ${many ? t('files.remove.blockDetailMany') : t('files.remove.blockDetail', { name: e.entry.name })}
+                  </li>
+                  <li class="efs-folder-block-rule">${t('files.remove.blockAppRule')}</li>`
+              : nothing
+          }
           <li>${t('files.remove.stays')}</li>
           ${folders ? html`<li>${t('files.remove.folder')}</li>` : nothing}
-          <li>${t('files.remove.public')}</li>
+          <li>${t(ask.hide ? 'files.remove.publicBlocked' : 'files.remove.public')}</li>
         </ul>`;
       }
       case 'efs.restoreReview': {
@@ -700,11 +734,16 @@ export class EfsFolderSave extends EfsElement {
           ${instead(e, e.entry.name)}`;
         const e = r.entries[0];
         if (!e) return nothing;
+        const unblocks =
+          ask.kind === 'restore' && ask.entries.some((x) => x.blocked)
+            ? html`<p class="efs-folder-unblock">${t('files.restore.unblocks')}</p>`
+            : nothing;
         if (r.entries.length === 1) {
           return html`<p>${t('files.restore.review', { name: e.entry.name })}</p>
-            ${one(e)}`;
+            ${unblocks} ${one(e)}`;
         }
         return html`<p>${t('files.restore.reviewMany', { count: r.entries.length })}</p>
+          ${unblocks}
           <ul class="efs-folder-items">
             ${r.entries.map(
               (x) =>
@@ -740,8 +779,14 @@ export class EfsFolderSave extends EfsElement {
     const label =
       ask?.kind === 'remove'
         ? many
-          ? t('files.remove.titleMany', { count: ask.entries.length, folder: ask.folderName })
-          : t(title, { name: first?.name ?? '', folder: ask.folderName })
+          ? t(ask.hide ? 'files.remove.blockTitleMany' : 'files.remove.titleMany', {
+              count: ask.entries.length,
+              folder: ask.folderName,
+            })
+          : t(ask.hide ? 'files.remove.blockTitle' : title, {
+              name: first?.name ?? '',
+              folder: ask.folderName,
+            })
         : ask?.kind === 'move'
           ? many
             ? t('files.move.titleMany', { count: ask.entries.length })
@@ -939,7 +984,22 @@ export class EfsFolderSave extends EfsElement {
                       @click=${() => void this.#prepareAgain(s)}
                       >${t('review.prepareAgain')}</wa-button
                     >`
-                  : html`<wa-button
+                  : html`${
+                      isRemove &&
+                      ask.kind === 'remove' &&
+                      !ask.hide &&
+                      !sending &&
+                      this.#ownsPlace(ask, s.writer)
+                        ? html`<wa-button
+                            slot="footer"
+                            appearance="outlined"
+                            class="efs-folder-block"
+                            @click=${() => void this.#blockInstead(s)}
+                            >${t('files.remove.block')}</wa-button
+                          >`
+                        : nothing
+                    }
+                    <wa-button
                       slot="footer"
                       variant=${isRemove ? 'danger' : 'brand'}
                       class="efs-folder-send"
@@ -948,7 +1008,15 @@ export class EfsFolderSave extends EfsElement {
                       @click=${() => {
                         if (s.phase === 'review') void this.#send(s);
                       }}
-                      >${t(sent ? 'saves.sendAgain' : isRemove ? 'files.remove.yes' : 'review.send')}</wa-button
+                      >${t(
+                        sent
+                          ? 'saves.sendAgain'
+                          : isRemove
+                            ? ask.kind === 'remove' && ask.hide
+                              ? 'files.remove.blockYes'
+                              : 'files.remove.yes'
+                            : 'review.send',
+                      )}</wa-button
                     >`
             }`;
           break;

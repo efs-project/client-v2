@@ -11,10 +11,10 @@
   - New text file: named in the folder dialog, written in the editor's create mode (`apps/files/compose.ts`, `editor.ts`);
   - Upload, one file at a time, from the toolbar or a drop (`apps/files/upload-model.ts`);
   - multi-select: the person's own rows, Move or Remove as one review and one plan, with "Leave these out" (`listing.ts`, `folder-requests.ts` `withoutIndices`);
+  - "Remove and block this name" for the place's owner (judged by the account that planned), with Restore unblocking it;
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
   - uploading several files at once (one review for several creates needs a batch planner in the SDK);
-  - "Remove and block this name";
   - the lazy "also: …" marker.
 
 Draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first, labelled "recently added"; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.
@@ -208,7 +208,7 @@ Remove "pet.jpg" from 0x12…ab?
   - The next author's file with the same name, in the view's lens order, shows through, as in v1.
   - A mask would also have hidden the owner's `pet.jpg` from the person's view, and from everyone who trusts them.
 - **The second line comes from the review's `shownAfter`** (`{ author }` or null): "After this, this view shows <author>'s <name> here" or "After this, nothing is called <name> here in this view".
-- **Removing and blocking the name** is the masking form (`hide: true`).
+- **Removing and blocking the name** is the masking form (`hide: true`). Built: the remove review offers "Remove and block this name instead" when the account that planned owns the folder; it plans again with `hide: true`, and the review then says "Your <name> stops appearing here, and the name is blocked", what other people's same-named files do ("won't show here either, for anyone whose view puts you before them"), that it's this app's rule ("other apps may still show those files"), and `shownAfter`. The notice says "You removed and blocked <name>"; a blocked entry is listed as "Removed and blocked" under Show removed, and its Restore says "This also unblocks the name here".
   - It's offered only to the place's owner (the address, or the folder's creator), to stop someone squatting a name they removed.
   - It's labelled "Remove and block this name", with the line "Other people's files called <name> won't show here either, for anyone whose view puts you first".
   - The word "hide" is still never used (A7).
