@@ -61,6 +61,8 @@ export const entry: AppEntry = {
       defaultLayout: DEFAULT_LAYOUT,
       location: view(host, 'location'),
       navigation: view(host, 'navigation'),
+      // A file link opens on the Preview, also on a phone.
+      linkView: 'preview',
     };
   },
 };
