@@ -1,6 +1,6 @@
 # Offline, Service Worker and local storage: decision brief
 
-**Status:** proposed, for the integration owner (PM), 2026-11-25. **Decisions only.** No code until these are settled. Each question gives the facts, the options, a recommendation, who decides, and what is hard to change later.
+**Status:** questions 2, 3 and 5–8 decided by the integration owner (PM), 2026-11-25. Questions 1 and 4 are queued for James: they are needed only before a Service Worker ships, and the PM is holding them until after the tag discussion. Each question gives the facts, the options, a recommendation, the decision, and what is hard to change later.
 
 **Why now:** James's MVP brief (2026-11-24) names offline mode and fast loading as things that "will be hard to retrofit later". The init plan routes the Service Worker / PWA vertical ("stage R") as "unresolved, routed not decided".
 
@@ -10,22 +10,22 @@
 - **Accepted plans:** the init plan, `Reviews/2026-09-26-client-v2-initialization-plan/README.md` (IP); the M1 brief, `Reviews/2026-11-24-m1-integration-brief.md` (M1).
 - **This repo:** `docs/design/`.
 
-**Summary of recommendations:**
+**Summary:**
 
-| # | Question | Recommendation | Decides |
+| # | Question | Recommendation | Decided |
 |---|---|---|---|
-| 1 | Where does the app keep local state and run a Service Worker? | One stable origin for the official app. Everywhere else runs without a Service Worker. | **James** (which origin) |
-| 2 | Writes and settings on shared IPFS path gateways | Read-only there, now. Nothing is persisted, and Connect/Edit explain why. | PM |
-| 3 | Who selects the running client version? | A local selection record the person changes ("Update, then reload"). Never the Service Worker. | PM |
-| 4 | Where does rescue live? | A separately retained copy on a second origin, plus a downloadable zip. Never the primary origin's cache. | **James** (which origin); PM (shape) |
-| 5 | Persistent byte cache | Stays memory-only by default. An opt-in "Keep files I open on this device" on stable origins only. | PM |
-| 6 | What must work offline first? | The app opens; opted-in files read with their age shown; listings and writes say they need the network. No offline write queue. | PM |
-| 7 | Install metadata (`manifest.webmanifest`) | Add it now, inert, with a fixed `id`. | PM |
-| 8 | Storage ownership across tabs | Keep per-store CAS plus Web Locks. Add one lock so a version switch waits for unsettled saves. | PM |
+| 1 | Where does the app keep local state and run a Service Worker? | One stable origin for the official app. Everywhere else runs without a Service Worker. | **Queued for James** (which origin) |
+| 2 | Writes and settings on shared IPFS path gateways | Read-only there, now. Nothing is persisted, and Connect/Edit explain why. | PM, 2026-11-25: yes, as the next slice |
+| 3 | Who selects the running client version? | A local selection record the person changes ("Update, then reload"). Never the Service Worker. | PM, 2026-11-25: yes; AM's four fixtures before any Service Worker ships |
+| 4 | Where does rescue live? | A separately retained copy on a second origin, plus a downloadable zip. Never the primary origin's cache. | **Queued for James** (which origin); shape as recommended |
+| 5 | Persistent byte cache | Stays memory-only by default. An opt-in "Keep files I open on this device" on stable origins only. | PM, 2026-11-25: yes, with a cap, Clear and re-verify on read |
+| 6 | What must work offline first? | The app opens; opted-in files read with their age shown; listings and writes say they need the network. No offline write queue. | PM, 2026-11-25: yes |
+| 7 | Install metadata (`manifest.webmanifest`) | Add it now, inert, with a fixed `id`. | PM, 2026-11-25: commit it with `id` `./`, but link it only on the stable origin (see 7) |
+| 8 | Storage ownership across tabs | Keep per-store CAS plus Web Locks. Add one lock so a version switch waits for unsettled saves. | PM, 2026-11-25: yes |
 
 ---
 
-## 1. Which origin keeps local state and runs a Service Worker? (James)
+## 1. Which origin keeps local state and runs a Service Worker? (queued for James)
 
 **Facts:**
 - Browser storage, the Service Worker and grants all belong to an *origin*, and how the app is hosted decides what that origin is (AM, "Deployment profiles"):
@@ -46,6 +46,8 @@
 
 **Hard to change later:** yes. Users' settings, saves in progress and installs live on whatever origin they first use. Moving them is an export/import, never automatic.
 
+**Decision:** queued for James; needed only before a Service Worker ships. The PM holds it until after the tag discussion.
+
 ## 2. Writes and settings on shared IPFS path gateways (PM; recommended now, independent of offline)
 
 **Facts:**
@@ -64,6 +66,11 @@
 - The "isolated copy" link comes from config. The CID-subdomain form of the same CID is derivable.
 
 **Hard to change later:** the longer writes run on shared origins, the more journals and settings exist there that can't be trusted afterwards.
+
+**Decision (PM, 2026-11-25):** (a), as the next slice. On `/ipfs/<cid>/` or `/ipns/<name>/` path hosting, the app runs read-only:
+- settings last for the session only;
+- no journal is opened;
+- Connect and Edit explain why, with a link to the isolated copy (from config, or the CID-subdomain form).
 
 ## 3. Who selects the running client version? (PM)
 
@@ -87,7 +94,9 @@
 
 **Hard to change later:** yes. The selection record's format and the "never auto-switch" rule shape every update the person ever sees.
 
-## 4. Where does rescue live? (James for the origin; PM for the shape)
+**Decision (PM, 2026-11-25):** (a). The four fixtures above are written before any Service Worker ships.
+
+## 4. Where does rescue live? (origin queued for James; PM for the shape)
 
 **Facts:**
 - AM's "Independent rescue contract": rescue "is not merely the prior generation cached under the same origin". At least one exact release is retained outside the primary origin and update path.
@@ -105,6 +114,8 @@
 
 **Hard to change later:** moderate. The origin should exist before the first Service Worker ships, so the boot-loop fixture has somewhere to escape to.
 
+**Decision:** the origin is queued for James (with question 1). The shape is as recommended.
+
 ## 5. Persistent byte cache (PM)
 
 **Facts:**
@@ -121,6 +132,8 @@
 
 **Hard to change later:** low, as long as the default stays off.
 
+**Decision (PM, 2026-11-25):** as recommended: memory-only by default, and the opt-in only on the stable origin, with a cap, Clear and re-verify on read.
+
 ## 6. What must work offline first? (PM)
 
 **Facts:**
@@ -136,6 +149,8 @@
 
 **Hard to change later:** low, as long as the copy never claims freshness it didn't check.
 
+**Decision (PM, 2026-11-25):** as recommended.
+
 ## 7. Install metadata: `manifest.webmanifest` (PM)
 
 **Facts:**
@@ -148,6 +163,12 @@
 - An installed app's identity is its manifest `id`. Changing it later makes existing installs a different app.
 
 **Hard to change later:** the `id` is.
+
+**Decision (PM, 2026-11-25):** fix the `id` now, but don't link the manifest everywhere.
+- Chrome installs sites without a Service Worker. A manifest linked on every host would let people install from CID-subdomains, path gateways or loopback, each install tied to the wrong origin for good.
+- So `apps/web/public/manifest.webmanifest` is committed with **`"id": "./"`** (with `scope` and `start_url` also `./`, as in the init plan). On the stable origin, `./` resolves to the app's root there, and it never changes.
+- `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`.
+- `AGENTS.md`'s deferral line is updated to say exactly this. That lands with the path-gateway slice, which reads the same `delivery` config.
 
 ## 8. Storage ownership across tabs (PM)
 
@@ -163,6 +184,8 @@
 - Add one shared lock that a tab holds while it has an unsettled save. The version switch (3) and any storage migration wait for it.
 
 **Hard to change later:** low.
+
+**Decision (PM, 2026-11-25):** as recommended.
 
 ---
 
