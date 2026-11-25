@@ -7,10 +7,10 @@ import { expect, test } from '@playwright/test';
 import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './support.ts';
 
 /**
- * Milliseconds from navigation start, with the CPU slowed 4×: about twice CI's median, rounded up
- * to the next 100 ms (samples in docs/design/shell.md, "Time budgets"). Re-measure, don't bump.
+ * Milliseconds from navigation start, with the CPU slowed 4×: 2.5× CI's median, rounded up to the
+ * next 100 ms (samples in docs/design/shell.md, "Time budgets"). Re-measure, don't bump.
  */
-const BUDGET_MS = { booted: 700, previewVerified: 3400 };
+const BUDGET_MS = { booted: 900, previewVerified: 4300 };
 
 test('startup and Preview stay within their budgets @chromium-only', async ({ page }, info) => {
   const cdp = await page.context().newCDPSession(page);

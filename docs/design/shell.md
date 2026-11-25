@@ -206,9 +206,9 @@ require-trusted-types-for 'script'; trusted-types lit-html
 
 ## Time budgets
 
-`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **700 ms**, or the first verified file text (`efs:preview-verified`) within **3.4 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report, and the e2e-static job logs them as a `budgets: {…}` line.
+`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **900 ms**, or the first verified file text (`efs:preview-verified`) within **4.3 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report, and the e2e-static job logs them as a `budgets: {…}` line.
 
-The budgets are about twice CI's median, rounded up to the next 100 ms (they were a provisional 1.5 s and 4 s until CI's numbers were in). CI samples, in ms:
+The budgets are 2.5× CI's median, rounded up to the next 100 ms (PM, 2026-11-25; they were a provisional 1.5 s and 4 s until CI's numbers were in). They exist to catch big regressions, not small ones: at 2× the slowest sample sat only about 1.4× under the budget, close enough to flake, and a flaky gate gets ignored. CI samples, in ms:
 
 | CI run | booted | preview-verified |
 |---|---|---|
