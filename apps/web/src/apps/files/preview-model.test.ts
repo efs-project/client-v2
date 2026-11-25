@@ -67,6 +67,25 @@ describe('runPreview against the SDK fixtures', () => {
     });
   });
 
+  it("openObject's FILE with open UNKNOWN shows as couldn't-tell in the file's pane, read again next time", async () => {
+    // A file link whose kind was read but whose HEAD failed on every endpoint (sdk-v2 fd3db9b):
+    // the resolver's open is used as given, once; Try again reads the file afresh.
+    const r = reads(fixture('open-inline'), fixture('bytes-inline-verified'));
+    const states: PreviewState[] = [];
+    const signal = new AbortController().signal;
+    await runPreview(r, efs, target, signal, (s) => states.push(s), {
+      opened: fixture('open-unknown'),
+    });
+    expect(r.openFile).not.toHaveBeenCalled();
+    expect(states.at(-1)).toMatchObject({
+      phase: 'not-present',
+      open: { status: 'UNKNOWN', reason: { retry: 'transient' } },
+    });
+    await runPreview(r, efs, target, signal, (s) => states.push(s));
+    expect(r.openFile).toHaveBeenCalledTimes(1);
+    expect(states.at(-1)).toMatchObject({ phase: 'read', bytes: { grade: 'VERIFIED' } });
+  });
+
   it('shows web3:// contents verified through the RPC endpoints', async () => {
     const states = await run(reads(fixture('open-external'), fixture('bytes-web3-verified')));
     const last = states.at(-1);

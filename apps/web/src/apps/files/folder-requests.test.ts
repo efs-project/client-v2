@@ -30,6 +30,13 @@ describe('placesOf', () => {
       placesOf({ kind: 'rename', from: { folder, name: 'a.txt' }, to: 'b.txt' }).map((p) => p.name),
     ).toEqual(['a.txt', 'b.txt']);
   });
+  it('a move holds its old place and the same name at its new folder', () => {
+    const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
+    expect(placesOf({ kind: 'move', from: { folder, name: 'a.txt' }, to })).toEqual([
+      { folder: DIR.toLowerCase(), name: 'a.txt' },
+      { folder: to.directory.toLowerCase(), name: 'a.txt' },
+    ]);
+  });
   it('remove and restore hold every entry they name', () => {
     const entries = [
       { folder, name: 'a' },
@@ -68,6 +75,33 @@ describe('planRequest', () => {
       { moves: [{ from: { folder, name: 'a.txt' }, to: { name: 'b.txt' } }], lens },
       { signal },
     );
+  });
+
+  it('a move names the destination folder; via only when given (a folder move)', async () => {
+    const p = planners();
+    const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
+    const via = { from: folder, segments: ['team', 'plans'] };
+    const from = { folder, name: 'a' };
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'move', from, to },
+      lens,
+      signal,
+    );
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'move', from, to, via },
+      lens,
+      signal,
+    );
+    expect(p.planMoveEntries.mock.calls.map((c) => (c as unknown[])[2])).toEqual([
+      { moves: [{ from, to: { folder: to } }], lens },
+      { moves: [{ from, to: { folder: to, via } }], lens },
+    ]);
   });
 
   it('remove releases unless asked to hide; hide is passed only when true', async () => {

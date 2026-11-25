@@ -3,9 +3,11 @@
 //
 // openObject decides, first and alone: the kind is a property of the id (a directory record is a
 // folder, whatever else exists), never inferred from whether a HEAD happens to read PRESENT. For
-// a file it also returns the file opened under the Lens (`open`), which the Preview reuses, so a
-// file link costs one batched read more than before and nothing else. Until it answers, nothing
-// reads the id as a missing file, so a folder's link never shows "Confirmed not present".
+// a file it also returns the file opened under the Lens (`open`), which the Preview reuses once;
+// the kind and the HEAD are read in one batch, so a file link costs what opening the file does.
+// A FILE whose `open` is UNKNOWN (its HEAD failed on every endpoint) shows in the file's pane with
+// Try again, which opens it afresh. Until it answers, nothing reads the id as a missing file, so
+// a folder's link never shows "Confirmed not present".
 //
 // The kind always answers for the link in the URL and the session now: while a new link (or the
 // same link in a new session) resolves it is pending, or a folder already known in this tab,

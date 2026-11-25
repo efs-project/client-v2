@@ -32,6 +32,8 @@ import {
   type FolderReads,
   type ListingState,
   listingNotice,
+  placeLens,
+  rootFolder,
   startListing,
 } from './folder-model.ts';
 import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
@@ -73,12 +75,6 @@ interface Removal {
   readonly sequenceId: string;
   readonly entry: EntryRef;
   readonly isFolder: boolean;
-}
-
-/** The realm's shared root folder, from the pinned deployment: the stand-in start. */
-export function rootFolder(efs: Efs): FolderRef {
-  const root = efs.deployment.root;
-  return { kind: 'folder', directory: root.directoryRecordId, owner: root.principalId };
 }
 
 export class EfsFilesListing extends EfsElement {
@@ -287,12 +283,7 @@ export class EfsFilesListing extends EfsElement {
   }
 
   #lens(efs: Efs, folder: FolderRef): Lens {
-    const reader = this.#reader();
-    return efs.lens.place({
-      ...(reader ? { reader: reader as never } : {}),
-      ...(folder.owner ? { owner: folder.owner } : {}),
-      base: efs.lens.default,
-    });
+    return placeLens(efs, folder, this.#reader());
   }
 
   #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): Promise<void> {
@@ -407,6 +398,22 @@ export class EfsFilesListing extends EfsElement {
             <wa-button
               size="s"
               appearance="plain"
+              class="efs-entry-move"
+              ?disabled=${saving}
+              @click=${() =>
+                this.#ask({
+                  kind: 'move',
+                  entry,
+                  ...(row.kind === 'folder' && row.target?.kind === 'folder'
+                    ? { moving: row.target }
+                    : {}),
+                  start: this.nav.path.get(),
+                })}
+              >${appIcon('file-export', t('files.move.button', { name: row.name }))}</wa-button
+            >
+            <wa-button
+              size="s"
+              appearance="plain"
               class="efs-entry-remove"
               ?disabled=${saving}
               @click=${() =>
@@ -421,7 +428,7 @@ export class EfsFilesListing extends EfsElement {
             >
           </span>`
         : nothing;
-    const name = html`<span class="efs-entry-name" translate="no">${row.name}</span>`;
+    const name = html`<span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>`;
     const target = row.target;
     let open: unknown;
     if (row.kind === 'folder' && target?.kind === 'folder') {
@@ -566,7 +573,7 @@ export class EfsFilesListing extends EfsElement {
                 (c) => html`<li class="efs-entry efs-entry-creating" data-kind=${c.kind}>
                   <span class="efs-entry-open"
                     >${appIcon(c.kind)}
-                    <span class="efs-entry-name" translate="no">${c.name}</span></span
+                    <span class="efs-entry-name" translate="no" dir="auto">${c.name}</span></span
                   >
                   <span class="efs-entry-meta efs-quiet">
                     <span>${t(KIND_LABEL[c.kind])}</span>

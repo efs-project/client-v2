@@ -24,6 +24,7 @@ export const APP_ICONS = [
   'circle-info',
   'download',
   'file',
+  'file-export',
   'folder',
   'gear',
   'network-wired',

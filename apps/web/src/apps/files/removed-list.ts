@@ -73,7 +73,10 @@ export class EfsFilesRemoved extends EfsElement {
     const key = base ? `${base}|${this.generation}` : undefined;
     if (key === this.#loaded) return;
     this.#loaded = key;
-    if (base) void this.#load(undefined, base === this.#shown);
+    // After a microtask: a signal write during Lit's update (inside SignalWatcher's computed)
+    // would not render again.
+    const keep = base === this.#shown;
+    if (base) queueMicrotask(() => void this.#load(undefined, keep));
     this.#shown = base;
   }
 
@@ -114,7 +117,7 @@ export class EfsFilesRemoved extends EfsElement {
     return html`<li class="efs-entry efs-entry-removed" data-state=${row.state}>
       <span class="efs-entry-open">
         ${appIcon(row.target.kind === 'folder' ? 'folder' : 'file')}
-        <span class="efs-entry-name" translate="no">${row.name}</span>
+        <span class="efs-entry-name" translate="no" dir="auto">${row.name}</span>
       </span>
       <span class="efs-entry-meta efs-quiet">
         ${label ? t(label) : html`<code translate="no">${row.state}</code>`}

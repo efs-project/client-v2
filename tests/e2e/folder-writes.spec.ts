@@ -392,3 +392,113 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
     await chain.finish();
   }
 });
+
+/** inbox/ and archive/ by anvil #6 at the root; note.txt and sub/ inside inbox/. */
+async function withInbox(chain: TestChain): Promise<void> {
+  await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+    const folderIn = async (parent: import('@efs/sdk/files').FolderRef, name: string) =>
+      (
+        (await done(await files.planCreateFolder(efs, writer, { folder: parent, name, lens }))) as {
+          created: import('@efs/sdk/files').FolderRef;
+        }
+      ).created;
+    const inbox = await folderIn(root, 'inbox');
+    await folderIn(root, 'archive');
+    await done(
+      await files.planCreateFile(efs, writer, {
+        folder: inbox,
+        name: 'note.txt',
+        content: new TextEncoder().encode('note\n'),
+        lens,
+      }),
+    );
+    await folderIn(inbox, 'sub');
+  });
+}
+
+const picker = (page: Page) => page.locator('efs-files-folder-picker');
+const pickerRow = (page: Page, name: string) =>
+  picker(page).locator('.efs-entry', { has: page.locator('.efs-entry-name', { hasText: name }) });
+const moveHere = (page: Page) => dialog(page).locator('wa-button.efs-move-here');
+
+test('Move a file: the picker opens where it is, walks by names, and it lands in the folder picked', async ({
+  page,
+}) => {
+  const chain = await testChain('client-folder-move-file', 'inbox/{note.txt, sub/} and archive/.');
+  try {
+    await withInbox(chain);
+    await openRoot(page, chain);
+    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await expect(row(page, 'note.txt')).toBeVisible();
+    await row(page, 'note.txt').locator('wa-button.efs-entry-move').click();
+    await expect(dialog(page)).toContainText(/Move\W+note\.txt\W+to…/);
+    // It opens in inbox/, where note.txt already is: not a destination.
+    await expect(pickerRow(page, 'sub')).toBeVisible();
+    await expect(dialog(page)).toContainText("It's already in this folder.");
+    await expect(moveHere(page)).toHaveAttribute('disabled', '');
+    chain.step('Move note.txt: the picker opens in inbox/, where it already is');
+
+    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await expect(pickerRow(page, 'archive')).toBeVisible();
+    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await expect(picker(page)).toContainText('No folders in here.');
+    await expect(moveHere(page)).not.toHaveAttribute('disabled');
+    chain.step('Up to the root, into archive/: no folders in it, and it can take note.txt');
+
+    await moveHere(page).click();
+    await expect(dialog(page)).toContainText(/Move\W+note\.txt\W+to\W+archive/);
+    await expect(dialog(page)).toContainText(/Your entry appears in\W+archive/);
+    await expect(dialog(page)).not.toContainText('Checked under this lens');
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'note.txt')).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Review and send: note.txt leaves inbox/');
+
+    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await expect(row(page, 'archive')).toBeVisible();
+    await row(page, 'archive').locator('button.efs-entry-open').click();
+    await expect(row(page, 'note.txt').locator('.efs-entry-whose')).toHaveCount(0);
+    await expect(row(page, 'note.txt')).toBeVisible();
+    chain.step('archive/ lists note.txt');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("Move a folder: it can't be opened in the picker, its path travels with it, and the review says how far that was checked", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-folder-move-folder',
+    'inbox/{note.txt, sub/} and archive/.',
+  );
+  try {
+    await withInbox(chain);
+    await openRoot(page, chain);
+    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await expect(row(page, 'sub')).toBeVisible();
+    await row(page, 'sub').locator('wa-button.efs-entry-move').click();
+    await expect(pickerRow(page, 'sub')).toContainText("This is the folder you're moving.");
+    await expect(pickerRow(page, 'sub').locator('button.efs-entry-open')).toBeDisabled();
+    chain.step('Move sub/: in the picker, sub/ itself is shown but not opened');
+
+    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await expect(pickerRow(page, 'archive')).toBeVisible();
+    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await expect(picker(page)).toContainText('No folders in here.');
+    await moveHere(page).click();
+    await expect(dialog(page)).toContainText(/Move\W+sub\W+to\W+archive/);
+    await expect(dialog(page)).toContainText(
+      "Checked under this lens: the destination isn't inside this folder.",
+    );
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'sub')).toHaveCount(0);
+    await expect(row(page, 'note.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Into archive/, with its path: sub/ leaves inbox/');
+  } finally {
+    await chain.finish();
+  }
+});

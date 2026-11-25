@@ -7,9 +7,9 @@
   - per-(folder, name) holds;
   - New folder, Rename, and Remove (a release), with Restore offered right after;
   - "Show removed": the person's own removed entries in the folder on screen, each with Restore (`apps/files/removed-list.ts`);
+  - Move, with the folder picker and `via` (`apps/files/folder-picker.ts`);
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
-  - Move, with the picker and `via`;
   - New text file and Upload;
   - "Remove and block this name";
   - multi-select batches;
@@ -164,7 +164,7 @@ They are one SDK operation: one atomic change of placement. It releases the entr
   - The review says: "Rename "notes.txt" to "plans.txt". Links to this file keep working. Links that use its old path won't find it there."
   - **It also says what the old name shows afterwards,** from the review's `shownAfter`: "After this, "notes.txt" here shows Alice's file" or "…shows nothing".
 - **Move.**
-  - It starts from "Move to…" in the ⋯ menu, which opens a folder picker (the tree, folders only).
+  - It starts from "Move" on the entry's row, which opens a folder picker (folders only, each listed through its place Lens). It opens at the folder the entry is in when the trail's names are known, else at the root, and walks down by names, so the destination's path is always known. "Move here" is off where the entry already is.
   - The person can move an entry into any folder, including one another author made. The review says who will see it there: "Your entry appears in /team/plans for you, for anyone whose lens names you, and for everyone with public on."
   - **A folder can't be moved into itself or below itself.**
     - The picker greys those out, and the SDK refuses them too.
