@@ -1,6 +1,6 @@
 # Markdown READMEs in the Overview pane: options
 
-**Status:** proposed, for the integration owner (PM), 2026-11-25. **A decision only; no code.**
+**Status:** decided by the integration owner (PM), 2026-11-25: **(c), then (a), with no new library.** No code until listings land.
 
 **Context:**
 - The File Browser's Overview pane says "When this location has a README, it will appear here."
@@ -54,3 +54,9 @@ Two families, sized approximately from their published bundle sizes (to be measu
 **Who decides:**
 - (a) or (c): the PM.
 - (b): James, because it's a dependency-policy call.
+
+## Decision (PM, 2026-11-25)
+
+- **(c) when listings land:** the README shows as plain text.
+- **Then (a):** an in-house subset rendered straight to Lit templates. No HTML strings, no new Trusted Types policy, no CSP change.
+- **(b) stays off the table** unless (a) proves too costly. If it does, it goes to James as a dependency decision.
