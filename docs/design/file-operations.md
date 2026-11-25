@@ -191,7 +191,7 @@ They are one SDK operation: one atomic change of placement. It releases the entr
 - **Several at once.**
   - Selecting several entries and choosing Move, or Remove, makes one review and one prompt (A1: "reorganizing 50 items is one ceremony"). `planMoveEntries` and `planRemoveEntries` take the whole selection.
   - The SDK splits the batch by gas, and a partial batch uses the banner's existing Continue / Stop.
-    - Since sdk-v2 db9dc26 each part counts the kernel's per-bind index floor, so no part goes over the 2^24 cap (batches of about 40 or more were refused on every try before). 64 files measured on the fixture chain (`folder-writes.spec.ts`, live only): Move takes 5 parts, Remove 2. The floor is a safe upper bound until the tag release, so the counts shrink then.
+    - Since sdk-v2 db9dc26 each part counts the kernel's per-bind index floor, so no part goes over the 2^24 cap (batches of about 40 or more were refused on every try before). The live-only 64-file case (`folder-writes.spec.ts`) asserts completion, never part counts, and logs them (`select-64`). On db9dc26 Move took 5 parts and Remove 2. The tag release (a7b2471) reserves 7,400 gas per bind instead of 120,000: measured there, Move takes 3 parts and Remove 1.
   - **A batch is all or nothing at plan time.** If any item is refused, nothing is planned. The answer is REFUSED, with each refused item's `index` and `code`.
   - The dialog then lists those items with their reasons, and offers "Leave these out and review the rest", which plans again without them. It never sends a part of the selection silently.
 
@@ -232,6 +232,12 @@ Remove "pet.jpg" from 0x12…ab?
   - **Later,** "Show removed" (a switch in the listing's toolbar, with a connected account) lists the person's own removed entries in the folder on screen, each with Restore and its state ("Removed", or "Removed and blocked"). It reads `listRemoved` for the connected account, never the Lens: it shows what *you* removed, not what anyone hid (L5: shadowing is inspectable).
     - **Nothing is said to be empty unless the whole list was read** (COMPLETE): "You haven't removed anything here." An empty page with more to read says "None found yet", with Keep looking. A list the network can't vouch for says so. Anything but PRESENT is "can't be listed right now", with Try again, never "nothing removed". Coverage only gets weaker across pages, as in the listing (`removed-model.ts`).
     - **Row labels come from a table keyed by the row's state,** so the tag release's states (you hid someone else's entry: Unhide) slot in without reshaping the row. A state the client doesn't know shows raw.
+    - **What a row offers follows its history** (`last`, sdk-v2 a7b2471):
+      - KNOWN: Restore puts back its last target, as before.
+      - NEVER_BOUND: a block with nothing of yours before it, so someone else's entry at that name is hidden. The row says "You blocked someone else's entry at this name" and offers **Unblock** (`planUnhideEntries`, which releases your block). The review says what shows at the name afterwards. The word "hide" is still never used (A7).
+      - UNKNOWN: the history is too deep to read, for that row only. The row says so and offers nothing; it is never a guess.
+      - Restore's refusals NEVER_BOUND and HISTORY_UNKNOWN, and Unblock's NOT_HIDDEN, each have their own words.
+      - Until the SDK's save record names an unhide's effect (asked for), the listing re-reads only after an Unblock sent from this tab, and the save hold treats it as touching everything (fail-closed).
     - **It reads again** whenever a save touching the folder lands, keeping its rows shown meanwhile.
   - **Restoring a folder needs the path to it** (`via`: from the realm's root, by the names on the trail), so the SDK can check it never lands inside itself. In a folder opened by its link the trail has no names: a folder's Restore is disabled there, with "Open this folder from the root to restore a folder here." A file restores anywhere. The SDK checks the path against the chain, so a stale trail is refused, never trusted.
   - **The review says where else the target is placed now** (`alsoPlaced`, by anyone): "It's in N other places now too; restoring puts it here as well." Nothing is said when the index can't vouch for the count (never "0").

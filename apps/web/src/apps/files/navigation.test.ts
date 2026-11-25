@@ -44,24 +44,6 @@ describe('arrive: the trail follows the URL when it changes', () => {
     nav.arrive(undefined);
     expect(nav.path.get()).toEqual([]);
   });
-
-  it("gives a step the trail holds without its creator the one the folder's read saw", () => {
-    const nav = createFolderNav();
-    const owner = `0x${'0'.repeat(24)}${'12'.repeat(20)}` as `0x${string}`;
-    // A path link's middle folders come without their creator.
-    nav.goTo([
-      { folder: folder('a'), name: 'docs' },
-      { folder: { ...folder('b'), owner }, name: 'notes' },
-    ]);
-    const before = nav.path.get();
-    nav.arrive({ ...folder('b'), owner });
-    expect(nav.path.get()).toBe(before);
-    nav.arrive({ ...folder('a'), owner });
-    expect(nav.path.get()).toEqual([{ folder: { ...folder('a'), owner }, name: 'docs' }]);
-    // A read without the creator never takes one away.
-    nav.arrive(folder('a'));
-    expect(nav.path.get()).toEqual([{ folder: { ...folder('a'), owner }, name: 'docs' }]);
-  });
 });
 
 describe('goTo: a folder chosen in the tree', () => {

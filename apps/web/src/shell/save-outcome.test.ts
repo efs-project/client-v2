@@ -52,6 +52,13 @@ const R = {
     revert: { selector: '0xdeadbeef' },
   },
   staleNoRevert: { code: 'STALE', retry: 'after-replan', detail: 'revert E_CAS (text only)' },
+  // The tag release: a HEAD at another file's revision is refused at write time (the Files
+  // validator's code 8, wrapped by the index call).
+  headLaw: {
+    code: 'STALE',
+    retry: 'after-replan',
+    revert: { selector: '0x94b0e1fa', error: 'E_INDEX_CALL' },
+  },
   overCap: { code: 'OVER_TX_GAS_CAP', retry: 'after-replan' },
   limit: { code: 'LIMIT_EXCEEDED', retry: 'after-replan' },
   journalTransient: { code: 'JOURNAL_UNAVAILABLE', retry: 'transient' },
@@ -162,6 +169,10 @@ describe('saveOutcome', () => {
     expect(saveOutcome(p({ reason: reason(R.staleUnknownSelector) }))).toEqual({ kind: 'stale' });
     expect(saveOutcome(p({ reason: reason(R.staleNoRevert) }))).toEqual({ kind: 'stale' });
     expect(saveMessage({ kind: 'stale', error: 'E_DEADLINE' })).toBe('save.refusedByLedger');
+    // The HEAD law refused at write time: the network refused it, named; never "changed".
+    const headLaw = saveOutcome(p({ reason: reason(R.headLaw) }));
+    expect(headLaw).toEqual({ kind: 'stale', error: 'E_INDEX_CALL' });
+    expect(saveMessage(headLaw)).toBe('save.refusedByLedger');
     // A stale plan in the middle of a save can't be continued.
     const stuck = saveOutcome(
       p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason(R.staleOther) }),

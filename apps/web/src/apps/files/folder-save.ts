@@ -69,6 +69,7 @@ const loadPlanners = async (): Promise<FolderPlanners> => {
     planMoveEntries: files.planMoveEntries,
     planRemoveEntries: files.planRemoveEntries,
     planRestoreEntries: files.planRestoreEntries,
+    planUnhideEntries: files.planUnhideEntries,
   };
 };
 
@@ -106,7 +107,9 @@ export type FolderAsk =
   | {
       readonly kind: 'restore';
       readonly entries: readonly RestoreItem[];
-    };
+    }
+  /** Unblock the person's own lone blocks (NEVER_BOUND rows in "Show removed"). */
+  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] };
 
 /** An entry the person picked: what it is, and whether it's a folder. */
 export interface SelectedEntry {
@@ -286,7 +289,13 @@ export class EfsFolderSave extends EfsElement {
    */
   #dropRefused(indices: readonly number[]): void {
     const ask = this.#ask.get();
-    if (ask?.kind !== 'move' && ask?.kind !== 'remove' && ask?.kind !== 'restore') return;
+    if (
+      ask?.kind !== 'move' &&
+      ask?.kind !== 'remove' &&
+      ask?.kind !== 'restore' &&
+      ask?.kind !== 'unhide'
+    )
+      return;
     const drop = new Set(indices);
     const entries = ask.entries.filter((_, i) => !drop.has(i));
     this.#ask.set({ ...ask, entries } as FolderAsk);
@@ -339,6 +348,8 @@ export class EfsFolderSave extends EfsElement {
           kind: 'restore',
           entries: ask.entries.map((e) => ({ ...e.entry, ...(e.via ? { via: e.via } : {}) })),
         };
+      case 'unhide':
+        return { kind: 'unhide', entries: ask.entries };
     }
   }
 
@@ -787,6 +798,24 @@ export class EfsFolderSave extends EfsElement {
             )}
           </ul>`;
       }
+      case 'efs.unhideReview': {
+        // Your block goes; what shows at the name afterwards is the next author's, or nothing.
+        const e = r.entries[0];
+        if (!e) return nothing;
+        if (r.entries.length === 1) {
+          return html`<p>${t('files.unhide.review', { name: e.entry.name })}</p>
+            ${after(e.shownAfter, e.entry.name)}`;
+        }
+        return html`<p>${t('files.unhide.reviewMany', { count: r.entries.length })}</p>
+          <ul class="efs-folder-items">
+            ${r.entries.map(
+              (x) => html`<li>
+                <span translate="no" dir="auto">${x.entry.name}</span>
+                ${after(x.shownAfter, x.entry.name)}
+              </li>`,
+            )}
+          </ul>`;
+      }
     }
   }
 
@@ -808,7 +837,9 @@ export class EfsFolderSave extends EfsElement {
                 ? 'files.move.title'
                 : ask?.kind === 'restore'
                   ? 'files.restore'
-                  : 'files.remove.title';
+                  : ask?.kind === 'unhide'
+                    ? 'files.unhide.title'
+                    : 'files.remove.title';
     const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
     const first =
       ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
@@ -1051,7 +1082,9 @@ export class EfsFolderSave extends EfsElement {
                             ? ask.kind === 'remove' && ask.hide
                               ? 'files.remove.blockYes'
                               : 'files.remove.yes'
-                            : 'review.send',
+                            : ask.kind === 'unhide'
+                              ? 'files.unhide.yes'
+                              : 'review.send',
                       )}</wa-button
                     >`
             }`;

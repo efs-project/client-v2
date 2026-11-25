@@ -1075,6 +1075,62 @@ test('Restore unblocks a blocked name: listed as "Removed and blocked", the revi
   }
 });
 
+test('a block with nothing of yours under it (NEVER_BOUND) offers Unblock, not Restore; Unblock shows the other entry again', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-folder-unblock',
+    'theirs.txt at the root by anvil #0 (the owner); anvil #6 blocks that name with nothing of its own there (a lone block, planLoneHide).',
+  );
+  const listed = (name: string) =>
+    entries(page).locator('.efs-entry:not(.efs-entry-removed)', {
+      has: page.locator('.efs-entry-name', { hasText: name }),
+    });
+  try {
+    await fileAtRoot(chain, 0, 'theirs.txt', "the owner's\n");
+    await chain.actAs?.(6, async ({ root, lens, writer, efs, save: done }) => {
+      const { planLoneHide } = await import('@efs/sdk/testing');
+      await done(await planLoneHide(efs, writer, { folder: root, name: 'theirs.txt', lens }));
+    });
+    await openRoot(page, chain);
+    // You first: your block hides the owner's theirs.txt from this view.
+    await expect(listed('theirs.txt')).toHaveCount(0);
+    await entries(page).locator('wa-switch.efs-show-removed').click();
+    const removed = page.locator('efs-files-removed .efs-entry', {
+      has: page.locator('.efs-entry-name', { hasText: 'theirs.txt' }),
+    });
+    await expect(removed).toHaveAttribute('data-last', 'NEVER_BOUND');
+    await expect(removed).toContainText("You blocked someone else's entry at this name");
+    await expect(removed.locator('wa-button.efs-removed-restore')).toHaveCount(0);
+    await expect(removed.locator('wa-button.efs-removed-unhide')).toHaveText(
+      /Unblock\W+theirs\.txt/,
+    );
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-listing')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step('Show removed: your lone block is listed with Unblock, never Restore');
+
+    await removed.locator('wa-button.efs-removed-unhide').click();
+    await expect(dialog(page)).toContainText(/Unblock\W+theirs\.txt\W+here/);
+    // What shows at the name afterwards: the owner's entry.
+    await expect(dialog(page).locator('.efs-folder-after')).toContainText(/theirs\.txt/);
+    await expect(send(page)).toHaveText('Unblock');
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(listed('theirs.txt')).toBeVisible();
+    await expect(page.locator('efs-files-removed')).toContainText(
+      "You haven't removed anything here.",
+    );
+    expect(sendRequests(chain)).toHaveLength(1);
+    await chain.idle(500);
+    chain.step("Unblock: one send; the owner's theirs.txt shows here again");
+  } finally {
+    await chain.finish();
+  }
+});
+
 /** Lists the whole folder on screen: "Keep looking" until there is no next page. */
 async function listAll(page: Page, first: string): Promise<void> {
   await expect(row(page, first)).toBeVisible();

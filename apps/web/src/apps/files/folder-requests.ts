@@ -15,6 +15,7 @@ export type FolderPlanners = Pick<
   | 'planMoveEntries'
   | 'planRemoveEntries'
   | 'planRestoreEntries'
+  | 'planUnhideEntries'
 >;
 
 export type FolderRequest =
@@ -44,7 +45,12 @@ export type FolderRequest =
       /** Masks the name (only offered to the folder's owner); a release otherwise. */
       readonly hide: boolean;
     }
-  | { readonly kind: 'restore'; readonly entries: readonly RestoreEntry[] };
+  | { readonly kind: 'restore'; readonly entries: readonly RestoreEntry[] }
+  /**
+   * Unblock: release the person's own blocks at these names (a lone block of someone else's
+   * entry, NEVER_BOUND), so the Lens shows the next author's entry there again.
+   */
+  | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] };
 
 /**
  * The path to a folder from the start of the person's view (the realm's root, by names): what a
@@ -76,6 +82,7 @@ export function placesOf(r: FolderRequest): readonly Place[] {
       return r.moves.flatMap((m) => [place(m.from.folder, m.from.name), place(r.to, m.from.name)]);
     case 'remove':
     case 'restore':
+    case 'unhide':
       return r.entries.map((e) => place(e.folder, e.name));
   }
 }
@@ -86,6 +93,7 @@ export type AnyFolderPlan = FolderPlanResult<
   | import('@efs/sdk/files').MoveReview
   | import('@efs/sdk/files').RemoveReview
   | import('@efs/sdk/files').RestoreReview
+  | import('@efs/sdk/files').UnhideReview
 >;
 
 /** Plans `r` through the SDK, in the Lens the person sees the folder through. */
@@ -137,6 +145,8 @@ export function planRequest(
       );
     case 'restore':
       return planners.planRestoreEntries(efs, writer, { entries: r.entries, lens }, o);
+    case 'unhide':
+      return planners.planUnhideEntries(efs, writer, { entries: r.entries, lens }, o);
   }
 }
 
@@ -163,6 +173,10 @@ export function withoutIndices(
       const entries = keep(r.entries);
       return entries.length > 0 ? { ...r, entries } : undefined;
     }
+    case 'unhide': {
+      const entries = keep(r.entries);
+      return entries.length > 0 ? { ...r, entries } : undefined;
+    }
     default:
       return undefined;
   }
@@ -175,6 +189,9 @@ const REFUSAL: Readonly<Record<string, MessageId>> = {
   ENTRY_ABSENT: 'files.refused.entryAbsent',
   NOT_REMOVED: 'files.refused.notRemoved',
   PATH_CHANGED: 'files.refused.pathChanged',
+  NEVER_BOUND: 'files.refused.neverBound',
+  HISTORY_UNKNOWN: 'files.refused.historyUnknown',
+  NOT_HIDDEN: 'files.refused.notHidden',
 };
 
 /** The words for a refusal code; an unknown code is shown raw, never as success. */
