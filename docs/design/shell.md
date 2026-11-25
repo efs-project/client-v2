@@ -130,7 +130,7 @@ Browser storage belongs to an origin, and how a copy is hosted decides what its 
 
 - **Detection is the address alone** (`platform/hosting.ts`), before any storage is opened.
 - **The isolated copy** is the operator's `delivery.isolatedCopy` in `efs.config.json`. Otherwise it is derived: the subdomain-gateway form of the same CID (CIDv1 base32 only) or IPNS name, never on an IP-address host. With neither, the notice says to open the app from its own address.
-- **Install metadata:** `manifest.webmanifest` (fixed `id` `./`) is linked only when `delivery.stableOrigin` names this origin. The offline/Service Worker profile will run only there (pending James's choice of origin).
+- **Install metadata:** `manifest.webmanifest` (fixed `id` `/`; `start_url` and `scope` `./`) is linked only when `delivery.stableOrigin` names this origin. The offline/Service Worker profile will run only there (pending James's choice of origin).
 
 ## Network configuration
 

@@ -106,7 +106,7 @@ test('this origin named as the stable origin: the manifest is linked, with the f
     const href = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.href ?? '';
     return (await fetch(href)).json();
   });
-  expect(body).toMatchObject({ id: './', scope: './', start_url: './' });
+  expect(body).toMatchObject({ id: '/', scope: './', start_url: './' });
 });
 
 test('another origin named as the stable origin: no manifest here', async ({ page }) => {

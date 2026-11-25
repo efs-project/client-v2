@@ -56,7 +56,7 @@ Evidence goes to `apps/web/dist-evidence/`.
 
 - Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the PR.
 - Don't add a Service Worker, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred (`docs/design/offline-brief.md`). Remote requests go only through the SDK to endpoints the user can see in Settings.
-- `manifest.webmanifest` is committed with its fixed `id` (`./`), but `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`: an install anywhere else would be tied to the wrong origin for good. Don't link it unconditionally.
+- `manifest.webmanifest` is committed with its fixed `id` (`/`, the origin root, so moving the app within its origin never orphans installs; `start_url` and `scope` stay `./`), but `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`: an install anywhere else would be tied to the wrong origin for good. Don't link it unconditionally.
 - On a shared IPFS path gateway (`/ipfs/<cid>/…`, `/ipns/<name>/…`) the app is read-only: nothing is stored (settings last for the tab), no journal is opened, no wallet is touched. Keep it that way for anything new that stores or saves.
 - Don't widen the CSP. If something needs it, say why in the PR (`docs/design/shell.md` lists every exception and its reason).
 - Don't guess a dev server URL or kill processes by port: `pnpm dev:status` gives this worktree's URLs, and `pnpm dev:stop` stops only what this worktree started.

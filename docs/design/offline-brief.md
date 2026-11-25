@@ -20,7 +20,7 @@
 | 4 | Where does rescue live? | A separately retained copy on a second origin, plus a downloadable zip. Never the primary origin's cache. | **Queued for James** (which origin); shape as recommended |
 | 5 | Persistent byte cache | Stays memory-only by default. An opt-in "Keep files I open on this device" on stable origins only. | PM, 2026-11-25: yes, with a cap, Clear and re-verify on read |
 | 6 | What must work offline first? | The app opens; opted-in files read with their age shown; listings and writes say they need the network. No offline write queue. | PM, 2026-11-25: yes |
-| 7 | Install metadata (`manifest.webmanifest`) | Add it now, inert, with a fixed `id`. | PM, 2026-11-25: commit it with `id` `./`, but link it only on the stable origin (see 7) |
+| 7 | Install metadata (`manifest.webmanifest`) | Add it now, inert, with a fixed `id`. | PM, 2026-11-25: commit it with `id` `/`, but link it only on the stable origin (see 7) |
 | 8 | Storage ownership across tabs | Keep per-store CAS plus Web Locks. Add one lock so a version switch waits for unsettled saves. | PM, 2026-11-25: yes |
 
 ---
@@ -166,7 +166,8 @@
 
 **Decision (PM, 2026-11-25):** fix the `id` now, but don't link the manifest everywhere.
 - Chrome installs sites without a Service Worker. A manifest linked on every host would let people install from CID-subdomains, path gateways or loopback, each install tied to the wrong origin for good.
-- So `apps/web/public/manifest.webmanifest` is committed with **`"id": "./"`** (with `scope` and `start_url` also `./`, as in the init plan). On the stable origin, `./` resolves to the app's root there, and it never changes.
+- So `apps/web/public/manifest.webmanifest` is committed with **`"id": "/"`**, while `scope` and `start_url` stay `./` (so path-prefix hosting, `AGENTS.md` rule 8, still works).
+- Why `/` and not `./`: the `id` is resolved against `start_url`. With `./`, the app's identity would be the directory it's served from, so moving it on the stable origin (from `/` to `/app/`, or back) would turn every existing install into a different app. `/` is the origin root wherever the app lives, and is same-origin with any `start_url`.
 - `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`.
 - `AGENTS.md`'s deferral line is updated to say exactly this. That lands with the path-gateway slice, which reads the same `delivery` config.
 
