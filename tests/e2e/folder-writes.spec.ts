@@ -767,3 +767,131 @@ test('Upload: a file over the limit says how large a file can be saved here, wit
     await chain.finish();
   }
 });
+
+const select = (page: Page, name: string) => row(page, name).locator('input.efs-entry-select');
+const selection = (page: Page) => entries(page).locator('.efs-selection');
+
+test('Select a file and a folder, Move them into archive: one review lists both, one send, both leave', async ({
+  page,
+}) => {
+  const chain = await testChain('client-select-move', 'inbox/{note.txt, sub/} and archive/.');
+  try {
+    await withInbox(chain);
+    await openRoot(page, chain);
+    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await expect(row(page, 'sub')).toBeVisible();
+    await select(page, 'note.txt').check();
+    await select(page, 'sub').check();
+    await expect(selection(page)).toContainText('2 selected');
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-listing')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    await selection(page).locator('wa-button.efs-selection-move').click();
+    await expect(dialog(page)).toContainText(/Move\W+2\W+entries to…/);
+    // sub/ is one of the folders moved: shown, never opened.
+    await expect(pickerRow(page, 'sub').locator('button.efs-entry-open')).toBeDisabled();
+    chain.step('Select note.txt and sub/, Move…: one picker for both');
+
+    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await expect(picker(page)).toContainText('No folders in here.');
+    await moveHere(page).click();
+    await expect(dialog(page)).toContainText(/Move these\W+2\W+entries to\W+archive/);
+    await expect(dialog(page).locator('.efs-folder-items li')).toHaveCount(2);
+    await expect(dialog(page)).toContainText('Checked under this lens');
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'note.txt')).toHaveCount(0);
+    await expect(row(page, 'sub')).toHaveCount(0);
+    await expect(selection(page)).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Into archive/: one review, one send; both leave inbox/');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a selection with one refused item plans nothing, lists it, and "Leave these out" reviews the rest', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-select-refused',
+    'inbox/{note.txt, sub/}, and archive/ already holding a note.txt of anvil #6.',
+  );
+  try {
+    await withInbox(chain);
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const page1 = await files.listFolder(efs, root, { lens });
+      const archive =
+        page1.status === 'PRESENT'
+          ? page1.rows.find((r) => r.name === 'archive')?.target
+          : undefined;
+      if (archive?.kind !== 'folder') throw new Error('archive/ not listed');
+      await done(
+        await files.planCreateFile(efs, writer, {
+          folder: archive,
+          name: 'note.txt',
+          content: new TextEncoder().encode('already archived\n'),
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await expect(row(page, 'sub')).toBeVisible();
+    await select(page, 'note.txt').check();
+    await select(page, 'sub').check();
+    await selection(page).locator('wa-button.efs-selection-move').click();
+    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await expect(picker(page)).toContainText('No folders in here.');
+    await moveHere(page).click();
+    await expect(dialog(page).locator('.efs-folder-refused')).toContainText(
+      /You already have something called\W+note\.txt\W+here/,
+    );
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('note.txt is taken in archive/: the whole selection is refused, and says which');
+
+    await dialog(page).locator('wa-button.efs-folder-leave-out').click();
+    await expect(dialog(page)).toContainText(/Move\W+sub\W+to\W+archive/);
+    await expect(dialog(page)).toContainText('Checked under this lens');
+    await dialog(page).locator('wa-button', { hasText: 'Cancel' }).first().click();
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('Leave these out: sub/ alone is reviewed; Cancel sends nothing');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('Select two files, Remove: one review lists both, one send; the notice offers Restore for both', async ({
+  page,
+}) => {
+  const chain = await testChain('client-select-remove', 'a.txt and b.txt by anvil #6 at the root.');
+  try {
+    await fileAtRoot(chain, 6, 'a.txt', 'a\n');
+    await fileAtRoot(chain, 6, 'b.txt', 'b\n');
+    await openRoot(page, chain);
+    await select(page, 'a.txt').check();
+    await select(page, 'b.txt').check();
+    await selection(page).locator('wa-button.efs-selection-remove').click();
+    await expect(dialog(page)).toContainText(/Remove\W+2\W+entries from/);
+    await expect(dialog(page)).toContainText(/These\W+2\W+entries of yours stop appearing here/);
+    await expect(dialog(page).locator('wa-button.efs-folder-keep')).toBeFocused();
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'a.txt')).toHaveCount(0);
+    await expect(row(page, 'b.txt')).toHaveCount(0);
+    await expect(entries(page).locator('.efs-entries-removed')).toContainText(
+      /You removed\W+2\W+entries/,
+    );
+    await expect(entries(page).locator('wa-button.efs-entries-restore')).not.toHaveAttribute(
+      'disabled',
+    );
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Remove both: one review, one send; "You removed 2 entries" with Restore');
+  } finally {
+    await chain.finish();
+  }
+});

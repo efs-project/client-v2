@@ -36,6 +36,7 @@ import {
   planRequest,
   refusalMessage,
   type ViewPath,
+  withoutIndices,
 } from './folder-requests.ts';
 import type { NavStep } from './navigation.ts';
 
@@ -86,27 +87,39 @@ export type FolderAsk =
       readonly typeFrom: 'signature' | 'text' | 'unknown';
     }
   | { readonly kind: 'rename'; readonly from: EntryRef }
+  /** One entry, or a selection, all from the folder on screen. */
   | {
       readonly kind: 'move';
-      readonly entry: EntryRef;
-      /** The folder being moved, when the entry is a folder (it needs a path, and can't go in itself). */
-      readonly moving?: FolderRef;
-      /** Where the picker opens: the trail to the folder the entry is in. */
+      readonly entries: readonly MoveItem[];
+      /** Where the picker opens: the trail to the folder the entries are in. */
       readonly start: readonly NavStep[];
     }
   | {
       readonly kind: 'remove';
-      readonly entry: EntryRef;
+      readonly entries: readonly SelectedEntry[];
       readonly folderName: string;
-      readonly isFolder: boolean;
       readonly hide: boolean;
     }
   | {
       readonly kind: 'restore';
-      readonly entry: EntryRef;
-      /** Required when the entry is a folder: the path to its folder from the view's start. */
-      readonly via?: ViewPath;
+      readonly entries: readonly RestoreItem[];
     };
+
+/** An entry the person picked: what it is, and whether it's a folder. */
+export interface SelectedEntry {
+  readonly entry: EntryRef;
+  readonly isFolder: boolean;
+}
+/** An entry to move; a folder carries itself (it can't go inside itself, and needs a path). */
+export interface MoveItem {
+  readonly entry: EntryRef;
+  readonly moving?: FolderRef;
+}
+/** An entry to restore; a folder needs the path to its folder from the view's start (`via`). */
+export interface RestoreItem {
+  readonly entry: EntryRef;
+  readonly via?: ViewPath;
+}
 
 type Planned = Extract<AnyFolderPlan, { status: 'PLANNED' }>;
 type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${string}` };
@@ -120,6 +133,8 @@ type Phase =
       readonly phase: 'refused';
       readonly request: FolderRequest;
       readonly refused: readonly {
+        /** The item's index in the request (what "Leave these out" drops). */
+        readonly index: number;
         readonly code: string;
         readonly name: string;
         readonly author?: string;
@@ -220,16 +235,29 @@ export class EfsFolderSave extends EfsElement {
     this.#phase.set({ phase: 'picking' });
   }
 
+  /**
+   * "Leave these out": the ask drops the same items as the request, so the review (folders among
+   * them, the count) and the notice after the save describe what's actually planned.
+   */
+  #dropRefused(indices: readonly number[]): void {
+    const ask = this.#ask.get();
+    if (ask?.kind !== 'move' && ask?.kind !== 'remove' && ask?.kind !== 'restore') return;
+    const drop = new Set(indices);
+    const entries = ask.entries.filter((_, i) => !drop.has(i));
+    this.#ask.set({ ...ask, entries } as FolderAsk);
+  }
+
   /** "Move here": plans the move into the folder the picker is on. */
   #moveHere(ask: Extract<FolderAsk, { kind: 'move' }>): void {
     const pick = this.#pick.get();
     if (!pick || pick.why || this.host.saving.availability.get().status !== 'READY') return;
     this.#moveLabel = pick.label;
+    const folders = ask.entries.some((e) => e.moving !== undefined);
     void this.#plan({
       kind: 'move',
-      from: ask.entry,
+      moves: ask.entries.map((e) => ({ from: e.entry, isFolder: e.moving !== undefined })),
       to: pick.folder,
-      ...(ask.moving ? { via: pick.via } : {}),
+      ...(folders ? { via: pick.via } : {}),
     });
   }
 
@@ -260,11 +288,11 @@ export class EfsFolderSave extends EfsElement {
       case 'move':
         throw new Error('a move is planned from the picker (#moveHere)');
       case 'remove':
-        return { kind: 'remove', entries: [ask.entry], hide: ask.hide };
+        return { kind: 'remove', entries: ask.entries.map((e) => e.entry), hide: ask.hide };
       case 'restore':
         return {
           kind: 'restore',
-          entries: [{ ...ask.entry, ...(ask.via ? { via: ask.via } : {}) }],
+          entries: ask.entries.map((e) => ({ ...e.entry, ...(e.via ? { via: e.via } : {}) })),
         };
     }
   }
@@ -291,6 +319,7 @@ export class EfsFolderSave extends EfsElement {
           phase: 'refused',
           request,
           refused: plan.refused.map((r) => ({
+            index: r.index,
             code: r.code,
             name: r.entry.name,
             ...(r.author ? { author: r.author } : {}),
@@ -436,8 +465,8 @@ export class EfsFolderSave extends EfsElement {
         .reader=${reader}
         .translator=${this.host.translator}
         .start=${ask.start}
-        .source=${ask.entry.folder}
-        .moving=${ask.moving}
+        .source=${ask.entries[0]?.entry.folder}
+        .moving=${ask.entries.flatMap((e) => (e.moving ? [e.moving] : []))}
         @efs-picker-change=${(event: Event) =>
           this.#pick.set((event as CustomEvent<PickerSelection>).detail)}
       ></efs-files-folder-picker>
@@ -609,10 +638,24 @@ export class EfsFolderSave extends EfsElement {
         const m = r.moves[0];
         if (!m) return nothing;
         if (ask.kind === 'move') {
-          return html`<p>${t('files.move.reviewLine', { name: m.from.name, folder: this.#moveLabel })}</p>
+          const folders = ask.entries.some((e) => e.moving !== undefined);
+          const many = r.moves.length > 1;
+          return html`${
+            many
+              ? html`<p>${t('files.move.reviewMany', { count: r.moves.length, folder: this.#moveLabel })}</p>
+                  <ul class="efs-folder-items">
+                    ${r.moves.map(
+                      (x) => html`<li>
+                        <span translate="no" dir="auto">${x.from.name}</span>
+                        ${instead(x, x.to.name)} ${after(x.shownAfter, x.from.name)}
+                      </li>`,
+                    )}
+                  </ul>`
+              : html`<p>${t('files.move.reviewLine', { name: m.from.name, folder: this.#moveLabel })}</p>
+                  ${instead(m, m.to.name)} ${after(m.shownAfter, m.from.name)}`
+          }
             <p>${t('files.move.review', { folder: this.#moveLabel })}</p>
-            ${ask.moving ? html`<p class="efs-quiet">${t('files.move.checkedUnderLens')}</p>` : nothing}
-            ${instead(m, m.to.name)} ${after(m.shownAfter, m.from.name)}`;
+            ${folders ? html`<p class="efs-quiet">${t('files.move.checkedUnderLens')}</p>` : nothing}`;
         }
         return html`<p>${t('files.rename.review', { from: m.from.name, to: m.to.name })}</p>
           ${instead(m, m.to.name)} ${after(m.shownAfter, m.from.name)}`;
@@ -620,28 +663,53 @@ export class EfsFolderSave extends EfsElement {
       case 'efs.removeReview': {
         const e = r.entries[0];
         if (!e || ask.kind !== 'remove') return nothing;
+        const folders = ask.entries.some((x) => x.isFolder);
+        const items =
+          r.entries.length > 1
+            ? html`<li>
+                ${t('files.remove.hereMany', { count: r.entries.length })}
+                <ul class="efs-folder-items">
+                  ${r.entries.map(
+                    (x) => html`<li>
+                      <span translate="no" dir="auto">${x.entry.name}</span>
+                      ${after(x.shownAfter, x.entry.name)}
+                    </li>`,
+                  )}
+                </ul>
+              </li>`
+            : html`<li>${t('files.remove.here', { name: e.entry.name })}</li>
+                <li>${after(e.shownAfter, e.entry.name)}</li>`;
         return html`<ul class="efs-folder-clauses">
-          <li>${t('files.remove.here', { name: e.entry.name })}</li>
-          <li>${after(e.shownAfter, e.entry.name)}</li>
+          ${items}
           <li>${t('files.remove.stays')}</li>
-          ${ask.isFolder ? html`<li>${t('files.remove.folder')}</li>` : nothing}
+          ${folders ? html`<li>${t('files.remove.folder')}</li>` : nothing}
           <li>${t('files.remove.public')}</li>
         </ul>`;
       }
       case 'efs.restoreReview': {
-        const e = r.entries[0];
-        if (!e) return nothing;
         // alsoPlaced: live placements of this target now, by anyone. Null when the index can't
         // vouch: then nothing is said (never "0").
-        return html`<p>${t('files.restore.review', { name: e.entry.name })}</p>
-          ${
-            e.alsoPlaced !== null && e.alsoPlaced > 0
-              ? html`<p class="efs-folder-also">
-                  ${t('files.restore.alsoPlaced', { count: e.alsoPlaced })}
-                </p>`
-              : nothing
-          }
+        const one = (e: (typeof r.entries)[number]) => html`${
+          e.alsoPlaced !== null && e.alsoPlaced > 0
+            ? html`<p class="efs-folder-also">
+                ${t('files.restore.alsoPlaced', { count: e.alsoPlaced })}
+              </p>`
+            : nothing
+        }
           ${instead(e, e.entry.name)}`;
+        const e = r.entries[0];
+        if (!e) return nothing;
+        if (r.entries.length === 1) {
+          return html`<p>${t('files.restore.review', { name: e.entry.name })}</p>
+            ${one(e)}`;
+        }
+        return html`<p>${t('files.restore.reviewMany', { count: r.entries.length })}</p>
+          <ul class="efs-folder-items">
+            ${r.entries.map(
+              (x) =>
+                html`<li><span translate="no" dir="auto">${x.entry.name}</span> ${one(x)}</li>`,
+            )}
+          </ul>`;
       }
     }
   }
@@ -665,11 +733,18 @@ export class EfsFolderSave extends EfsElement {
                 : ask?.kind === 'restore'
                   ? 'files.restore'
                   : 'files.remove.title';
+    const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
+    const first =
+      ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
     const label =
       ask?.kind === 'remove'
-        ? t(title, { name: ask.entry.name, folder: ask.folderName })
+        ? many
+          ? t('files.remove.titleMany', { count: ask.entries.length, folder: ask.folderName })
+          : t(title, { name: first?.name ?? '', folder: ask.folderName })
         : ask?.kind === 'move'
-          ? t(title, { name: ask.entry.name })
+          ? many
+            ? t('files.move.titleMany', { count: ask.entries.length })
+            : t(title, { name: first?.name ?? '' })
           : t(title);
     let body: unknown = nothing;
     if (open && ask) {
@@ -685,7 +760,13 @@ export class EfsFolderSave extends EfsElement {
             <wa-spinner></wa-spinner>${t('files.save.planning')}
           </p>`;
           break;
-        case 'refused':
+        case 'refused': {
+          // A selection plans all or nothing: what's left without the refused items is offered,
+          // never sent as part of the selection silently.
+          const rest = withoutIndices(
+            s.request,
+            s.refused.map((r) => r.index),
+          );
           body = html`<div class="wa-stack wa-gap-xs efs-folder-refused" role="alert">
               ${s.refused.map(
                 (r) =>
@@ -698,6 +779,20 @@ export class EfsFolderSave extends EfsElement {
                   </p>`,
               )}
             </div>
+            ${
+              rest
+                ? html`<wa-button
+                    slot="footer"
+                    appearance="outlined"
+                    class="efs-folder-leave-out"
+                    @click=${() => {
+                      this.#dropRefused(s.refused.map((r) => r.index));
+                      void this.#plan(rest);
+                    }}
+                    >${t('files.refused.leaveOut')}</wa-button
+                  >`
+                : nothing
+            }
             ${
               ask.kind === 'move'
                 ? html`<wa-button
@@ -713,6 +808,7 @@ export class EfsFolderSave extends EfsElement {
               >${t('files.save.close')}</wa-button
             >`;
           break;
+        }
         case 'plan-failed': {
           const noWallet = s.code === 'NO_WALLET';
           const intoItself = s.code === 'INTO_ITSELF';

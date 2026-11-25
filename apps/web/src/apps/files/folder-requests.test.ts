@@ -10,6 +10,7 @@ import {
   placesOf,
   planRequest,
   refusalMessage,
+  withoutIndices,
 } from './folder-requests.ts';
 
 const DIR = `0x${'D1'.repeat(32)}`;
@@ -41,11 +42,22 @@ describe('placesOf', () => {
       }),
     ).toEqual([{ folder: DIR.toLowerCase(), name: 'pic.png' }]);
   });
-  it('a move holds its old place and the same name at its new folder', () => {
+  it('a move holds each old place and the same name at the new folder', () => {
     const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
-    expect(placesOf({ kind: 'move', from: { folder, name: 'a.txt' }, to })).toEqual([
+    expect(
+      placesOf({
+        kind: 'move',
+        moves: [
+          { from: { folder, name: 'a.txt' }, isFolder: false },
+          { from: { folder, name: 'b' }, isFolder: true },
+        ],
+        to,
+      }),
+    ).toEqual([
       { folder: DIR.toLowerCase(), name: 'a.txt' },
       { folder: to.directory.toLowerCase(), name: 'a.txt' },
+      { folder: DIR.toLowerCase(), name: 'b' },
+      { folder: to.directory.toLowerCase(), name: 'b' },
     ]);
   });
   it('remove and restore hold every entry they name', () => {
@@ -108,31 +120,36 @@ describe('planRequest', () => {
     );
   });
 
-  it('a move names the destination folder; via only when given (a folder move)', async () => {
+  it('a move is one plan for the whole selection; via goes with the folders only', async () => {
     const p = planners();
     const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
     const via = { from: folder, segments: ['team', 'plans'] };
-    const from = { folder, name: 'a' };
+    const a = { folder, name: 'a' };
+    const b = { folder, name: 'b' };
     await planRequest(
       p as unknown as FolderPlanners,
       efs,
       writer,
-      { kind: 'move', from, to },
+      {
+        kind: 'move',
+        moves: [
+          { from: a, isFolder: false },
+          { from: b, isFolder: true },
+        ],
+        to,
+        via,
+      },
       lens,
       signal,
     );
-    await planRequest(
-      p as unknown as FolderPlanners,
-      efs,
-      writer,
-      { kind: 'move', from, to, via },
+    expect(p.planMoveEntries).toHaveBeenCalledTimes(1);
+    expect((p.planMoveEntries.mock.calls[0] as unknown[])[2]).toEqual({
+      moves: [
+        { from: a, to: { folder: to } },
+        { from: b, to: { folder: to, via } },
+      ],
       lens,
-      signal,
-    );
-    expect(p.planMoveEntries.mock.calls.map((c) => (c as unknown[])[2])).toEqual([
-      { moves: [{ from, to: { folder: to } }], lens },
-      { moves: [{ from, to: { folder: to, via } }], lens },
-    ]);
+    });
   });
 
   it('remove releases unless asked to hide; hide is passed only when true', async () => {
@@ -163,6 +180,32 @@ describe('planRequest', () => {
       hide: true,
       lens,
     });
+  });
+});
+
+describe('withoutIndices: "Leave these out and review the rest"', () => {
+  const entries = [
+    { folder, name: 'a' },
+    { folder, name: 'b' },
+    { folder, name: 'c' },
+  ];
+  it('drops the refused items by their index, keeping the rest in order', () => {
+    expect(withoutIndices({ kind: 'remove', entries, hide: false }, [0, 2])).toEqual({
+      kind: 'remove',
+      entries: [{ folder, name: 'b' }],
+      hide: false,
+    });
+    const to = { kind: 'folder', directory: `0x${'E2'.repeat(32)}` } as FolderRef;
+    const moves = entries.map((from) => ({ from, isFolder: false }));
+    expect(withoutIndices({ kind: 'move', moves, to }, [1])).toEqual({
+      kind: 'move',
+      moves: [moves[0], moves[2]],
+      to,
+    });
+  });
+  it('nothing left, or a request that is not a selection: nothing to review', () => {
+    expect(withoutIndices({ kind: 'remove', entries, hide: false }, [0, 1, 2])).toBeUndefined();
+    expect(withoutIndices({ kind: 'createFolder', folder, name: 'x' }, [0])).toBeUndefined();
   });
 });
 

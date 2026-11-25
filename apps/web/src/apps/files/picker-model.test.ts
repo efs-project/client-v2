@@ -22,10 +22,11 @@ const page = (rows: number, coverage: object, extra: object = {}): ListingState 
   }) as unknown as ListingState;
 
 describe('the folder picker', () => {
-  it("can't open the folder being moved, so nothing inside it can be picked", () => {
-    expect(cannotOpen(row(folder('b')), folder('B'))).toBe('files.move.moving');
-    expect(cannotOpen(row(folder('c')), folder('b'))).toBeUndefined();
-    expect(cannotOpen(row(folder('b')), undefined)).toBeUndefined();
+  it("can't open a folder being moved (any in the selection), so nothing inside one can be picked", () => {
+    expect(cannotOpen(row(folder('b')), [folder('B')])).toBe('files.move.moving');
+    expect(cannotOpen(row(folder('c')), [folder('b'), folder('C')])).toBe('files.move.moving');
+    expect(cannotOpen(row(folder('c')), [folder('b')])).toBeUndefined();
+    expect(cannotOpen(row(folder('b')), [])).toBeUndefined();
   });
   it("can't move an entry to the folder it's already in", () => {
     expect(cannotMoveHere(folder('a'), folder('A'))).toBe('files.move.same');

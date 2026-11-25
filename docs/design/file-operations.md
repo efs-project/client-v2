@@ -10,11 +10,11 @@
   - Move, with the folder picker and `via` (`apps/files/folder-picker.ts`);
   - New text file: named in the folder dialog, written in the editor's create mode (`apps/files/compose.ts`, `editor.ts`);
   - Upload, one file at a time, from the toolbar or a drop (`apps/files/upload-model.ts`);
+  - multi-select: the person's own rows, Move or Remove as one review and one plan, with "Leave these out" (`listing.ts`, `folder-requests.ts` `withoutIndices`);
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
-  - uploading several files at once (with multi-select batches);
+  - uploading several files at once (one review for several creates needs a batch planner in the SDK);
   - "Remove and block this name";
-  - multi-select batches;
   - the lazy "also: …" marker.
 
 Draft flows and copy for the integration owner's (PM's) review. Revised for the 2026-11-25 decision-sheet defaults (folder paths live under an address; a folder opened from a link shows its creator's files; public lists newest first, labelled "recently added"; no small depth limit) and for the SDK dev's confirmed removal semantics (Remove releases). No code yet. Each flow is wired only to the SDK's real exports, once they land. There's no protocol stand-in in the meantime.

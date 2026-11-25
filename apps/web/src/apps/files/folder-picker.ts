@@ -59,8 +59,8 @@ export class EfsFolderPicker extends EfsElement {
   declare start: readonly NavStep[];
   /** The folder the entry is in now. */
   declare source: FolderRef;
-  /** The folder being moved, when the entry is a folder. */
-  declare moving: FolderRef | undefined;
+  /** The folders being moved (the selection's folders; none when only files move). */
+  declare moving: readonly FolderRef[];
 
   #path = state<readonly NavStep[] | undefined>(undefined);
   #listing = state<ListingState | undefined>(undefined);
@@ -177,7 +177,7 @@ export class EfsFolderPicker extends EfsElement {
     const t = this.translator.t.bind(this.translator);
     const target = row.target;
     if (row.kind !== 'folder' || target?.kind !== 'folder') return nothing;
-    const why = cannotOpen(row, this.moving);
+    const why = cannotOpen(row, this.moving ?? []);
     const author = row.author.toLowerCase();
     const mine =
       this.reader !== undefined &&

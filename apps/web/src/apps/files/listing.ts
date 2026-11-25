@@ -37,7 +37,13 @@ import {
   rootFolder,
   startListing,
 } from './folder-model.ts';
-import type { ComposeDetail, EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
+import type {
+  ComposeDetail,
+  EfsFolderSave,
+  FolderAsk,
+  FolderSavedDetail,
+  SelectedEntry,
+} from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
 import { uploadMediaType } from './upload-model.ts';
 
@@ -79,11 +85,15 @@ const KIND_LABEL: Readonly<Record<EntryKind, MessageId>> = {
 
 type PaneState = ListingState | { readonly phase: 'load-failed' };
 
-/** A removal saved from here: its save, the entry, and whether it was a folder (for Restore). */
+/** One of the person's own rows, selected: what it is, and the folder it is when it's one. */
+interface SelectedItem extends SelectedEntry {
+  readonly moving?: FolderRef;
+}
+
+/** A removal saved from here: its save, and the entries (folders flagged, for Restore). */
 interface Removal {
   readonly sequenceId: string;
-  readonly entry: EntryRef;
-  readonly isFolder: boolean;
+  readonly entries: readonly SelectedEntry[];
 }
 
 export class EfsFilesListing extends EfsElement {
@@ -121,6 +131,11 @@ export class EfsFilesListing extends EfsElement {
   #showRemoved = state(false);
   /** Bumped when a save touching the folder on screen lands, so the removed list reads again. */
   #removedGeneration = state(0);
+  /**
+   * The person's own entries selected in the folder on screen, by name: Move and Remove act on
+   * them all in one review (one plan, all or nothing). Cleared when the folder changes.
+   */
+  #selected = state<ReadonlyMap<string, SelectedItem>>(new Map());
   /** Why the last upload didn't start (several files, or one too large to read). */
   #uploadNote = state<'files.upload.oneAtATime' | 'files.upload.tooBig' | undefined>(undefined);
 
@@ -236,18 +251,23 @@ export class EfsFilesListing extends EfsElement {
    * the SDK can check it never lands inside itself: unknown for a folder opened by its link, and
    * then there is no ask (the caller says why: files.restore.needsPath).
    */
-  #restoreAsk(entry: EntryRef, isFolder: boolean): FolderAsk | undefined {
-    if (!isFolder) return { kind: 'restore', entry };
+  #restoreAsk(entries: readonly SelectedEntry[]): FolderAsk | undefined {
     const efs = this.#efs;
     const via = efs ? viewPath(this.nav.path.get(), rootFolder(efs)) : undefined;
-    return via ? { kind: 'restore', entry, via } : undefined;
+    if (!via && entries.some((e) => e.isFolder)) return undefined;
+    return {
+      kind: 'restore',
+      entries: entries.map((e) =>
+        e.isFolder && via ? { entry: e.entry, via } : { entry: e.entry },
+      ),
+    };
   }
 
   /** Why a removed row can't be restored now, if it can't. */
   #unrestorable(folder: FolderRef, row: RemovedRow, pending: ReadonlySet<string>) {
     if (pending.has(placeKey(folder.directory, row.name) ?? '')) return 'files.pending' as const;
     const entry = { folder, name: row.name };
-    return this.#restoreAsk(entry, row.target.kind === 'folder')
+    return this.#restoreAsk([{ entry, isFolder: row.target.kind === 'folder' }])
       ? undefined
       : ('files.restore.needsPath' as const);
   }
@@ -255,7 +275,9 @@ export class EfsFilesListing extends EfsElement {
   #onRestoreRemoved = (event: Event): void => {
     event.stopPropagation();
     const { folder, row } = (event as CustomEvent<RestoreRemovedDetail>).detail;
-    const ask = this.#restoreAsk({ folder, name: row.name }, row.target.kind === 'folder');
+    const ask = this.#restoreAsk([
+      { entry: { folder, name: row.name }, isFolder: row.target.kind === 'folder' },
+    ]);
     if (ask) this.#ask(ask);
   };
 
@@ -301,6 +323,10 @@ export class EfsFilesListing extends EfsElement {
   }
 
   #load(efs: Efs | undefined, folder: FolderRef | undefined, kind: KindFilter): Promise<void> {
+    // Another folder: what was selected there isn't here.
+    const selected = this.#selected.get();
+    const was = selected.values().next().value?.entry.folder.directory.toLowerCase();
+    if (was !== undefined && was !== folder?.directory.toLowerCase()) this.#selected.set(new Map());
     this.#run?.dispose();
     this.#run = undefined;
     if (!efs || !folder || !this.#scope || this.#scope.signal.aborted) {
@@ -417,10 +443,11 @@ export class EfsFilesListing extends EfsElement {
               @click=${() =>
                 this.#ask({
                   kind: 'move',
-                  entry,
-                  ...(row.kind === 'folder' && row.target?.kind === 'folder'
-                    ? { moving: row.target }
-                    : {}),
+                  entries: [
+                    row.kind === 'folder' && row.target?.kind === 'folder'
+                      ? { entry, moving: row.target }
+                      : { entry },
+                  ],
                   start: this.nav.path.get(),
                 })}
               >${appIcon('file-export', t('files.move.button', { name: row.name }))}</wa-button
@@ -433,9 +460,8 @@ export class EfsFilesListing extends EfsElement {
               @click=${() =>
                 this.#ask({
                   kind: 'remove',
-                  entry,
+                  entries: [{ entry, isFolder: row.kind === 'folder' }],
                   folderName: this.#folderName(),
-                  isFolder: row.kind === 'folder',
                   hide: false,
                 })}
               >${appIcon('trash', t('files.remove.button', { name: row.name }))}</wa-button
@@ -479,7 +505,80 @@ export class EfsFilesListing extends EfsElement {
       // Other and invalid rows are shown, never opened as something they aren't.
       open = html`<span class="efs-entry-open">${appIcon('circle-info')} ${name}</span>`;
     }
-    return html`<li class="efs-entry" data-kind=${row.kind}>${open} ${meta} ${actions}</li>`;
+    const select =
+      this.#isMine(row.author) && row.kind !== 'invalid'
+        ? html`<input
+            type="checkbox"
+            class="efs-entry-select"
+            aria-label=${t('files.select.one', { name: row.name })}
+            .checked=${this.#selected.get().has(row.name)}
+            ?disabled=${saving}
+            @change=${(event: Event) =>
+              this.#toggle(
+                {
+                  entry,
+                  isFolder: row.kind === 'folder',
+                  ...(row.kind === 'folder' && row.target?.kind === 'folder'
+                    ? { moving: row.target }
+                    : {}),
+                },
+                (event.target as HTMLInputElement).checked,
+              )}
+          />`
+        : nothing;
+    return html`<li class="efs-entry" data-kind=${row.kind}>
+      ${select} ${open} ${meta} ${actions}
+    </li>`;
+  }
+
+  /** Selects or unselects one of the person's own rows. */
+  #toggle(item: SelectedItem, on: boolean): void {
+    const next = new Map(this.#selected.get());
+    if (on) next.set(item.entry.name, item);
+    else next.delete(item.entry.name);
+    this.#selected.set(next);
+  }
+
+  /** "N selected · Move… · Remove · Clear selection": one review for the whole selection. */
+  #selectionBar() {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const items = [...this.#selected.get().values()];
+    if (items.length === 0) return nothing;
+    return html`<div class="wa-cluster wa-gap-s efs-selection">
+      <span role="status">${t('files.select.count', { count: items.length })}</span>
+      <wa-button
+        size="s"
+        class="efs-selection-move"
+        @click=${() =>
+          this.#ask({
+            kind: 'move',
+            entries: items.map((x) =>
+              x.moving ? { entry: x.entry, moving: x.moving } : { entry: x.entry },
+            ),
+            start: this.nav.path.get(),
+          })}
+        ><span slot="start">${appIcon('file-export')}</span>${t('files.select.move')}</wa-button
+      >
+      <wa-button
+        size="s"
+        class="efs-selection-remove"
+        @click=${() =>
+          this.#ask({
+            kind: 'remove',
+            entries: items.map((x) => ({ entry: x.entry, isFolder: x.isFolder })),
+            folderName: this.#folderName(),
+            hide: false,
+          })}
+        ><span slot="start">${appIcon('trash')}</span>${t('files.select.remove')}</wa-button
+      >
+      <wa-button
+        size="s"
+        appearance="plain"
+        class="efs-selection-clear"
+        @click=${() => this.#selected.set(new Map())}
+        >${t('files.select.clear')}</wa-button
+      >
+    </div>`;
   }
 
   #filter() {
@@ -543,7 +642,8 @@ export class EfsFilesListing extends EfsElement {
       const pending = this.#pending();
       const placeLens = this.#efs ? this.#lens(this.#efs, folder) : undefined;
       const removedSave = this.#removed.get();
-      const removed = removedSave?.entry;
+      const removed = removedSave?.entries[0]?.entry;
+      const removedCount = removedSave?.entries.length ?? 0;
       const creating = pendingCreates(
         this.host.saving.saves.get(),
         folder.directory,
@@ -551,13 +651,15 @@ export class EfsFilesListing extends EfsElement {
         unsettled,
       );
       const unsaved = this.#unsavedNewFiles(folder);
-      const restoreAsk = removedSave
-        ? this.#restoreAsk(removedSave.entry, removedSave.isFolder)
-        : undefined;
+      const restoreAsk = removedSave ? this.#restoreAsk(removedSave.entries) : undefined;
       body = html`${
         removed && removed.folder.directory === folder.directory
           ? html`<p class="efs-entries-removed" role="status">
-              ${t('files.list.removed', { name: removed.name })}
+              ${
+                removedCount > 1
+                  ? t('files.list.removedMany', { count: removedCount })
+                  : t('files.list.removed', { name: removed.name })
+              }
               <wa-button
                 size="s"
                 class="efs-entries-restore"
@@ -580,6 +682,7 @@ export class EfsFilesListing extends EfsElement {
             </p>`
           : nothing
       }
+        ${this.#selectionBar()}
         ${
           s.rows.length > 0 || creating.length > 0 || unsaved.length > 0
             ? html`<ul class="efs-entries" aria-label=${t('files.entries.title')}>
@@ -821,12 +924,10 @@ export class EfsFilesListing extends EfsElement {
   #onSaved = (event: Event) => {
     const detail = (event as CustomEvent<FolderSavedDetail>).detail;
     const ask = detail.ask;
+    // A save from the selection: the selection is done.
+    if (ask?.kind === 'remove' || ask?.kind === 'move') this.#selected.set(new Map());
     if (ask?.kind === 'remove') {
-      this.#pendingRemoval = {
-        sequenceId: detail.sequenceId,
-        entry: ask.entry,
-        isFolder: ask.isFolder,
-      };
+      this.#pendingRemoval = { sequenceId: detail.sequenceId, entries: ask.entries };
       this.#removed.set(undefined);
     } else if (ask?.kind === 'restore') {
       this.#removed.set(undefined);

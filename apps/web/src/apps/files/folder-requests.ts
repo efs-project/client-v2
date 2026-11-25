@@ -28,10 +28,13 @@ export type FolderRequest =
       readonly mediaType: string;
     }
   | { readonly kind: 'rename'; readonly from: EntryRef; readonly to: string }
-  /** Into another folder under the same name. A folder needs the path to `to` (`via`). */
+  /**
+   * Entries into another folder, each under its own name: one plan for the whole selection. A
+   * folder among them needs the path to `to` (`via`), which goes with the folders only.
+   */
   | {
       readonly kind: 'move';
-      readonly from: EntryRef;
+      readonly moves: readonly { readonly from: EntryRef; readonly isFolder: boolean }[];
       readonly to: FolderRef;
       readonly via?: ViewPath;
     }
@@ -70,7 +73,7 @@ export function placesOf(r: FolderRequest): readonly Place[] {
     case 'rename':
       return [place(r.from.folder, r.from.name), place(r.from.folder, r.to)];
     case 'move':
-      return [place(r.from.folder, r.from.name), place(r.to, r.from.name)];
+      return r.moves.flatMap((m) => [place(m.from.folder, m.from.name), place(r.to, m.from.name)]);
     case 'remove':
     case 'restore':
       return r.entries.map((e) => place(e.folder, e.name));
@@ -117,7 +120,10 @@ export function planRequest(
         efs,
         writer,
         {
-          moves: [{ from: r.from, to: { folder: r.to, ...(r.via ? { via: r.via } : {}) } }],
+          moves: r.moves.map((m) => ({
+            from: m.from,
+            to: { folder: r.to, ...(m.isFolder && r.via ? { via: r.via } : {}) },
+          })),
           lens,
         },
         o,
@@ -131,6 +137,34 @@ export function planRequest(
       );
     case 'restore':
       return planners.planRestoreEntries(efs, writer, { entries: r.entries, lens }, o);
+  }
+}
+
+/**
+ * The request without the items at `indices` (a refusal's input indices): "Leave these out and
+ * review the rest". Undefined when nothing would be left, or the request isn't a selection.
+ */
+export function withoutIndices(
+  r: FolderRequest,
+  indices: readonly number[],
+): FolderRequest | undefined {
+  const drop = new Set(indices);
+  const keep = <T>(items: readonly T[]) => items.filter((_, i) => !drop.has(i));
+  switch (r.kind) {
+    case 'move': {
+      const moves = keep(r.moves);
+      return moves.length > 0 ? { ...r, moves } : undefined;
+    }
+    case 'remove': {
+      const entries = keep(r.entries);
+      return entries.length > 0 ? { ...r, entries } : undefined;
+    }
+    case 'restore': {
+      const entries = keep(r.entries);
+      return entries.length > 0 ? { ...r, entries } : undefined;
+    }
+    default:
+      return undefined;
   }
 }
 
