@@ -1,5 +1,6 @@
-// One dialog for every folder operation (New folder, Rename, Remove, Restore): name it if it needs
-// a name, plan it with the SDK, review, send, and hand the save to the banner. It keeps the edit
+// One dialog for every folder operation (New folder, Rename, Move, Remove, Restore): name it or
+// pick where it goes if it needs that, plan it with the SDK, review, send, and hand the save to the
+// banner. It keeps the edit
 // path's rules (docs/design/writes.md):
 // - no wallet before Review; Send only with the connected writer on the network in view;
 // - the journal is re-read before Send, and a save holding the same (folder, name) waits;
@@ -24,6 +25,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { shortId } from './editor.ts';
+import type { PickerSelection } from './folder-picker.ts';
 import {
   type AnyFolderPlan,
   type FolderPlanners,
@@ -35,6 +37,7 @@ import {
   refusalMessage,
   type ViewPath,
 } from './folder-requests.ts';
+import type { NavStep } from './navigation.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
 /** The event's detail: the save the banner now owns, and what it was asked to do. */
@@ -62,6 +65,14 @@ export type FolderAsk =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly folderName: string }
   | { readonly kind: 'rename'; readonly from: EntryRef }
   | {
+      readonly kind: 'move';
+      readonly entry: EntryRef;
+      /** The folder being moved, when the entry is a folder (it needs a path, and can't go in itself). */
+      readonly moving?: FolderRef;
+      /** Where the picker opens: the trail to the folder the entry is in. */
+      readonly start: readonly NavStep[];
+    }
+  | {
       readonly kind: 'remove';
       readonly entry: EntryRef;
       readonly folderName: string;
@@ -81,6 +92,7 @@ type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${strin
 type Phase =
   | { readonly phase: 'closed' }
   | { readonly phase: 'naming'; readonly value: string }
+  | { readonly phase: 'picking' }
   | { readonly phase: 'planning'; readonly request: FolderRequest }
   | {
       readonly phase: 'refused';
@@ -115,6 +127,10 @@ export class EfsFolderSave extends EfsElement {
   declare lens: Lens | undefined;
 
   #ask = state<FolderAsk | undefined>(undefined);
+  /** The folder the Move picker is on (where "Move here" puts the entry). */
+  #pick = state<PickerSelection | undefined>(undefined);
+  /** The destination's name as picked, for the move review. */
+  #moveLabel = '';
   /** The SDK's checkName, once loaded: until then a name can't be reviewed. */
   #checkName = state<CheckName | undefined>(undefined);
   #phase = state<Phase>({ phase: 'closed' });
@@ -159,7 +175,27 @@ export class EfsFolderSave extends EfsElement {
     }
     if (ask.kind === 'createFolder') this.#phase.set({ phase: 'naming', value: '' });
     else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
+    else if (ask.kind === 'move') this.#pickAgain();
     else void this.#plan(this.#request(ask, ''));
+  }
+
+  /** Back to the Move picker (it opens where the entry is). */
+  #pickAgain(): void {
+    this.#pick.set(undefined);
+    this.#phase.set({ phase: 'picking' });
+  }
+
+  /** "Move here": plans the move into the folder the picker is on. */
+  #moveHere(ask: Extract<FolderAsk, { kind: 'move' }>): void {
+    const pick = this.#pick.get();
+    if (!pick || pick.why || this.host.saving.availability.get().status !== 'READY') return;
+    this.#moveLabel = pick.label;
+    void this.#plan({
+      kind: 'move',
+      from: ask.entry,
+      to: pick.folder,
+      ...(ask.moving ? { via: pick.via } : {}),
+    });
   }
 
   #close(): void {
@@ -176,6 +212,8 @@ export class EfsFolderSave extends EfsElement {
         return { kind: 'createFolder', folder: ask.folder, name };
       case 'rename':
         return { kind: 'rename', from: ask.from, to: name };
+      case 'move':
+        throw new Error('a move is planned from the picker (#moveHere)');
       case 'remove':
         return { kind: 'remove', entries: [ask.entry], hide: ask.hide };
       case 'restore':
@@ -337,6 +375,53 @@ export class EfsFolderSave extends EfsElement {
     return shortId(author);
   }
 
+  #picking(ask: Extract<FolderAsk, { kind: 'move' }>) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const availability = this.host.saving.availability.get();
+    const reader = availability.status === 'READY' ? availability.account : undefined;
+    const pick = this.#pick.get();
+    return html`<efs-files-folder-picker
+        .efs=${this.efs}
+        .reader=${reader}
+        .translator=${this.host.translator}
+        .start=${ask.start}
+        .source=${ask.entry.folder}
+        .moving=${ask.moving}
+        @efs-picker-change=${(event: Event) =>
+          this.#pick.set((event as CustomEvent<PickerSelection>).detail)}
+      ></efs-files-folder-picker>
+      ${pick?.why ? html`<p class="efs-quiet efs-move-why">${t(pick.why)}</p>` : nothing}
+      ${
+        reader
+          ? nothing
+          : html`<wa-callout variant="neutral" size="small">
+              <span slot="icon">${appIcon('wallet')}</span>
+              <p>${t('files.save.connect')}</p>
+            </wa-callout>`
+      }
+      <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
+        >${t('review.cancel')}</wa-button
+      >
+      ${
+        reader
+          ? html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-move-here"
+              ?disabled=${!pick || pick.why !== undefined}
+              @click=${() => this.#moveHere(ask)}
+              >${t('files.move.here')}</wa-button
+            >`
+          : html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-connect"
+              @click=${() => this.host.saving.requestWallet()}
+              >${t('files.save.connectButton')}</wa-button
+            >`
+      }`;
+  }
+
   #naming(ask: FolderAsk, value: string) {
     const t = this.host.translator.t.bind(this.host.translator);
     const checkName = this.#checkName.get();
@@ -437,6 +522,12 @@ export class EfsFolderSave extends EfsElement {
       case 'efs.moveReview': {
         const m = r.moves[0];
         if (!m) return nothing;
+        if (ask.kind === 'move') {
+          return html`<p>${t('files.move.reviewLine', { name: m.from.name, folder: this.#moveLabel })}</p>
+            <p>${t('files.move.review', { folder: this.#moveLabel })}</p>
+            ${ask.moving ? html`<p class="efs-quiet">${t('files.move.checkedUnderLens')}</p>` : nothing}
+            ${instead(m, m.to.name)} ${after(m.shownAfter, m.from.name)}`;
+        }
         return html`<p>${t('files.rename.review', { from: m.from.name, to: m.to.name })}</p>
           ${instead(m, m.to.name)} ${after(m.shownAfter, m.from.name)}`;
       }
@@ -479,18 +570,25 @@ export class EfsFolderSave extends EfsElement {
         ? 'files.new.folder'
         : ask?.kind === 'rename'
           ? 'files.rename.title'
-          : ask?.kind === 'restore'
-            ? 'files.restore'
-            : 'files.remove.title';
+          : ask?.kind === 'move'
+            ? 'files.move.title'
+            : ask?.kind === 'restore'
+              ? 'files.restore'
+              : 'files.remove.title';
     const label =
       ask?.kind === 'remove'
         ? t(title, { name: ask.entry.name, folder: ask.folderName })
-        : t(title);
+        : ask?.kind === 'move'
+          ? t(title, { name: ask.entry.name })
+          : t(title);
     let body: unknown = nothing;
     if (open && ask) {
       switch (s.phase) {
         case 'naming':
           body = this.#naming(ask, s.value);
+          break;
+        case 'picking':
+          if (ask.kind === 'move') body = this.#picking(ask);
           break;
         case 'planning':
           body = html`<p class="wa-cluster wa-gap-xs" role="status">
@@ -510,6 +608,17 @@ export class EfsFolderSave extends EfsElement {
                   </p>`,
               )}
             </div>
+            ${
+              ask.kind === 'move'
+                ? html`<wa-button
+                    slot="footer"
+                    appearance="outlined"
+                    class="efs-move-again"
+                    @click=${() => this.#pickAgain()}
+                    >${t('files.move.again')}</wa-button
+                  >`
+                : nothing
+            }
             <wa-button slot="footer" variant="brand" @click=${() => this.#close()}
               >${t('files.save.close')}</wa-button
             >`;

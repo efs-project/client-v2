@@ -1,5 +1,6 @@
 // Registration module for the File Browser's elements. Imported by its entry only.
 import { EfsFileEditor } from './editor.ts';
+import { EfsFolderPicker } from './folder-picker.ts';
 import { EfsFolderSave } from './folder-save.ts';
 import { EfsFilesListing } from './listing.ts';
 import { EfsFilesPreview } from './preview.ts';
@@ -10,6 +11,9 @@ export function registerFilesElements(): void {
   if (!customElements.get('efs-files-view')) customElements.define('efs-files-view', EfsFilesView);
   if (!customElements.get('efs-file-editor'))
     customElements.define('efs-file-editor', EfsFileEditor);
+  if (!customElements.get('efs-files-folder-picker')) {
+    customElements.define('efs-files-folder-picker', EfsFolderPicker);
+  }
   if (!customElements.get('efs-files-folder-save')) {
     customElements.define('efs-files-folder-save', EfsFolderSave);
   }

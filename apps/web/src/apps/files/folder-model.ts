@@ -20,6 +20,24 @@ import type {
   FolderRow,
 } from '@efs/sdk/files';
 
+/** The realm's shared root folder, from the pinned deployment: the stand-in start. */
+export function rootFolder(efs: Efs): FolderRef {
+  const root = efs.deployment.root;
+  return { kind: 'folder', directory: root.directoryRecordId, owner: root.principalId };
+}
+
+/**
+ * The Lens a folder is listed through: the SDK's place Lens (the connected account, then the
+ * folder's owner, then the default). The client never splices principals itself.
+ */
+export function placeLens(efs: Efs, folder: FolderRef, reader: string | undefined): Lens {
+  return efs.lens.place({
+    ...(reader ? { reader: reader as never } : {}),
+    ...(folder.owner ? { owner: folder.owner } : {}),
+    base: efs.lens.default,
+  });
+}
+
 /** The SDK read the listing needs, injected so tests can replay recorded results. */
 export interface FolderReads {
   listFolder(

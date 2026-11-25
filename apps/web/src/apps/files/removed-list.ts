@@ -73,7 +73,10 @@ export class EfsFilesRemoved extends EfsElement {
     const key = base ? `${base}|${this.generation}` : undefined;
     if (key === this.#loaded) return;
     this.#loaded = key;
-    if (base) void this.#load(undefined, base === this.#shown);
+    // After a microtask: a signal write during Lit's update (inside SignalWatcher's computed)
+    // would not render again.
+    const keep = base === this.#shown;
+    if (base) queueMicrotask(() => void this.#load(undefined, keep));
     this.#shown = base;
   }
 

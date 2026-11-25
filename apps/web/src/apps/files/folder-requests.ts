@@ -16,6 +16,13 @@ export type FolderPlanners = Pick<
 export type FolderRequest =
   | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly name: string }
   | { readonly kind: 'rename'; readonly from: EntryRef; readonly to: string }
+  /** Into another folder under the same name. A folder needs the path to `to` (`via`). */
+  | {
+      readonly kind: 'move';
+      readonly from: EntryRef;
+      readonly to: FolderRef;
+      readonly via?: ViewPath;
+    }
   | {
       readonly kind: 'remove';
       readonly entries: readonly EntryRef[];
@@ -25,8 +32,9 @@ export type FolderRequest =
   | { readonly kind: 'restore'; readonly entries: readonly RestoreEntry[] };
 
 /**
- * The path to an entry's folder from the start of the person's view: what a folder restore (or
- * move) needs so the SDK can check it never lands inside itself.
+ * The path to a folder from the start of the person's view (the realm's root, by names): what a
+ * folder restore (the entry's folder) or move (the destination) needs, so the SDK can check the
+ * folder never lands inside itself. The SDK resolves it again against the chain.
  */
 export interface ViewPath {
   readonly from: FolderRef;
@@ -48,6 +56,8 @@ export function placesOf(r: FolderRequest): readonly Place[] {
       return [place(r.folder, r.name)];
     case 'rename':
       return [place(r.from.folder, r.from.name), place(r.from.folder, r.to)];
+    case 'move':
+      return [place(r.from.folder, r.from.name), place(r.to, r.from.name)];
     case 'remove':
     case 'restore':
       return r.entries.map((e) => place(e.folder, e.name));
@@ -79,6 +89,16 @@ export function planRequest(
         efs,
         writer,
         { moves: [{ from: r.from, to: { name: r.to } }], lens },
+        o,
+      );
+    case 'move':
+      return planners.planMoveEntries(
+        efs,
+        writer,
+        {
+          moves: [{ from: r.from, to: { folder: r.to, ...(r.via ? { via: r.via } : {}) } }],
+          lens,
+        },
         o,
       );
     case 'remove':
