@@ -94,6 +94,8 @@ interface SelectedItem extends SelectedEntry {
 interface Removal {
   readonly sequenceId: string;
   readonly entries: readonly SelectedEntry[];
+  /** Removed and blocked (a mask): Restore also unblocks. */
+  readonly blocked: boolean;
 }
 
 export class EfsFilesListing extends EfsElement {
@@ -258,15 +260,17 @@ export class EfsFilesListing extends EfsElement {
    * the SDK can check it never lands inside itself: unknown for a folder opened by its link, and
    * then there is no ask (the caller says why: files.restore.needsPath).
    */
-  #restoreAsk(entries: readonly SelectedEntry[]): FolderAsk | undefined {
+  #restoreAsk(entries: readonly SelectedEntry[], blocked = false): FolderAsk | undefined {
     const efs = this.#efs;
     const via = efs ? viewPath(this.nav.path.get(), rootFolder(efs)) : undefined;
     if (!via && entries.some((e) => e.isFolder)) return undefined;
     return {
       kind: 'restore',
-      entries: entries.map((e) =>
-        e.isFolder && via ? { entry: e.entry, via } : { entry: e.entry },
-      ),
+      entries: entries.map((e) => ({
+        entry: e.entry,
+        ...(e.isFolder && via ? { via } : {}),
+        ...(blocked ? { blocked: true } : {}),
+      })),
     };
   }
 
@@ -282,9 +286,10 @@ export class EfsFilesListing extends EfsElement {
   #onRestoreRemoved = (event: Event): void => {
     event.stopPropagation();
     const { folder, row } = (event as CustomEvent<RestoreRemovedDetail>).detail;
-    const ask = this.#restoreAsk([
-      { entry: { folder, name: row.name }, isFolder: row.target.kind === 'folder' },
-    ]);
+    const ask = this.#restoreAsk(
+      [{ entry: { folder, name: row.name }, isFolder: row.target.kind === 'folder' }],
+      row.state === 'MASKED',
+    );
     if (ask) this.#ask(ask);
   };
 
@@ -658,14 +663,21 @@ export class EfsFilesListing extends EfsElement {
         unsettled,
       );
       const unsaved = this.#unsavedNewFiles(folder);
-      const restoreAsk = removedSave ? this.#restoreAsk(removedSave.entries) : undefined;
+      const restoreAsk = removedSave
+        ? this.#restoreAsk(removedSave.entries, removedSave.blocked)
+        : undefined;
       body = html`${
         removed && removed.folder.directory === folder.directory
           ? html`<p class="efs-entries-removed" role="status">
               ${
-                removedCount > 1
-                  ? t('files.list.removedMany', { count: removedCount })
-                  : t('files.list.removed', { name: removed.name })
+                removedSave?.blocked
+                  ? removedCount > 1
+                    ? t('files.list.blockedMany', { count: removedCount })
+                    : t('files.list.blocked', { name: removed.name })
+                  : removedCount > 1
+                    ? t('files.list.removedMany', { count: removedCount })
+                    : t('files.list.removed', { name: removed.name })
+              })
               }
               <wa-button
                 size="s"
@@ -934,7 +946,11 @@ export class EfsFilesListing extends EfsElement {
     // A save from the selection: the selection is done.
     if (ask?.kind === 'remove' || ask?.kind === 'move') this.#selected.set(new Map());
     if (ask?.kind === 'remove') {
-      this.#pendingRemoval = { sequenceId: detail.sequenceId, entries: ask.entries };
+      this.#pendingRemoval = {
+        sequenceId: detail.sequenceId,
+        entries: ask.entries,
+        blocked: ask.hide,
+      };
       this.#removed.set(undefined);
     } else if (ask?.kind === 'restore') {
       this.#removed.set(undefined);
