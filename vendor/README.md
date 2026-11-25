@@ -7,7 +7,7 @@ refuses any other bytes.
 
 | File | Source | sha256 |
 |---|---|---|
-| `efs-sdk-0.0.0-ae21b8c.tgz` | efs-project/sdk-v2 main `ae21b8c6b1f78dd331fd1f4c52f4e1a4549f9d85`, packed with the SDK's own `tools/pack.mjs` | `5790478e7623f9443b391a9021a1bd9954aed5d85e891f3d3661235dbec7b36e` |
+| `efs-sdk-0.0.0-445aca5.tgz` | efs-project/sdk-v2 main `445aca519cd36d4dd19e3127d8cca7cbfa4f9bbe` (#20: cache hardening), packed with the SDK's own `tools/pack.mjs`; matches the SDK dev's independent build | `fde589a6be691fff9cf8e7e4b6c4281145b42a9f47f84f7d8b7a5f45f3cf5e28` |
 
 **Bumping:** the SDK dev names a main commit. Pack it from a `git archive` of that commit
 (`pnpm install --frozen-lockfile && pnpm --filter @efs/sdk build && node tools/pack.mjs --only sdk`);
