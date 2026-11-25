@@ -11,7 +11,7 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { EDIT_DONE_EVENT, type EditDoneDetail, shortId } from './editor.ts';
+import { type EditDoneDetail, shortId } from './editor.ts';
 import { readerNotice } from './notice.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';

@@ -27,6 +27,8 @@
     "build": "node tools/build/check-runtime.ts && node tools/build/check-messages.ts && node tools/build/icons.ts && vite build apps/web && node tools/build/postbuild.ts",
     "build:repro": "node tools/build/repro.ts",
     "test:e2e": "playwright test",
+    "test:e2e:live": "EFS_CHAIN=live playwright test tests/e2e/edit.spec.ts --project=chromium",
+    "transcripts:record": "EFS_CHAIN=record playwright test tests/e2e/edit.spec.ts --project=chromium --workers=1",
     "preview:static": "node tools/serve/static-serve.ts --dir apps/web/dist",
     "icons": "node tools/build/icons.ts --write"
   },
