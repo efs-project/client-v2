@@ -31,6 +31,8 @@ export interface SaveHoldInput {
   readonly file?: string;
   /** A folder operation: every (folder, name) it touches (a move: both ends). */
   readonly places?: readonly Place[];
+  /** A tag save: every (topic, thing) statement it makes (statementKey), from its review. */
+  readonly statements?: readonly string[];
   /** The save a review is continuing: it never holds itself. */
   readonly except?: string | undefined;
 }
@@ -38,7 +40,24 @@ export interface SaveHoldInput {
 type Touches =
   | { readonly kind: 'file'; readonly file: string }
   | { readonly kind: 'places'; readonly keys: ReadonlySet<string> }
+  /** Tag statements (and labels and links between tags): one key per (subject, what). */
+  | { readonly kind: 'statements'; readonly keys: ReadonlySet<string> }
   | { readonly kind: 'unknown' };
+
+/** One statement's key: a topic (or a home) and what it says about (a thing, or a label). */
+export const statementKey = (topic: string, thing: string): string =>
+  `${topic.toLowerCase()}\u0000${thing.toLowerCase()}`;
+
+/** A save's statements, or unknown when the effect doesn't name them cleanly. */
+function statementsOf(topic: unknown, things: unknown): Touches {
+  if (typeof topic !== 'string' || !Array.isArray(things)) return { kind: 'unknown' };
+  const keys = new Set<string>();
+  for (const thing of things) {
+    if (typeof thing !== 'string') return { kind: 'unknown' };
+    keys.add(statementKey(topic, thing));
+  }
+  return { kind: 'statements', keys };
+}
 
 /** Folder ids compare case-insensitively (hex); names are exact (files-name/2 is byte-exact). */
 export const placeKey = (folder: unknown, name: unknown): string | undefined =>
@@ -86,6 +105,23 @@ export function touchesOf(effect: SequenceProgress['effect']): Touches {
       return Array.isArray(e.entries)
         ? keysOf((e.entries as Record<string, unknown>[]).map((x) => [x.folder, x.name] as const))
         : { kind: 'unknown' };
+    // Tag saves (sdk-v2 983d70b): the statements they make, at one topic (or home) each.
+    case 'tags.tag':
+    case 'tags.deny':
+    case 'tags.untag':
+      return statementsOf(e.topic, e.targets);
+    // Registration only: it makes no statement, so it holds no statement.
+    case 'tags.register':
+      return { kind: 'statements', keys: new Set() };
+    case 'tags.label':
+      return typeof e.lang === 'string'
+        ? statementsOf(e.subject, [`label:${e.lang}`])
+        : { kind: 'unknown' };
+    case 'tags.same':
+    case 'tags.broader':
+      return typeof e.other === 'string'
+        ? statementsOf(e.subject, [`${e.kind}:${e.other}`])
+        : { kind: 'unknown' };
     default:
       return { kind: 'unknown' };
   }
@@ -95,7 +131,10 @@ export function touchesOf(effect: SequenceProgress['effect']): Touches {
 function disjoint(a: Touches, b: Touches): boolean {
   if (a.kind === 'unknown' || b.kind === 'unknown') return false;
   if (a.kind === 'file' && b.kind === 'file') return a.file !== b.file;
-  if (a.kind === 'places' && b.kind === 'places') {
+  if (
+    (a.kind === 'places' && b.kind === 'places') ||
+    (a.kind === 'statements' && b.kind === 'statements')
+  ) {
     for (const key of a.keys) if (b.keys.has(key)) return false;
     return true;
   }
@@ -105,15 +144,17 @@ function disjoint(a: Touches, b: Touches): boolean {
 
 export function saveHold(
   saves: readonly SequenceProgress[],
-  { account, file, places, except }: SaveHoldInput,
+  { account, file, places, statements, except }: SaveHoldInput,
 ): { readonly hold?: SaveHold; readonly lapsed: boolean } {
   const me = account.toLowerCase();
   const mine: Touches =
     file !== undefined
       ? { kind: 'file', file: file.toLowerCase() }
-      : places !== undefined
-        ? keysOf(places.map((x) => [x.folder, x.name] as const))
-        : { kind: 'unknown' };
+      : statements !== undefined
+        ? { kind: 'statements', keys: new Set(statements.map((k) => k.toLowerCase())) }
+        : places !== undefined
+          ? keysOf(places.map((x) => [x.folder, x.name] as const))
+          : { kind: 'unknown' };
   let waiting: { minutes: number; block: bigint } | undefined;
   let waitingUnknown = false;
   let lapsed = false;

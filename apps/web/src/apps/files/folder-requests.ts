@@ -284,6 +284,8 @@ export interface FolderHoldInput {
   readonly saves: readonly import('@efs/sdk/actions').SequenceProgress[];
   /** Undefined: places that can't be keyed (fail-closed: any unconfirmed or unsettled save holds). */
   readonly places: readonly Place[] | undefined;
+  /** A tag save: its statements (topic and thing, from its review), held by statement. */
+  readonly statements?: readonly string[];
   /** The save this review continues: it never holds itself. */
   readonly except?: string | undefined;
 }
@@ -317,7 +319,11 @@ export function folderHold(
   }
   const { hold, lapsed } = saveHold(input.saves, {
     account: input.signer,
-    ...(input.places ? { places: input.places } : {}),
+    ...(input.statements
+      ? { statements: input.statements }
+      : input.places
+        ? { places: input.places }
+        : {}),
     except: input.except,
   });
   return hold ? { hold: { kind: 'held' }, lapsed } : { lapsed };
