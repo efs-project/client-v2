@@ -31,14 +31,18 @@ import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
 import type { LinkState } from './target.ts';
 import {
+  aboutCount,
   badWord,
   DEFAULT_TOPIC_VIEW,
   emptyLine,
   filedBelow,
+  fromPlacesPage,
   fromTopicPage,
+  type PlacesState,
   pathText,
   rowWho,
   sections,
+  shownPlaces,
   TOPIC_VIEWS,
   type TopicListState,
 } from './topic-model.ts';
@@ -56,6 +60,78 @@ export interface PlaceOpened {
 const loadTags = async () => import('@efs/sdk/tags');
 const loadChecksum = async () => (await import('@efs/sdk')).checksumAddress;
 
+/** What a row's line says about who it's from (empty for an address's own rows). */
+export function whoLine(
+  t: Translator['t'],
+  row: TopicRow,
+  me: string | undefined,
+  owner: string | undefined,
+): string {
+  const who = rowWho(row, me, owner);
+  if (!who) return '';
+  switch (who.kind) {
+    case 'you':
+      return t('files.topic.taggedByYou');
+    case 'author':
+      return t('files.topic.taggedBy', { author: shortId(who.author) });
+    case 'public':
+      return who.yes === undefined ? '' : t('files.topic.yes', { count: Number(who.yes) });
+    case 'raw':
+      return who.yes === undefined || who.statements === undefined
+        ? ''
+        : t('files.topic.rawCounts', {
+            yes: Number(who.yes),
+            statements: Number(who.statements),
+          });
+  }
+}
+
+/**
+ * Opens a listed thing by its permanent link, keeping the list beside it (`opened`). A thing only
+ * the public tier vouched for opens behind the media gate.
+ */
+export function openThing(
+  host: AppHost,
+  nav: FolderNav,
+  opened: { set(o: PlaceOpened | undefined): void },
+  place: PlaceLink,
+  row: TopicRow,
+): void {
+  const target = linkOf({ kind: 'object', subject: row.thing as never });
+  if (row.decider.kind !== 'lens') nav.gate(row.thing);
+  opened.set({ place, link: target });
+  host.openLink(target);
+}
+
+/** The view control: People I trust, Everyone, Unfiltered. */
+export function viewControl(
+  t: Translator['t'],
+  value: TopicView,
+  onChange: (view: TopicView) => void,
+) {
+  return html`<wa-radio-group
+    class="efs-topic-view"
+    label=${t('files.topic.view.label')}
+    orientation="horizontal"
+    size="s"
+    .value=${value}
+    @change=${(event: Event) => {
+      const next = TOPIC_VIEWS.find(
+        (v) => v === (event.target as HTMLElement & { value: string }).value,
+      );
+      if (next && next !== value) onChange(next);
+    }}
+  >
+    ${TOPIC_VIEWS.map((v) => html`<wa-radio value=${v}>${t(VIEW_LABEL[v])}</wa-radio>`)}
+  </wa-radio-group>`;
+}
+
+/** The Lens a tag's list is read in: the link's own, else you first, then the default Lens. */
+export function tagLens(efs: Efs, lens: Lens | undefined, reader: string | undefined): Lens {
+  if (lens) return lens;
+  return reader ? efs.lens.mineFirst(reader as never, efs.lens.default) : efs.lens.default;
+}
+
 const VIEW_LABEL: Readonly<Record<TopicView, MessageId>> = {
   mine: 'files.topic.view.mine',
   everyone: 'files.topic.view.everyone',
@@ -72,6 +148,7 @@ export class EfsFilesTopic extends EfsElement {
     nav: { attribute: false },
     place: { attribute: false },
     opened: { attribute: false },
+    plain: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
@@ -79,6 +156,8 @@ export class EfsFilesTopic extends EfsElement {
   declare place: ReadonlySignal<PlaceLink | undefined>;
   /** Where this pane says which row it opened. */
   declare opened: { set(o: PlaceOpened | undefined): void };
+  /** A one-word tag shown as its own list: "The word's page" goes back to the word's page. */
+  declare plain: { set(canonical: string | undefined): void } | undefined;
 
   #view = state<TopicView>(DEFAULT_TOPIC_VIEW);
   #below = state(true);
@@ -88,6 +167,9 @@ export class EfsFilesTopic extends EfsElement {
   #paths = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
   /** The address shown, checksummed (display only; the lowercase form is what's read). */
   #checksummed = state<string | undefined>(undefined);
+  /** "Tags under this one": newest first (the junk rule and the Lens tiers wait on the SDK). */
+  #children = state<PlacesState | undefined>(undefined);
+  #showAll = state(false);
   #scope: OwnerScope | undefined;
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
@@ -131,7 +213,7 @@ export class EfsFilesTopic extends EfsElement {
         base: efs.lens.default,
       });
     }
-    return reader ? efs.lens.mineFirst(reader as never, efs.lens.default) : efs.lens.default;
+    return tagLens(efs, undefined, reader);
   }
 
   async #load(
@@ -152,6 +234,8 @@ export class EfsFilesTopic extends EfsElement {
     const { signal } = run;
     this.#state.set({ phase: 'loading' });
     this.#count.set(undefined);
+    this.#children.set(undefined);
+    this.#showAll.set(false);
     if (place.status === 'home') {
       void loadChecksum()
         .then((checksum) => {
@@ -201,7 +285,10 @@ export class EfsFilesTopic extends EfsElement {
       );
       const next = fromTopicPage(page);
       this.#state.set(next);
-      void this.#readPaths(efs, next, signal);
+      // One after the other, so the reads keep one order (replays depend on it).
+      await this.#readPaths(efs, next, signal);
+      if (place.status === 'topic' && !signal.aborted)
+        await this.#readChildren(efs, target, signal);
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
@@ -244,6 +331,133 @@ export class EfsFilesTopic extends EfsElement {
     }
   }
 
+  /** "Tags under this one": a page of the tag's children (or the next, appended). */
+  async #readChildren(efs: Efs, target: TopicPlace, signal: AbortSignal): Promise<void> {
+    const before = this.#children.get();
+    const cursor = before?.phase === 'page' ? before.next : undefined;
+    if (before?.phase === 'page' && cursor) this.#children.set({ ...before, more: 'loading' });
+    else this.#children.set({ phase: 'loading' });
+    try {
+      const { topicChildren } = await loadTags();
+      const page = await topicChildren(efs, target, { ...(cursor ? { cursor } : {}), signal });
+      if (signal.aborted) return;
+      this.#children.set(
+        fromPlacesPage(page, before?.phase === 'page' && cursor ? before : undefined),
+      );
+    } catch (error) {
+      if (signal.aborted) return;
+      console.error(error);
+      this.#children.set(
+        before?.phase === 'page' && cursor ? { ...before, more: 'failed' } : { phase: 'unknown' },
+      );
+    }
+  }
+
+  #moreChildren(): void {
+    const efs = verifiedEfs(this.host.reader.get());
+    const place = this.place.get();
+    const run = this.#run;
+    if (!efs || place?.status !== 'topic' || !run) return;
+    this.#showAll.set(true);
+    void this.#readChildren(efs, this.#target(place), run.signal);
+  }
+
+  #childrenSection(place: Extract<PlaceLink, { status: 'topic' }>, t: Translator['t']) {
+    const c = this.#children.get();
+    if (!c || c.phase === 'loading') return nothing;
+    if (c.phase === 'invalid') {
+      return html`<section class="wa-stack wa-gap-2xs efs-topic-children" data-section="children">
+        <h4 class="efs-topic-heading">${t('files.topic.children')}</h4>
+        <p class="efs-quiet">
+          ${t('files.topic.childrenInvalid')}
+          <code translate="no" dir="ltr">${c.reason.code}</code>
+        </p>
+      </section>`;
+    }
+    if (c.phase === 'unknown') {
+      return html`<section class="wa-stack wa-gap-2xs efs-topic-children" data-section="children">
+        <h4 class="efs-topic-heading">${t('files.topic.children')}</h4>
+        <p class="efs-quiet">${t('files.topic.childrenUnknown')}</p>
+        <div>
+          <wa-button size="s" @click=${() => this.#retryChildren()}>${t('outcome.retry')}</wa-button>
+        </div>
+      </section>`;
+    }
+    if (c.rows.length === 0 && c.finished) return nothing;
+    const { shown, held } = shownPlaces(c.rows, this.#showAll.get());
+    const open = (word: string) => {
+      const words = [...place.segments, word];
+      try {
+        this.host.openLink(linkOf({ kind: 'topic', segments: words, words }));
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    return html`<section class="wa-stack wa-gap-2xs efs-topic-children" data-section="children">
+      <h4 class="efs-topic-heading">${t('files.topic.children')}</h4>
+      <ul class="efs-entries" role="list">
+        ${shown.map((row) => {
+          const label = row.word ? pathText([...place.segments, row.word]) : shortId(row.topic);
+          return html`<li class="efs-entry efs-topic-child">
+            ${
+              row.word
+                ? html`<button
+                    type="button"
+                    class="efs-entry-open"
+                    @click=${() => row.word && open(row.word)}
+                  >
+                    ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="auto">${label}</span>
+                  </button>`
+                : html`<span class="efs-entry-open">
+                    ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="ltr">${label}</span>
+                  </span>`
+            }
+            <span class="efs-entry-meta efs-quiet">
+              ${t('files.topic.childAbout', { count: Number(aboutCount(row)) })}
+            </span>
+          </li>`;
+        })}
+      </ul>
+      ${
+        held > 0
+          ? html`<div>
+              <wa-button size="s" class="efs-topic-children-all" @click=${() => this.#showAll.set(true)}
+                >${
+                  // "Show all N" only for a directory read to its end; otherwise more may follow.
+                  c.finished
+                    ? t('files.topic.childrenAll', { count: c.rows.length })
+                    : t('files.topic.childrenMore')
+                }</wa-button
+              >
+            </div>`
+          : this.#showAll.get() || c.rows.length <= shown.length
+            ? c.more === 'failed'
+              ? html`<p class="efs-quiet">${t('files.topic.childrenUnknown')}</p>`
+              : c.next
+                ? html`<div>
+                    <wa-button
+                      size="s"
+                      class="efs-topic-children-more"
+                      ?loading=${c.more === 'loading'}
+                      @click=${() => this.#moreChildren()}
+                      >${t('files.list.keepLooking')}</wa-button
+                    >
+                  </div>`
+                : nothing
+            : nothing
+      }
+    </section>`;
+  }
+
+  #retryChildren(): void {
+    const efs = verifiedEfs(this.host.reader.get());
+    const place = this.place.get();
+    const run = this.#run;
+    if (!efs || place?.status !== 'topic' || !run) return;
+    this.#children.set(undefined);
+    void this.#readChildren(efs, this.#target(place), run.signal);
+  }
+
   /** The words of each topic a shown row was filed under (below the place), each read once. */
   async #readPaths(efs: Efs, s: TopicListState, signal: AbortSignal): Promise<void> {
     if (s.phase !== 'page') return;
@@ -259,34 +473,6 @@ export class EfsFilesTopic extends EfsElement {
       const next = new Map(this.#paths.get());
       next.set(id, answer?.status === 'PRESENT' ? answer.words : null);
       this.#paths.set(next);
-    }
-  }
-
-  /** Opens a row by its permanent link; one reached only through the public tier, gated. */
-  #open(row: TopicRow, place: PlaceLink): void {
-    const target = linkOf({ kind: 'object', subject: row.thing as never });
-    if (row.decider.kind !== 'lens') this.nav.gate(row.thing);
-    this.opened.set({ place, link: target });
-    this.host.openLink(target);
-  }
-
-  #who(row: TopicRow, me: string | undefined, owner: string | undefined, t: Translator['t']) {
-    const who = rowWho(row, me, owner);
-    if (!who) return '';
-    switch (who.kind) {
-      case 'you':
-        return t('files.topic.taggedByYou');
-      case 'author':
-        return t('files.topic.taggedBy', { author: shortId(who.author) });
-      case 'public':
-        return who.yes === undefined ? '' : t('files.topic.yes', { count: Number(who.yes) });
-      case 'raw':
-        return who.yes === undefined || who.statements === undefined
-          ? ''
-          : t('files.topic.rawCounts', {
-              yes: Number(who.yes),
-              statements: Number(who.statements),
-            });
     }
   }
 
@@ -316,12 +502,12 @@ export class EfsFilesTopic extends EfsElement {
         type="button"
         class="efs-entry-open"
         aria-label=${t('files.topic.open', { id })}
-        @click=${() => this.#open(row, place)}
+        @click=${() => openThing(this.host, this.nav, this.opened, place, row)}
       >
         ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
       </button>
       <span class="efs-entry-meta efs-quiet">
-        <span class="efs-topic-who">${this.#who(row, me, owner, t)}</span>
+        <span class="efs-topic-who">${whoLine(t, row, me, owner)}</span>
         ${filed}
       </span>
     </li>`;
@@ -436,6 +622,15 @@ export class EfsFilesTopic extends EfsElement {
         }
       </h3>
       ${
+        isTopic && place.segments.length === 1
+          ? html`<div>
+              <wa-button size="s" appearance="plain" class="efs-word-back" @click=${() => this.plain?.set(undefined)}
+                >${t('files.word.back', { word: place.segments[0] ?? '' })}</wa-button
+              >
+            </div>`
+          : nothing
+      }
+      ${
         isTopic && place.segments.length === 1 && place.segments[0]?.endsWith('.eth')
           ? html`<p class="efs-quiet efs-topic-not-address">
               ${t('files.topic.notAddress', { word: place.segments[0] })}
@@ -456,20 +651,7 @@ export class EfsFilesTopic extends EfsElement {
 
   #controls(place: PlaceLink, t: Translator['t']) {
     return html`<div class="wa-cluster wa-gap-m efs-topic-controls">
-      <wa-radio-group
-        class="efs-topic-view"
-        label=${t('files.topic.view.label')}
-        orientation="horizontal"
-        size="s"
-        .value=${this.#view.get()}
-        @change=${(event: Event) => {
-          const value = (event.target as HTMLElement & { value: string }).value;
-          const next = TOPIC_VIEWS.find((v) => v === value);
-          if (next && next !== this.#view.get()) this.#view.set(next);
-        }}
-      >
-        ${TOPIC_VIEWS.map((v) => html`<wa-radio value=${v}>${t(VIEW_LABEL[v])}</wa-radio>`)}
-      </wa-radio-group>
+      ${viewControl(t, this.#view.get(), (view) => this.#view.set(view))}
       ${
         place.status === 'topic'
           ? html`<wa-radio-group
@@ -512,7 +694,12 @@ export class EfsFilesTopic extends EfsElement {
     const s = this.#state.get();
     return html`<div class="wa-stack wa-gap-s efs-topic" data-place=${place.status}>
       ${this.#header(place, t)}
-      ${notice ?? html`${this.#controls(place, t)} ${s ? this.#list(s, place, t) : nothing}`}
+      ${
+        notice ??
+        html`${this.#controls(place, t)}
+          ${place.status === 'topic' ? this.#childrenSection(place, t) : nothing}
+          ${s ? this.#list(s, place, t) : nothing}`
+      }
     </div>`;
   }
 }

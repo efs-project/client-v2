@@ -1,13 +1,17 @@
-import type { TopicPage, TopicRow } from '@efs/sdk/tags';
+import type { LookupPage, PlaceCountRow, TopicPage, TopicRow } from '@efs/sdk/tags';
 import { describe, expect, it } from 'vitest';
 import {
+  aboutCount,
   badWord,
+  CHILDREN_SHOWN,
   emptyLine,
   filedBelow,
+  fromPlacesPage,
   fromTopicPage,
   pathText,
   rowWho,
   sections,
+  shownPlaces,
   type TopicListState,
 } from './topic-model.ts';
 
@@ -137,5 +141,52 @@ describe('sections and who: rows by who decided them', () => {
 
   it('a path reads as /word/word', () => {
     expect(pathText(['cars', 'tesla'])).toBe('/cars/tesla');
+  });
+});
+
+describe('directories: children and a word page', () => {
+  const place = (n: number, ever = 1n, below = 0n) =>
+    ({
+      topic: `0x${n.toString(16).padStart(64, '0')}`,
+      word: `w${n}`,
+      registeredAt: BigInt(n),
+      positionsEver: ever,
+      positionsEverBelow: below,
+      filings: ever,
+      filingsBelow: below,
+    }) as PlaceCountRow;
+  const dir = (rows: PlaceCountRow[], finished: boolean) =>
+    ({
+      kind: 'efs.lookupPage',
+      status: 'PRESENT',
+      rows,
+      finished,
+      ...(finished ? {} : { next: { v: 1, query: '0x', next: '0x' } }),
+      skipped: { notOwnFold: 0 },
+    }) as unknown as LookupPage<PlaceCountRow>;
+
+  it('appends pages; only `finished` ends one; UNKNOWN is never an empty directory', () => {
+    const first = fromPlacesPage(dir([place(1)], false));
+    expect(first).toMatchObject({ phase: 'page', finished: false });
+    if (first.phase !== 'page') throw new Error('page');
+    expect(first.next).toBeDefined();
+    const all = fromPlacesPage(dir([place(2)], true), first);
+    expect(all).toMatchObject({ phase: 'page', finished: true });
+    if (all.phase !== 'page') throw new Error('page');
+    expect(all.rows.map((r) => r.word)).toEqual(['w1', 'w2']);
+    const failed = { kind: 'efs.lookupPage', status: 'UNKNOWN' } as never;
+    expect(fromPlacesPage(failed)).toEqual({ phase: 'unknown' });
+    const refused = { kind: 'efs.lookupPage', status: 'INVALID', reason: { code: 'X' } } as never;
+    expect(fromPlacesPage(refused)).toEqual({ phase: 'invalid', reason: { code: 'X' } });
+    expect(fromPlacesPage(failed, first as never)).toMatchObject({ phase: 'page', more: 'failed' });
+  });
+
+  it('shows the first 8 until "Show all"; "about N" is exact plus below', () => {
+    const rows = Array.from({ length: 11 }, (_, i) => place(i));
+    expect(shownPlaces(rows, false)).toMatchObject({ held: 3 });
+    expect(shownPlaces(rows, false).shown).toHaveLength(CHILDREN_SHOWN);
+    expect(shownPlaces(rows, true)).toEqual({ shown: rows, held: 0 });
+    expect(shownPlaces(rows.slice(0, 3), false).held).toBe(0);
+    expect(aboutCount(place(1, 2n, 3n))).toBe(5n);
   });
 });

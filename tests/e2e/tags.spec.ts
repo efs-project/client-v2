@@ -92,6 +92,11 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     );
     await expect(topic(page).locator('.efs-topic-count')).toHaveText(/About\W+2\W+tagged things/);
     await expect(crumbs(page)).toHaveCount(3);
+    // Tags under this one: model_y, with its count.
+    const child = topic(page).locator('[data-section="children"] .efs-topic-child');
+    await expect(child).toHaveCount(1);
+    await expect(child).toContainText('/cars/tesla/model_y');
+    await expect(child).toContainText(/about\W+1\W+tagged thing/);
     const axe = await new AxeBuilder({ page })
       .include('efs-files-topic')
       .withTags(AXE_TAGS)
@@ -135,15 +140,32 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await expect(preview(page).locator('.efs-preview-gated')).toHaveCount(0);
     chain.step('Open the Lens row: no gate');
 
-    // The bar's words open their own tags.
+    // A child opens its own tag.
     await go(page, '#/r/testnet/cars/tesla');
-    await expect(section(page, 'lens')).toHaveCount(1);
+    await expect(child).toHaveCount(1);
+    await child.locator('button.efs-entry-open').click();
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars/tesla/model_y');
+    await expect(section(page, 'public')).toHaveCount(1);
+    chain.step('Tags under this one: model_y opens its own tag');
+
+    // The bar's first word opens its word's page; the plain tag opens from there, and back.
     await crumbs(page).nth(1).click();
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars');
+    const word = page.locator('efs-files-word');
+    await expect(word.locator('.efs-topic-title')).toHaveText(
+      /Everything tagged with the word\W+cars/,
+    );
+    const plainGroup = word.locator('.efs-word-group[data-root="yes"]');
+    await expect(plainGroup).toContainText(/\/cars\W+\(just the word\)/);
+    await expect(plainGroup).toContainText(/about\W+2\W+tagged things/);
+    await expect(plainGroup.locator('.efs-topic-row')).toHaveCount(2);
+    await plainGroup.locator('wa-button.efs-word-open').click();
     await expect(topic(page).locator('.efs-topic-title')).toHaveText(/Everything tagged\W+\/cars/);
     await expect(section(page, 'public')).toHaveCount(1);
+    await topic(page).locator('wa-button.efs-word-back').click();
+    await expect(plainGroup).toBeVisible();
     await chain.idle(500);
-    chain.step('The bar: "cars" opens /cars, which rolls up both');
+    chain.step('The bar: "cars" opens the word page; the plain /cars lists both; back to the page');
   } finally {
     await chain.finish();
   }
@@ -155,18 +177,69 @@ test('a word the network refuses is named before any read; a tag word ending .et
   const chain = await testChain('client-tags-words', 'No tags.');
   try {
     await open(page, chain, './#/r/testnet/Cars');
-    const bad = topic(page).locator('.efs-topic-bad-word');
+    const bad = page.locator('efs-files-word .efs-topic-bad-word');
     await expect(bad).toContainText(/Cars\W+isn't a word the network accepts in a tag \(rule\W+3/);
     chain.step('Cars: refused by the grammar (rule 3), nothing read');
 
     await go(page, '#/r/testnet/vitalik.eth');
-    await expect(topic(page).locator('.efs-topic-not-address')).toContainText(
+    const word = page.locator('efs-files-word');
+    await expect(word.locator('.efs-topic-not-address')).toContainText(
       /This is the tag\W+vitalik\.eth\W+, not an address\./,
     );
-    await expect(topic(page).locator('.efs-topic-mark')).toContainText('Tag');
-    await expect(topic(page).locator('.efs-topic-empty')).toBeVisible();
+    await expect(word.locator('.efs-topic-mark')).toContainText('Tag');
+    // A word nobody has used: the SDK's wordPage says INVALID today (its reader's ABSENT_PROVEN,
+    // asked to become an empty, finished page). Shown as refused, never as "couldn't be confirmed".
+    await expect(word.locator('.efs-word-invalid')).toContainText(
+      "This word's places can't be read:",
+    );
+    await expect(word.locator('efs-outcome')).toHaveCount(0);
     await chain.idle(500);
     chain.step('vitalik.eth: a tag, said not to be an address; nothing tagged');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a word page groups every place that uses the word, the plain tag first, never one mixed list', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-word-page',
+    'p.txt tagged /tesla, c.txt tagged /cars/tesla and k.txt tagged /companies/tesla, all by anvil #0.',
+  );
+  try {
+    await taggedFile(chain, 0, 'p.txt', [['tesla']]);
+    await taggedFile(chain, 0, 'c.txt', [['cars', 'tesla']]);
+    await taggedFile(chain, 0, 'k.txt', [['companies', 'tesla']]);
+    await open(page, chain, './#/r/testnet/tesla');
+    const word = page.locator('efs-files-word');
+    await expect(word.locator('.efs-topic-title')).toHaveText(
+      /Everything tagged with the word\W+tesla/,
+    );
+    const groups = word.locator('.efs-word-group');
+    await expect(groups).toHaveCount(3);
+    await expect(word.locator('.efs-word-count')).toHaveText(/3\W+places use it/);
+    // The plain tag first; each place its own group, each with its own items.
+    await expect(groups.first()).toHaveAttribute('data-root', 'yes');
+    await expect(groups.first()).toContainText(/\/tesla\W+\(just the word\)/);
+    for (const path of ['/cars/tesla', '/companies/tesla']) {
+      const g = groups.filter({ hasText: path });
+      await expect(g).toHaveCount(1);
+      await expect(g.locator('.efs-topic-row')).toHaveCount(1);
+    }
+    await expect(word.locator('.efs-topic-section')).toHaveCount(0);
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-word')
+      .withTags(AXE_TAGS)
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step('tesla: three groups, the plain tag first, no mixed list');
+
+    await groups.filter({ hasText: '/companies/tesla' }).locator('wa-button.efs-word-open').click();
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/companies/tesla');
+    await expect(section(page, 'lens')).toHaveCount(1);
+    await chain.idle(500);
+    chain.step('Open /companies/tesla: its own tag');
   } finally {
     await chain.finish();
   }

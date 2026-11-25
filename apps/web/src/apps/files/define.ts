@@ -9,6 +9,7 @@ import { EfsFilesRemoved } from './removed-list.ts';
 import { EfsFilesTopic } from './topic.ts';
 import { EfsFilesTree } from './tree.ts';
 import { EfsFilesView } from './views.ts';
+import { EfsFilesWord } from './word.ts';
 
 export function registerFilesElements(): void {
   if (!customElements.get('efs-files-view')) customElements.define('efs-files-view', EfsFilesView);
@@ -37,5 +38,8 @@ export function registerFilesElements(): void {
   }
   if (!customElements.get('efs-files-topic')) {
     customElements.define('efs-files-topic', EfsFilesTopic);
+  }
+  if (!customElements.get('efs-files-word')) {
+    customElements.define('efs-files-word', EfsFilesWord);
   }
 }

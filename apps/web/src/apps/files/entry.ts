@@ -18,6 +18,7 @@ import { type LinkState, linkState } from './target.ts';
 import type { EfsFilesTopic, PlaceLink, PlaceOpened } from './topic.ts';
 import type { EfsFilesTree } from './tree.ts';
 import type { EfsFilesView, FilesViewKind } from './views.ts';
+import type { EfsFilesWord } from './word.ts';
 
 const DEFAULT_LAYOUT: PaneLayout = {
   panes: [{ view: 'overview' }, { view: 'entries' }, { view: 'preview' }],
@@ -40,6 +41,11 @@ interface Shared {
    */
   readonly place: ReadonlySignal<PlaceLink | undefined>;
   readonly opened: Signal.State<PlaceOpened | undefined>;
+  /**
+   * A one-word tag shown as its own list rather than as its word's page (its canonical link): the
+   * word page's "Open" on the plain tag, for as long as that tag is shown.
+   */
+  readonly plain: Signal.State<string | undefined>;
 }
 
 /** The Overview pane: the folder's README, or its summary. */
@@ -77,8 +83,8 @@ function tree(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement {
 }
 
 /**
- * The Entries pane: a folder's listing, or a tag's (or an address's) list while one is shown.
- * Both stay mounted; the listing reads nothing while it's hidden.
+ * The Entries pane: a folder's listing, a tag's (or an address's) list, or a word's page (a
+ * one-word tag). All stay mounted; the listing reads nothing while it's hidden.
  */
 function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement {
   const box = document.createElement('div');
@@ -94,16 +100,38 @@ function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   const topic = document.createElement('efs-files-topic') as EfsFilesTopic;
   topic.host = host;
   topic.nav = shared.nav;
-  topic.place = shared.place;
   topic.opened = shared.opened;
-  box.append(list, topic);
+  topic.plain = shared.plain;
+  // A one-word tag is its word's page, unless its own list was asked for (plain).
+  const isWord = computed(() => {
+    const p = shared.place.get();
+    return p?.status === 'topic' && p.segments.length === 1 && shared.plain.get() !== p.canonical;
+  });
+  topic.place = computed(() => (isWord.get() ? undefined : shared.place.get()));
+  const word = document.createElement('efs-files-word') as EfsFilesWord;
+  word.host = host;
+  word.nav = shared.nav;
+  word.place = computed(() => (isWord.get() ? shared.place.get() : undefined));
+  word.opened = shared.opened;
+  word.plain = shared.plain;
+  box.append(list, topic, word);
   effect(scope, () => {
     const on = placed.get();
+    const words = isWord.get();
     list.hidden = on;
-    topic.hidden = !on;
+    topic.hidden = !on || words;
+    word.hidden = !words;
+  });
+  // Leaving the plain tag (another place, or none) ends it.
+  effect(scope, () => {
+    const p = shared.place.get();
+    const plain = shared.plain.get();
+    if (plain !== undefined && p?.canonical !== plain)
+      queueMicrotask(() => shared.plain.set(undefined));
   });
   list.start(scope);
   topic.start(scope);
+  word.start(scope);
   return box;
 }
 
@@ -150,6 +178,7 @@ export const entry: AppEntry = {
       shown: state<ListingState | undefined>(undefined),
       place,
       opened,
+      plain: state<string | undefined>(undefined),
     };
     // A new file is written where it was started: leaving that place ends the composer (its text
     // stays kept, and the folder's listing offers it back).

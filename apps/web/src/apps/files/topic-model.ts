@@ -11,7 +11,14 @@
 //   tier's, labelled; Raw applies no rule.
 
 import type { Reason } from '@efs/sdk';
-import type { TopicCursor, TopicPage, TopicRow, TopicView } from '@efs/sdk/tags';
+import type {
+  LookupPage,
+  PlaceCountRow,
+  TopicCursor,
+  TopicPage,
+  TopicRow,
+  TopicView,
+} from '@efs/sdk/tags';
 
 /** The views, in the order the control offers them. Everyone is the default for tags (D11). */
 export const TOPIC_VIEWS: readonly TopicView[] = ['mine', 'everyone', 'raw'];
@@ -144,4 +151,65 @@ export function rowWho(row: TopicRow, me: string | undefined, owner?: string): R
 /** A topic's path as shown: `/cars/tesla`. Each word is shown as stored (no fold here). */
 export function pathText(words: readonly string[]): string {
   return `/${words.join('/')}`;
+}
+
+/**
+ * A tag's children ("Tags under this one") or a word's places (the word page): the SDK's directory
+ * pages, newest first. Only `finished` ends one; UNKNOWN is never an empty directory.
+ */
+export type PlacesState =
+  | { readonly phase: 'loading' }
+  | {
+      readonly phase: 'page';
+      readonly rows: readonly PlaceCountRow[];
+      readonly finished: boolean;
+      readonly next?: PlacesCursor;
+      readonly more: 'idle' | 'loading' | 'failed';
+    }
+  | { readonly phase: 'unknown' }
+  /** The SDK refused the directory read: shown with its code, never as empty or as unknown. */
+  | { readonly phase: 'invalid'; readonly reason: Reason };
+
+export type PlacesCursor = NonNullable<
+  Extract<LookupPage<PlaceCountRow>, { status: 'PRESENT' }>['next']
+>;
+
+/** How many children a tag shows before "Show all": the client's choice (tags.md: up to 8). */
+export const CHILDREN_SHOWN = 8;
+
+export function fromPlacesPage(
+  page: LookupPage<PlaceCountRow>,
+  before?: Extract<PlacesState, { phase: 'page' }>,
+): PlacesState {
+  if (page.status !== 'PRESENT') {
+    if (before) return { ...before, more: 'failed' };
+    return page.status === 'INVALID'
+      ? { phase: 'invalid', reason: page.reason }
+      : { phase: 'unknown' };
+  }
+  return {
+    phase: 'page',
+    rows: before ? [...before.rows, ...page.rows] : page.rows,
+    finished: page.finished,
+    ...(page.next && !page.finished ? { next: page.next } : {}),
+    more: 'idle',
+  };
+}
+
+/** The rows a directory shows: the first `limit` until the person asks for all. */
+export function shownPlaces<T>(
+  rows: readonly T[],
+  showAll: boolean,
+  limit = CHILDREN_SHOWN,
+): { readonly shown: readonly T[]; readonly held: number } {
+  if (showAll || rows.length <= limit) return { shown: rows, held: 0 };
+  return { shown: rows.slice(0, limit), held: rows.length - limit };
+}
+
+/**
+ * "About N" for a place in a directory: filed exactly there plus filed strictly below it (the
+ * chain's two counts), an upper bound, never a row count.
+ */
+export function aboutCount(row: PlaceCountRow): bigint {
+  return row.positionsEver + row.positionsEverBelow;
 }

@@ -14,6 +14,15 @@
 - The media gate: a row opened from the public tier opens in Preview on its Type, size and author, with nothing fetched until "Show preview" (tab memory, per file).
 - Names under an address (`0x…/photos/cat.jpg`) say they can't be read yet, with "Open the address"; they wait for homes as folders' parents in the SDK.
 - **No display names yet** (SDK tags-0.1 §5.5 isn't built): a row shows the thing's short id. The client never invents one.
+
+**Built (stage 2, `apps/files/word.ts`, children in `topic.ts`):**
+- **The word page:** a one-word link (`#/r/<realm>/tesla`) opens it, grouped by place from the SDK's `wordPage`, never one mixed list. The plain one-word tag comes first ("/tesla (just the word)"), then the rest in the SDK's order. Lens-first ordering waits for a Lens count. Each group shows "about N" (exact plus below), its 3 most recently added items (the page's choice, not a read bound) and Open.
+  - Open on the plain tag shows that tag's own list in place of the page (tab memory: both share one link), with "All places that use tesla" to go back. Open on any other place opens its tag.
+  - Groups are read one after another, so a replay sees one order. A group that can't be read says so and is never added in.
+  - "N places use it" only for a finished directory; "found so far" with Keep looking otherwise.
+  - A word nobody has used reads INVALID from the SDK today (its reader's ABSENT_PROVEN). It's shown as refused, with its code, never as "nothing uses it" or "couldn't be confirmed", until the SDK maps it to an empty page (asked).
+- **Tags under this one** (children), on a tag's list: newest first, from `topicChildren`, the first 8, then "Show all N" for a finished directory ("Show more" otherwise, then Keep looking). Each opens its own tag, with "about N". The junk rule and the Lens tiers wait for the SDK.
+- **The location bar's first word** opens that word's page, as the link means.
 - **A file opened from a tag (or any file link) whose versions are all by people outside the view's Lens** is read in its own place, as a folder is: you, then its creator, then that Lens. It never reads "Confirmed not present" for that alone. A link carrying its own Lens is read in that Lens only.
 
 **Build order:**
