@@ -45,6 +45,7 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { approvalsLine } from './approvals.ts';
 import { newFileKey } from './compose.ts';
 import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
 
@@ -733,11 +734,7 @@ export class EfsFileEditor extends EfsElement {
         }
         <p>${t('review.appears')}</p>
         <p class="efs-review-prompts">
-          ${
-            r.prompts.sequential === 1
-              ? t('review.promptsOne')
-              : t('review.promptsMany', { count: r.prompts.sequential })
-          }
+          ${approvalsLine(t, r.prompts)}
         </p>
         <dl class="efs-facts">
           <dt>${t('review.size')}</dt>
