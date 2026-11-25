@@ -14,19 +14,18 @@
 // with its sticky chain id. It stops itself after 24 h even if this process is killed outright
 // (the fixture's watchdog); before then, the next start or dev:reset stops it by its lease.
 
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { devIdentity } from './identity.ts';
+import { isSameProcess, processFacts } from './ownership.ts';
 
 const ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
 const STATE_DIR = join(ROOT, '.efs-dev');
 const STATE_FILE = join(STATE_DIR, 'state.json');
 /** The fixture's lease registry and state for this worktree's chain. */
 const FIXTURE_HOME = join(STATE_DIR, 'fixture');
-const SCRIPT = 'tools/dev/dev.ts';
 const NETWORK_ID = 'dev';
 /** The fixture's watchdog stops anvil after this, even if this process dies without cleanup. */
 const CHAIN_TTL_SECONDS = 24 * 3600;
@@ -34,6 +33,8 @@ const CHAIN_TTL_SECONDS = 24 * 3600;
 interface DevState {
   readonly schema: 'efs-dev-state/1';
   readonly pid: number;
+  /** `ps -o lstart=` of `pid` when it started: a reused pid never matches it. */
+  readonly startTime: string;
   readonly worktree: string;
   readonly uiUrl: string;
   readonly rpcUrl: string;
@@ -50,24 +51,15 @@ const readState = (): DevState | undefined => {
   }
 };
 
-/** Whether `pid` is alive and is this worktree's dev command (never another process). */
-function isOurs(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-  try {
-    const command = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
-    return command.includes(SCRIPT);
-  } catch {
-    return false;
-  }
-}
+/**
+ * Whether the recorded process is still this worktree's dev command: alive, started at the
+ * recorded time (a reused pid isn't), and running the dev script. Checked before every signal.
+ */
+const isOurs = (state: DevState): boolean => isSameProcess(state, processFacts(state.pid));
 
 const running = (): DevState | undefined => {
   const state = readState();
-  return state && isOurs(state.pid) ? state : undefined;
+  return state && isOurs(state) ? state : undefined;
 };
 
 async function status(): Promise<void> {
@@ -76,7 +68,7 @@ async function status(): Promise<void> {
     console.log('No dev instance for this worktree. Start one with: pnpm dev');
     return;
   }
-  if (!isOurs(state.pid)) {
+  if (!isOurs(state)) {
     console.log(`Not running (stale state from ${state.startedAt}). pnpm dev:reset clears it.`);
     return;
   }
@@ -99,13 +91,13 @@ async function status(): Promise<void> {
 
 async function stop(): Promise<boolean> {
   const state = readState();
-  if (!state || !isOurs(state.pid)) {
+  if (!state || !isOurs(state)) {
     console.log('No dev instance is running for this worktree.');
     return true;
   }
   process.kill(state.pid, 'SIGTERM');
   for (let i = 0; i < 100; i++) {
-    if (!isOurs(state.pid)) {
+    if (!isOurs(state)) {
       console.log('Stopped.');
       return true;
     }
@@ -166,6 +158,9 @@ async function start(): Promise<void> {
     uiPort: process.env.EFS_DEV_UI_PORT,
     rpcPort: process.env.EFS_DEV_RPC_PORT,
   });
+  // Recorded so stop/reset can tell this process from a later one that reuses its pid.
+  const startTime = processFacts(process.pid)?.startTime;
+  if (!startTime) throw new Error("couldn't read this process's start time with ps");
   mkdirSync(STATE_DIR, { recursive: true });
   console.log(`Starting this worktree's chain on port ${id.rpcPort} (chain id ${id.chainId})…`);
 
@@ -231,6 +226,7 @@ async function start(): Promise<void> {
   const state: DevState = {
     schema: 'efs-dev-state/1',
     pid: process.pid,
+    startTime,
     worktree: ROOT,
     uiUrl,
     rpcUrl: chain.rpcUrl,
