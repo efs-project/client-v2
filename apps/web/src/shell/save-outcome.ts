@@ -3,9 +3,8 @@
 // Copy rules (PM, 2026-11-24): never say "saved" before COMPLETE; "Saved · confirming" until
 // final, then "Saved"; a reorg is "undone by the network" and re-sending is the person's choice;
 // abandoning is not undo; a race with another author reads as "someone else changed it", never
-// as the person's save failing. Branch on state, then reason.code and reason.retry; never parse
-// free text, except the E_CAS marker the SDK documents for the same-account race (until every
-// STALE reason carries `revert`).
+// as the person's save failing. Branch on state, then reason.code, reason.retry and the
+// structured fields (`revert`, `wallet`); never on `detail`, which is free text for logs.
 //
 // Continue is offered only when the SDK says the same plan can go on (retry "transient" or
 // "after-reconcile", or no reason). "after-replan" means this save can't finish as planned:
@@ -46,12 +45,8 @@ export type SaveOutcome =
   | { readonly kind: 'not-sent'; readonly code: string };
 
 /** The ledger refused because the editor's own HEAD moved (compare-and-swap). */
-function isCasRace(reason: SequenceProgress['reason']): boolean {
-  // `revert` arrives with the SDK's structured reasons; older reasons only carry `detail`.
-  const revert = (reason as { revert?: { error?: string } } | undefined)?.revert;
-  if (revert) return revert.error === 'E_CAS';
-  return reason?.detail?.includes('E_CAS') ?? false;
-}
+const isCasRace = (reason: SequenceProgress['reason']): boolean =>
+  reason?.revert?.error === 'E_CAS';
 
 export function saveOutcome(p: SequenceProgress): SaveOutcome {
   const code = p.reason?.code;

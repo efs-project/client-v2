@@ -7,8 +7,8 @@ refuses any other bytes.
 
 | File | Source | sha256 |
 |---|---|---|
-| `efs-sdk-0.0.0-88bfc0c.tgz` | efs-project/sdk-v2 main `88bfc0cf70a8d6e303d0045849eb4bc4cf3a2f01` (contracts #8 snapshot `07818d1`: five reader addresses and the planHash moved, the ledger did not; re-recorded replay fixtures; reconcile decodes `publicationAt` by Status), packed with the SDK's own `tools/pack.mjs`; matches the SDK dev's independent build | `2aec17e76751f02915fc0d67bfc82c7f309e6739b4604fafe05cb83a344c9e35` |
-| `efs-fixture-0.0.0-88bfc0c.tgz` | the same commit's `@efs/fixture` (node-only; `startFixtureChain` over the vendored contracts fixture, contracts `07818d1`), for the live-chain e2e job only; never bundled | `2296fa1c8414670114c70c47309fd1d2afe50023f067f06cef3888c7c6d887b8` |
+| `efs-sdk-0.0.0-2ab41b5.tgz` | efs-project/sdk-v2 main `2ab41b587207d7006a5417847d95898b0477a046` (#30: `WALLET_MISMATCH` as NOT_SENT with `reason.wallet`, STALE reasons carry `reason.revert`, settleMs bounds the receipt wait; contracts `07818d1` as in 88bfc0c), packed with the SDK's own `tools/pack.mjs`; matches the SDK dev's independent build | `6245171f45a0a09a3ebf2a8f83c5c1b5b281e9f11efa669cf3889b3df72eb22a` |
+| `efs-fixture-0.0.0-88bfc0c.tgz` | `@efs/fixture` from sdk-v2 main `88bfc0c` (byte-identical at `2ab41b5`) (node-only; `startFixtureChain` over the vendored contracts fixture, contracts `07818d1`), for the live-chain e2e job only; never bundled | `2296fa1c8414670114c70c47309fd1d2afe50023f067f06cef3888c7c6d887b8` |
 
 **Bumping:** the SDK dev names a main commit. Pack it from a `git archive` of that commit
 (`pnpm install --frozen-lockfile && pnpm --filter @efs/sdk build && node tools/pack.mjs --only sdk`);

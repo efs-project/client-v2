@@ -15,6 +15,8 @@ const p = (over: Partial<SequenceProgress>): SequenceProgress =>
     ...over,
   }) as SequenceProgress;
 
+const CAS = { selector: '0x12345678', error: 'E_CAS', args: [1n, 2n] };
+
 const reason = (code: string, retry = 'transient', detail?: string, extra = {}) =>
   ({ code, retry, detail, ...extra }) as never;
 
@@ -45,14 +47,14 @@ describe('saveOutcome', () => {
       state: 'PARTIAL',
       committed: 2,
       total: 3,
-      reason: reason('STALE', 'after-replan', 'revert E_CAS(…)'),
+      reason: reason('STALE', 'after-replan', undefined, { revert: CAS }),
     });
     expect(saveOutcome(lost)).toEqual({ kind: 'changed', committed: 2 });
     expect(saveAction(saveOutcome(lost))).toBe('reopen');
     expect(saveMessage(saveOutcome(lost))).toBe('save.changedPartly');
   });
 
-  it('prefers the structured revert over the detail text', () => {
+  it('decides on the structured revert, never on the detail text', () => {
     const structured = reason('STALE', 'after-replan', 'no marker here', {
       revert: { selector: '0x12345678', error: 'E_CAS' },
     });
@@ -61,6 +63,14 @@ describe('saveOutcome', () => {
       revert: { selector: '0x12345678', error: 'E_DEADLINE' },
     });
     expect(saveOutcome(p({ reason: other }))).toEqual({ kind: 'stale' });
+    // An unknown selector names no error: not a race.
+    const unknown = reason('STALE', 'after-replan', 'E_CAS', {
+      revert: { selector: '0xdeadbeef' },
+    });
+    expect(saveOutcome(p({ reason: unknown }))).toEqual({ kind: 'stale' });
+    expect(saveOutcome(p({ reason: reason('STALE', 'after-replan', 'revert E_CAS') }))).toEqual({
+      kind: 'stale',
+    });
   });
 
   it('offers Continue only when the same plan can finish', () => {
