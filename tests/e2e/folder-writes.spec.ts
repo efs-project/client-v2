@@ -895,3 +895,60 @@ test('Select two files, Remove: one review lists both, one send; the notice offe
     await chain.finish();
   }
 });
+
+const treeFolder = (page: Page, name: string) =>
+  page.locator(`efs-files-tree wa-tree-item.efs-tree-folder[data-name="${name}"]`);
+
+test('the folder tree: read as it opens, follows the trail both ways, leaves only when read, keyboard and axe', async ({
+  page,
+}) => {
+  const chain = await testChain('client-folder-tree', 'inbox/{note.txt, sub/} and archive/.');
+  try {
+    await withInbox(chain);
+    await openRoot(page, chain);
+    const tree = page.locator('efs-files-tree wa-tree');
+    await expect(treeFolder(page, 'inbox')).toBeVisible();
+    await expect(treeFolder(page, 'archive')).toBeVisible();
+    await expect(treeFolder(page, 'Root')).toHaveAttribute('selected', '');
+    chain.step('The tree: the root open, its folders listed (in the place Lens), Root selected');
+
+    // Choosing a folder in the tree opens it, and its own folders are read.
+    await treeFolder(page, 'inbox').locator('span.efs-tree-label').first().click();
+    await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
+    await expect(row(page, 'note.txt')).toBeVisible();
+    await expect(treeFolder(page, 'inbox')).toHaveAttribute('selected', '');
+    await expect(treeFolder(page, 'sub')).toBeVisible();
+    await expect(page.locator('efs-files-view wa-breadcrumb-item')).toHaveCount(2);
+    chain.step('Choose inbox/ in the tree: it opens, the breadcrumb names it, sub/ is read');
+
+    // The listing moves the tree: opening sub/ from its row selects it there; read with no
+    // folders, it's a leaf (no "Reading…" left behind).
+    await row(page, 'sub').locator('button.efs-entry-open').click();
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await expect(treeFolder(page, 'sub')).toHaveAttribute('selected', '');
+    await expect(treeFolder(page, 'sub').locator('wa-tree-item')).toHaveCount(0);
+    // Unopened folders hold a hidden "Reading…" until opened; none shows once reads are done.
+    await expect(tree.locator('.efs-tree-reading:visible')).toHaveCount(0);
+    chain.step('Open sub/ from the listing: the tree selects it; read with no folders, a leaf');
+
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-tree')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+
+    // The keyboard: Enter on a folder in the tree opens it.
+    await treeFolder(page, 'archive').focus();
+    await page.keyboard.press('Enter');
+    await expect(treeFolder(page, 'archive')).toHaveAttribute('selected', '');
+    await expect(page.locator('efs-files-view wa-breadcrumb-item')).toHaveCount(2);
+    // archive/'s own reads, not the screen sub/ left: its node is read (a leaf), and every read
+    // has answered before the case ends (so a recording holds them all).
+    await expect(treeFolder(page, 'archive').locator('wa-tree-item')).toHaveCount(0);
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await chain.idle(500);
+    chain.step('Keyboard: Enter on archive/ in the tree opens it');
+  } finally {
+    await chain.finish();
+  }
+});

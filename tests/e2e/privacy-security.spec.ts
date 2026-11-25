@@ -162,6 +162,7 @@ test('only the expected custom elements are registered', async ({ page }) => {
     'efs-files-listing',
     'efs-files-preview',
     'efs-files-removed',
+    'efs-files-tree',
     'efs-files-view',
     'efs-network-indicator',
     'efs-outcome',

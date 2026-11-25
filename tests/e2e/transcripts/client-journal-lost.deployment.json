@@ -23,7 +23,7 @@
     },
     "txHash": "0xc6bd2c5680db95e4a37dd242fe75c88eff6e3469946cef9e51b82c3400cc4b4d",
     "blockNumber": 38,
-    "blockHash": "0x669adfbb10dd6118875aeb469ff566d5e4724a429d318479204d578a1b343a03"
+    "blockHash": "0x9796788be76e1d32ed3cd0a977b19a77c79bae4aa485682e4342a6d138634e23"
   },
   "activation": {
     "revision": 1,
@@ -1375,7 +1375,7 @@
     "snapshot": "taken when the instance was deployed; read live values from the chain"
   },
   "rpc": {
-    "url": "http://127.0.0.1:8600",
+    "url": "http://127.0.0.1:8601",
     "chainId": 31337,
     "hardfork": "osaka"
   },

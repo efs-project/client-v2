@@ -31,6 +31,8 @@ export interface FolderNav {
   back(depth: number): void;
   /** A folder opened by its link (a reload, a shared link): it becomes the only folder opened. */
   resetTo(step: NavStep): void;
+  /** A folder chosen in the tree: the trail becomes the names from the root to it. */
+  goTo(steps: readonly NavStep[]): void;
   /**
    * The URL arrived at `folder` (undefined: the realm's root): back along the trail to it when it's
    * there (Back, the breadcrumb), else a trail of its own (resetTo). Nothing when it's the last.
@@ -80,6 +82,10 @@ export function createFolderNav(): FolderNav {
     resetTo(step) {
       browsing.set(true);
       path.set([step]);
+    },
+    goTo(steps) {
+      browsing.set(true);
+      path.set([...steps]);
     },
     back(depth) {
       const now = path.get();

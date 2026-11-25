@@ -45,3 +45,18 @@ describe('arrive: the trail follows the URL when it changes', () => {
     expect(nav.path.get()).toEqual([]);
   });
 });
+
+describe('goTo: a folder chosen in the tree', () => {
+  it('sets the whole trail, and the URL arriving there changes nothing', () => {
+    const nav = createFolderNav();
+    const steps = [
+      { folder: folder('a'), name: 'docs' },
+      { folder: folder('b'), name: 'notes' },
+    ];
+    nav.goTo(steps);
+    expect(nav.browsing.get()).toBe(true);
+    expect(nav.path.get()).toEqual(steps);
+    nav.arrive(folder('b'));
+    expect(nav.path.get()).toEqual(steps);
+  });
+});

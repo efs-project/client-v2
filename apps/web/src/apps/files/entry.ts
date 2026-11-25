@@ -13,6 +13,7 @@ import { createFolderNav, type FolderNav } from './navigation.ts';
 import { type ObjectKindState, objectKindState } from './object-kind.ts';
 import type { EfsFilesPreview } from './preview.ts';
 import { type LinkState, linkState } from './target.ts';
+import type { EfsFilesTree } from './tree.ts';
 import type { EfsFilesView, FilesViewKind } from './views.ts';
 
 const DEFAULT_LAYOUT: PaneLayout = {
@@ -35,6 +36,15 @@ function view(host: AppHost, kind: FilesViewKind, nav: FolderNav): HTMLElement {
   element.kind = kind;
   element.host = host;
   element.nav = nav;
+  return element;
+}
+
+/** The navigation pane: the folder tree, following the trail. */
+function tree(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement {
+  const element = document.createElement('efs-files-tree') as EfsFilesTree;
+  element.host = host;
+  element.nav = nav;
+  element.start(scope);
   return element;
 }
 
@@ -121,7 +131,7 @@ export const entry: AppEntry = {
       views,
       defaultLayout: DEFAULT_LAYOUT,
       location: view(host, 'location', nav),
-      navigation: view(host, 'navigation', nav),
+      navigation: tree(host, nav, scope),
       // A link opens on what it names, also on a phone: a folder on its Entries, a file on its
       // Preview; undefined until openObject has said which.
       linkView: computed(() => {
