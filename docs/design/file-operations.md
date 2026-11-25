@@ -25,14 +25,19 @@
    - Hiding another author's entry waits on contracts.
 4. **Pending isn't done.**
    - Until the banner says "Saved", the listing shows the change with a "Saving" badge (A1's optimistic UI over the journal).
-   - **Which rows are pending comes from the save's effect,** not from the client's guess. Each effect (`files.create`, `files.createFolder`, `files.move`, `files.remove`, `files.restore`) lists the (folder, name) positions it touches, and those rows carry the badge. A second operation on a held position waits, as a second edit of the same file does.
+   - **Which rows are pending comes from the save's effect,** not from the client's guess. Each folder effect names the places it touches as (folder, name) pairs, and those rows carry the badge. A second operation on a held place waits, as a second edit of the same file does.
+     - `files.create` and `files.createFolder`: `{ folder, name, … }`;
+     - `files.remove` (with `hide`) and `files.restore`: `entries[]` of `{ folder, name, target }`;
+     - `files.move`: `moves[]` of `{ folder, name, toFolder, toName, target }`, so both ends.
+
+     That's the SDK's shape at `64bc33c`, which may change in review.
    - **The hold rule** (`shell/save-hold.ts`, PM 2026-11-25). An unsettled save of the same account holds a new one when:
      - both are `files.edit` of the same file (as today); or
-     - both list positions, and any position is shared. A move holds both its old and its new position.
+     - both are folder effects, and any (folder, name) pair is shared. A move counts both (`folder`, `name`) and (`toFolder`, `toName`).
    - **It stays fail-closed.** A pending save whose effect is missing, or of a kind this version doesn't recognize, still holds every new save of that account, as a folder save does today, because today's check knows only `files.edit`.
-   - **An edit and a folder operation hold each other only by that fallback.** An edit changes a file's contents and has no positions; a folder operation changes placements, not contents.
+   - **An edit and a folder operation hold each other only by that fallback.** An edit changes a file's contents and names no (folder, name); a folder operation changes placements, not contents.
    - The release rules (`pastDeadline`, PARTIAL and NOT_STARTED waiting for the person) don't change.
-   - **Tests, when wired:** an unrelated position doesn't wait; a shared position waits; a move holds both ends; an unknown effect kind holds everything.
+   - **Tests, when wired:** an unrelated (folder, name) doesn't wait; a shared one waits; a move holds both ends; an unknown or missing effect holds everything.
    - A stop shown in the banner (partial, "undone by the network") also shows on the row.
    - A pending entry is never shown as a settled one.
 5. **Names are checked by the SDK, as the person types.**
@@ -307,7 +312,7 @@ An unrecognised code is shown as "Couldn't plan this ({$code})", with its raw co
 - `shownAfter` on remove and move;
 - the gas figure.
 
-**Effects:** `files.create`, `files.createFolder`, `files.move`, `files.remove` and `files.restore`, each listing its positions. They drive the per-name "Saving" badges and holds.
+**Effects:** `files.create`, `files.createFolder`, `files.move`, `files.remove` and `files.restore`, each naming its (folder, name) pairs (shapes under "Pending isn't done"). They drive the per-name "Saving" badges and holds.
 
 **Answers so far** (PM, 2026-11-25; the SDK dev confirms when the exports land):
 - **What a row carries:** author, position, kind, Type id and size. Size may sit behind an option if it costs a read per row.
@@ -332,7 +337,7 @@ Each operation is recorded once against the SDK's fixture chain (`pnpm transcrip
   - "Remove and block this name" is offered only to the place's owner.
 - **Another author's entry:** actions disabled, with the reason.
 - **Batch refusals:** a selection with one refused item plans nothing and lists the item with its code's copy. "Leave these out" plans the rest; an unknown code shows raw.
-- **Pending rows** come from the effect's positions: only the touched names show "Saving", and a second operation on a held name waits.
+- **Pending rows** come from the effect's (folder, name) pairs: only the touched names show "Saving", and a second operation on a held name waits.
 - **`resolvePath` statuses:** NOT_A_FOLDER, MASKED and ABSENT_PROVEN each name their segment.
 - **An `invalid` entry** shows as "can't be read", never as a file and never hidden.
 - **Filter by kind:** a PARTIAL filtered page shows "Keep looking", never "No folders".
