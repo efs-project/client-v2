@@ -5,12 +5,14 @@
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppEntry, AppHost, AppMount, PaneLayout, ViewDescriptor } from '../../shell/apps.ts';
 import { effect } from '../../state/effect.ts';
-import { computed, type ReadonlySignal } from '../../state/signals.ts';
+import { computed, type ReadonlySignal, type Signal, state } from '../../state/signals.ts';
 import { type Composer, createComposer } from './compose.ts';
 import { registerFilesElements } from './define.ts';
+import type { ListingState } from './folder-model.ts';
 import type { EfsFilesListing } from './listing.ts';
 import { createFolderNav, type FolderNav } from './navigation.ts';
 import { type ObjectKindState, objectKindState } from './object-kind.ts';
+import type { EfsFilesOverview } from './overview.ts';
 import type { EfsFilesPreview } from './preview.ts';
 import { type LinkState, linkState } from './target.ts';
 import type { EfsFilesTree } from './tree.ts';
@@ -29,6 +31,18 @@ interface Shared {
   readonly link: ReadonlySignal<LinkState>;
   readonly object: ObjectKindState;
   readonly composer: Composer;
+  /** What the Entries pane lists now: the Overview finds the folder's README in it. */
+  readonly shown: Signal.State<ListingState | undefined>;
+}
+
+/** The Overview pane: the folder's README, or its summary. */
+function overview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement {
+  const element = document.createElement('efs-files-overview') as EfsFilesOverview;
+  element.host = host;
+  element.nav = shared.nav;
+  element.shown = shared.shown;
+  element.start(scope);
+  return element;
 }
 
 function view(host: AppHost, kind: FilesViewKind, nav: FolderNav): HTMLElement {
@@ -54,6 +68,7 @@ function listing(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   element.nav = shared.nav;
   element.object = shared.object;
   element.composer = shared.composer;
+  element.shown = shared.shown;
   element.start(scope);
   return element;
 }
@@ -91,6 +106,7 @@ export const entry: AppEntry = {
       link,
       object: objectKindState(host, link, nav, scope),
       composer,
+      shown: state<ListingState | undefined>(undefined),
     };
     // A new file is written where it was started: leaving that place ends the composer (its text
     // stays kept, and the folder's listing offers it back).
@@ -107,7 +123,7 @@ export const entry: AppEntry = {
         {
           id: 'overview',
           title: 'files.overview.title',
-          create: () => view(host, 'overview', nav),
+          create: (s) => overview(host, shared, s),
         },
       ],
       [

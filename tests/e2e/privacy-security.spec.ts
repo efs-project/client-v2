@@ -160,6 +160,7 @@ test('only the expected custom elements are registered', async ({ page }) => {
     'efs-files-folder-picker',
     'efs-files-folder-save',
     'efs-files-listing',
+    'efs-files-overview',
     'efs-files-preview',
     'efs-files-removed',
     'efs-files-tree',

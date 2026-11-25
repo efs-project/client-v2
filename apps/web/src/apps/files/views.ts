@@ -1,15 +1,13 @@
-// The File Browser's smaller views: the Overview placeholder and the location bar (a breadcrumb
-// of the folders opened in this tab). The Entries pane is listing.ts; the navigation pane, the
-// folder tree, is tree.ts.
+// The File Browser's location bar: a breadcrumb of the folders opened in this tab. The Entries
+// pane is listing.ts, the navigation pane (the folder tree) tree.ts, the Overview overview.ts.
 
 import { link } from '@efs/sdk/links';
 import type { AppHost } from '../../shell/apps.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import { shortId } from './editor.ts';
 import type { FolderNav } from './navigation.ts';
-import { readerNotice } from './notice.ts';
 
-export type FilesViewKind = 'overview' | 'location';
+export type FilesViewKind = 'location';
 
 /** Breadcrumbs longer than this collapse their middle into a "…" item (never drop a folder). */
 const BREADCRUMB_MAX = 4;
@@ -89,11 +87,6 @@ export class EfsFilesView extends EfsElement {
   }
 
   override render() {
-    const t = this.host.translator.t.bind(this.host.translator);
-    if (this.kind === 'location') return this.#breadcrumb();
-    const notice = readerNotice(this, this.host, t);
-    return html`<div class="wa-stack wa-gap-m efs-files-empty">
-      ${notice ?? html`<p class="efs-quiet">${t('files.overview.empty')}</p>`}
-    </div>`;
+    return this.#breadcrumb();
   }
 }
