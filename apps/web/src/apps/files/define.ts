@@ -3,6 +3,7 @@ import { EfsFileEditor } from './editor.ts';
 import { EfsFolderSave } from './folder-save.ts';
 import { EfsFilesListing } from './listing.ts';
 import { EfsFilesPreview } from './preview.ts';
+import { EfsFilesRemoved } from './removed-list.ts';
 import { EfsFilesView } from './views.ts';
 
 export function registerFilesElements(): void {
@@ -17,5 +18,8 @@ export function registerFilesElements(): void {
   }
   if (!customElements.get('efs-files-preview')) {
     customElements.define('efs-files-preview', EfsFilesPreview);
+  }
+  if (!customElements.get('efs-files-removed')) {
+    customElements.define('efs-files-removed', EfsFilesRemoved);
   }
 }

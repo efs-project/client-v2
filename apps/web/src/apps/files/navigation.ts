@@ -7,6 +7,7 @@
 import type { Lens } from '@efs/sdk';
 import type { FolderRef } from '@efs/sdk/files';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
+import type { ViewPath } from './folder-requests.ts';
 
 /** One folder opened from a row: the FolderRef the row pointed at, and the name it was shown as. */
 export interface NavStep {
@@ -31,6 +32,11 @@ export interface FolderNav {
   /** A folder opened by its link (a reload, a shared link): it becomes the only folder opened. */
   resetTo(step: NavStep): void;
   /**
+   * The URL arrived at `folder` (undefined: the realm's root): back along the trail to it when it's
+   * there (Back, the breadcrumb), else a trail of its own (resetTo). Nothing when it's the last.
+   */
+  arrive(folder: FolderRef | undefined): void;
+  /**
    * Remembers the Lens a file row was shown in, before the file opens. The Preview reads that
    * file in it, so a file listed as "yours" isn't "not present" there. Tab memory only: links
    * stay clean object links, and a copied link never carries the person's trust list.
@@ -38,6 +44,17 @@ export interface FolderNav {
   rememberLens(subject: string, lens: Lens): void;
   /** The Lens `subject` was last listed in, in this tab. */
   lensFor(subject: string): Lens | undefined;
+}
+
+/**
+ * The path from the realm's root to the folder now shown, by the names on the trail: what a folder
+ * restore (or move) gives the SDK so it can check the folder never lands inside itself. Unknown
+ * once the trail starts at a folder opened by its link (its name, and its parents, aren't known
+ * here). The SDK checks the path against the chain, so a stale trail is refused, not trusted.
+ */
+export function viewPath(path: readonly NavStep[], root: FolderRef): ViewPath | undefined {
+  if (path.some((step) => step.name === '')) return undefined;
+  return { from: root, segments: path.map((step) => step.name) };
 }
 
 export function createFolderNav(): FolderNav {
@@ -67,6 +84,18 @@ export function createFolderNav(): FolderNav {
     back(depth) {
       const now = path.get();
       if (depth < now.length) path.set(now.slice(0, Math.max(0, depth)));
+    },
+    arrive(folder) {
+      if (!folder) {
+        this.back(0);
+        return;
+      }
+      const now = path.get();
+      const id = folder.directory.toLowerCase();
+      const at = now.findIndex((step) => step.folder.directory.toLowerCase() === id);
+      if (at >= 0 && at === now.length - 1) return;
+      if (at >= 0) this.back(at + 1);
+      else this.resetTo({ folder, name: '' });
     },
   };
 }

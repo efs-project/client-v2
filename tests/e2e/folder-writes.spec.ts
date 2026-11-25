@@ -3,6 +3,7 @@
 // the realm root's owner and the default Lens are anvil #0. Entries are prepared from Node in live
 // and record mode; the replay carries the result.
 
+import { AxeBuilder } from '@axe-core/playwright';
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import { expect, objectLink, preview, save, sendRequests } from './edit-support.ts';
@@ -277,6 +278,116 @@ test("Remove releases: the dialog says the owner's same-named file will show; it
     await expect(row(page, 'shared.txt').locator('.efs-entry-whose')).toHaveText('yours');
     expect(sendRequests(chain)).toHaveLength(2);
     chain.step('Restore: yours is back, first in the place Lens');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('Show removed lists only your removed entries here; Restore puts one back, a folder only with its path', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-folder-show-removed',
+    'outer/ by anvil #6 at the root, holding old.txt and inner/, both removed by anvil #6.',
+  );
+  // The listing's rows, and the removed list's (it sits inside the listing).
+  const listed = (name: string) =>
+    entries(page).locator('.efs-entry:not(.efs-entry-removed)', {
+      has: page.locator('.efs-entry-name', { hasText: name }),
+    });
+  const removedList = page.locator('efs-files-removed');
+  const removedRow = (name: string) =>
+    removedList.locator('.efs-entry', { has: page.locator('.efs-entry-name', { hasText: name }) });
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const outer = (
+        (await done(
+          await files.planCreateFolder(efs, writer, { folder: root, name: 'outer', lens }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      await done(
+        await files.planCreateFile(efs, writer, {
+          folder: outer,
+          name: 'old.txt',
+          content: new TextEncoder().encode('old\n'),
+          lens,
+        }),
+      );
+      await done(await files.planCreateFolder(efs, writer, { folder: outer, name: 'inner', lens }));
+      await done(
+        await files.planRemoveEntries(efs, writer, {
+          entries: [
+            { folder: outer, name: 'old.txt' },
+            { folder: outer, name: 'inner' },
+          ],
+          lens,
+        }),
+      );
+      return { outer: outer.directory };
+    });
+    await openRoot(page, chain);
+    await entries(page).locator('wa-switch.efs-show-removed').click();
+    // Said only because the whole list was read (COMPLETE): outer/ is yours, and still here.
+    await expect(removedList).toContainText("You haven't removed anything here.");
+    chain.step('Show removed at the root: you have removed nothing here');
+
+    await listed('outer').locator('button.efs-entry-open').click();
+    await expect(removedList.locator('.efs-entry')).toHaveCount(2);
+    await expect(removedRow('old.txt')).toContainText('Removed');
+    await expect(removedRow('inner')).toContainText('Removed');
+    await expect(listed('old.txt')).toHaveCount(0);
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-listing')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step('Open outer/: old.txt and inner/ are listed as removed by you');
+
+    // The same folder opened by its link: no trail, so no path to restore a folder by. Each move
+    // waits for the folder's reads to settle, so a replay sees the calls in the recorded order.
+    const atRoot = async () => {
+      await page.locator('wa-breadcrumb wa-breadcrumb-item').first().click();
+      await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
+      await expect(listed('outer')).toBeVisible();
+      await expect(removedList).toContainText("You haven't removed anything here.");
+    };
+    await atRoot();
+    await page.evaluate(
+      (hash) => {
+        location.hash = hash;
+      },
+      `#/r/testnet/${objectLink(chain.ids.outer as string)}`,
+    );
+    await expect(removedRow('inner')).toContainText(
+      'Open this folder from the root to restore a folder here.',
+    );
+    await expect(removedRow('inner').locator('wa-button.efs-removed-restore')).toHaveAttribute(
+      'disabled',
+      '',
+    );
+    await expect(
+      removedRow('old.txt').locator('wa-button.efs-removed-restore'),
+    ).not.toHaveAttribute('disabled');
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step(
+      "outer/ opened by its link: a folder can't be restored without its path; a file can",
+    );
+
+    // From the root again: the path is known, and the folder restores.
+    await atRoot();
+    await listed('outer').locator('button.efs-entry-open').click();
+    await expect(removedRow('inner').locator('wa-button.efs-removed-restore')).not.toHaveAttribute(
+      'disabled',
+    );
+    await removedRow('inner').locator('wa-button.efs-removed-restore').click();
+    await expect(dialog(page)).toContainText(/Restore\W+inner\W+here/);
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(listed('inner')).toBeVisible();
+    await expect(removedRow('inner')).toHaveCount(0);
+    await expect(removedRow('old.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Restore inner/ from the list: it is back, and no longer listed as removed');
   } finally {
     await chain.finish();
   }

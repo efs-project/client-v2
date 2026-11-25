@@ -7,10 +7,12 @@
 //   default. The client never splices principals itself.
 // - Every row that isn't the folder owner's says whose it is, the person's own included.
 // - Nothing reads as empty unless the SDK proved it (COMPLETE); see listingNotice.
+// - "Show removed" (a connected account only) lists the person's own removed entries here, each
+//   with Restore (removed-list.ts). A folder is restored only with the path to it (viewPath).
 
 import type { Efs, Lens } from '@efs/sdk';
 import type { SequenceProgress } from '@efs/sdk/actions';
-import type { EntryKind, EntryRef, FolderRef, FolderRow } from '@efs/sdk/files';
+import type { EntryKind, EntryRef, FolderRef, FolderRow, RemovedRow } from '@efs/sdk/files';
 import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
@@ -34,9 +36,10 @@ import {
 } from './folder-model.ts';
 import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
-import type { FolderNav } from './navigation.ts';
+import { type FolderNav, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import type { ObjectKindState } from './object-kind.ts';
+import type { RestoreRemovedDetail } from './removed-list.ts';
 
 const loadReads = async (): Promise<FolderReads> => {
   const { listFolder } = await import('@efs/sdk/files');
@@ -65,6 +68,13 @@ const KIND_LABEL: Readonly<Record<EntryKind, MessageId>> = {
 
 type PaneState = ListingState | { readonly phase: 'load-failed' };
 
+/** A removal saved from here: its save, the entry, and whether it was a folder (for Restore). */
+interface Removal {
+  readonly sequenceId: string;
+  readonly entry: EntryRef;
+  readonly isFolder: boolean;
+}
+
 /** The realm's shared root folder, from the pinned deployment: the stand-in start. */
 export function rootFolder(efs: Efs): FolderRef {
   const root = efs.deployment.root;
@@ -87,20 +97,22 @@ export class EfsFilesListing extends EfsElement {
   #scope: OwnerScope | undefined;
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
-  /** The route's link when last seen, to tell arriving at the root from being there. */
-  #routeLink: string | undefined;
+  /** The route's link the trail last followed (see nav.arrive). */
+  #arrived: string | undefined;
   #efs: Efs | undefined;
   /** How far each save touching the folder on screen has been listed again for. */
   #synced = new Map<string, 'committed' | 'final'>();
   /** A removal sent from here, until its save is complete (or fails). */
-  #pendingRemoval: { readonly sequenceId: string; readonly entry: EntryRef } | undefined;
+  #pendingRemoval: Removal | undefined;
   /**
    * The entry the person removed here, offered back with Restore (this tab only): shown only once
    * the removal's save is complete, and cleared if it fails or the network undoes it.
    */
-  #removed = state<{ readonly sequenceId: string; readonly entry: EntryRef } | undefined>(
-    undefined,
-  );
+  #removed = state<Removal | undefined>(undefined);
+  /** "Show removed": the person's own removed entries in the folder on screen. */
+  #showRemoved = state(false);
+  /** Bumped when a save touching the folder on screen lands, so the removed list reads again. */
+  #removedGeneration = state(0);
 
   protected override createRenderRoot() {
     return this;
@@ -120,18 +132,15 @@ export class EfsFilesListing extends EfsElement {
       const location = this.host.location.get();
       const atRoot = location.kind === 'realm' && location.link === '';
       const named = this.object.kind.get();
-      // Arriving at the root (Back, a link, the breadcrumb) ends the trail. Only on arrival: a row
-      // click extends the trail a moment before its folder's link reaches the URL.
+      // The trail follows the URL when the URL changes (a reload, a shared link, Back, the
+      // breadcrumb), once its link's kind is known: back along the trail to the folder it names,
+      // a trail of its own for a folder off it, none at the root. Only then: a click changes the
+      // trail and the URL one after the other, and the URL left behind is never acted on again.
       const routeLink = location.kind === 'realm' ? location.link : undefined;
-      if (atRoot && this.#routeLink !== undefined && this.#routeLink !== '') {
-        queueMicrotask(() => this.nav.back(0));
-      }
-      this.#routeLink = routeLink;
-      if (named.status === 'folder') {
-        const top = this.nav.path.get().at(-1)?.folder;
-        if (top?.directory.toLowerCase() !== named.folder.directory.toLowerCase()) {
-          queueMicrotask(() => this.nav.resetTo({ folder: named.folder, name: '' }));
-        }
+      if (efs && routeLink !== this.#arrived && named.status !== 'pending') {
+        this.#arrived = routeLink;
+        const arrivedAt = named.status === 'folder' ? named.folder : undefined;
+        if (atRoot || arrivedAt) queueMicrotask(() => this.nav.arrive(arrivedAt));
       }
       if (atRoot && !this.nav.browsing.get()) queueMicrotask(() => this.nav.startBrowsing());
       const browsing = atRoot || named.status === 'folder' || this.nav.browsing.get();
@@ -160,7 +169,10 @@ export class EfsFilesListing extends EfsElement {
         if (this.#synced.get(p.sequenceId) === 'final') continue;
         this.#synced.set(p.sequenceId, stage);
         const { effect: saved, account } = p;
-        queueMicrotask(() => void this.#listAgainFor(saved, account));
+        queueMicrotask(() => {
+          this.#removedGeneration.set(this.#removedGeneration.get() + 1);
+          void this.#listAgainFor(saved, account);
+        });
       }
     });
   }
@@ -208,6 +220,34 @@ export class EfsFilesListing extends EfsElement {
     const dialog = this.querySelector<EfsFolderSave>('efs-files-folder-save');
     dialog?.open(ask);
   }
+
+  /**
+   * Restore for an entry of the folder on screen. A folder needs the path to it from the root, so
+   * the SDK can check it never lands inside itself: unknown for a folder opened by its link, and
+   * then there is no ask (the caller says why: files.restore.needsPath).
+   */
+  #restoreAsk(entry: EntryRef, isFolder: boolean): FolderAsk | undefined {
+    if (!isFolder) return { kind: 'restore', entry };
+    const efs = this.#efs;
+    const via = efs ? viewPath(this.nav.path.get(), rootFolder(efs)) : undefined;
+    return via ? { kind: 'restore', entry, via } : undefined;
+  }
+
+  /** Why a removed row can't be restored now, if it can't. */
+  #unrestorable(folder: FolderRef, row: RemovedRow, pending: ReadonlySet<string>) {
+    if (pending.has(placeKey(folder.directory, row.name) ?? '')) return 'files.pending' as const;
+    const entry = { folder, name: row.name };
+    return this.#restoreAsk(entry, row.target.kind === 'folder')
+      ? undefined
+      : ('files.restore.needsPath' as const);
+  }
+
+  #onRestoreRemoved = (event: Event): void => {
+    event.stopPropagation();
+    const { folder, row } = (event as CustomEvent<RestoreRemovedDetail>).detail;
+    const ask = this.#restoreAsk({ folder, name: row.name }, row.target.kind === 'folder');
+    if (ask) this.#ask(ask);
+  };
 
   /** The name the folder now shown goes by: its row's name, or the root's. */
   #folderName(): string {
@@ -489,6 +529,9 @@ export class EfsFilesListing extends EfsElement {
         s.rows,
         unsettled,
       );
+      const restoreAsk = removedSave
+        ? this.#restoreAsk(removedSave.entry, removedSave.isFolder)
+        : undefined;
       body = html`${
         removed && removed.folder.directory === folder.directory
           ? html`<p class="efs-entries-removed" role="status">
@@ -496,9 +539,15 @@ export class EfsFilesListing extends EfsElement {
               <wa-button
                 size="s"
                 class="efs-entries-restore"
-                @click=${() => this.#ask({ kind: 'restore', entry: removed })}
+                ?disabled=${!restoreAsk}
+                @click=${() => restoreAsk && this.#ask(restoreAsk)}
                 >${t('files.restore')}</wa-button
               >
+              ${
+                restoreAsk
+                  ? nothing
+                  : html`<span class="efs-quiet">${t('files.restore.needsPath')}</span>`
+              }
             </p>`
           : nothing
       }
@@ -567,6 +616,11 @@ export class EfsFilesListing extends EfsElement {
     const efs = this.#efs;
     const folder = s?.phase === 'page' ? s.folder : undefined;
     const ready = this.host.saving.availability.get().status !== 'SHARED_GATEWAY';
+    // Whose removed entries: the connected account's, so only with one (READY).
+    const reader = this.#reader();
+    const author = efs && reader ? efs.lens.principalOf(reader as never) : undefined;
+    const showRemoved = this.#showRemoved.get() && folder !== undefined && author !== undefined;
+    const pending = this.#pending();
     const toolbar = html`<div class="wa-cluster wa-gap-s efs-listing-toolbar">
       ${this.#filter()}
       ${
@@ -580,9 +634,37 @@ export class EfsFilesListing extends EfsElement {
             >`
           : nothing
       }
+      ${
+        folder && author
+          ? html`<wa-switch
+              class="efs-show-removed"
+              size="s"
+              ?checked=${this.#showRemoved.get()}
+              @change=${(event: Event) =>
+                this.#showRemoved.set((event.target as HTMLInputElement).checked)}
+              >${t('files.removed.toggle')}</wa-switch
+            >`
+          : nothing
+      }
     </div>`;
-    return html`<div class="wa-stack wa-gap-s efs-listing" @efs-folder-saved=${this.#onSaved}>
+    return html`<div
+      class="wa-stack wa-gap-s efs-listing"
+      @efs-folder-saved=${this.#onSaved}
+      @efs-restore-removed=${this.#onRestoreRemoved}
+    >
       ${toolbar} ${body}
+      ${
+        showRemoved
+          ? html`<efs-files-removed
+              .efs=${efs}
+              .folder=${folder}
+              .author=${author}
+              .translator=${this.host.translator}
+              .generation=${this.#removedGeneration.get()}
+              .restorable=${(row: RemovedRow) => this.#unrestorable(folder, row, pending)}
+            ></efs-files-removed>`
+          : nothing
+      }
       <efs-files-folder-save
         .host=${this.host}
         .efs=${efs}
@@ -596,7 +678,11 @@ export class EfsFilesListing extends EfsElement {
     const detail = (event as CustomEvent<FolderSavedDetail>).detail;
     const ask = detail.ask;
     if (ask?.kind === 'remove') {
-      this.#pendingRemoval = { sequenceId: detail.sequenceId, entry: ask.entry };
+      this.#pendingRemoval = {
+        sequenceId: detail.sequenceId,
+        entry: ask.entry,
+        isFolder: ask.isFolder,
+      };
       this.#removed.set(undefined);
     } else if (ask?.kind === 'restore') {
       this.#removed.set(undefined);

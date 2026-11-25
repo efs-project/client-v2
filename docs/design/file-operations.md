@@ -1,17 +1,17 @@
 # File operations in the File Browser: flows and copy
 
-**Status:** partly built (on main since 2026-11-25; folder links through `openObject` on sdk-v2 c8ed37a).
+**Status:** partly built (on main since 2026-11-25; folder links through `openObject` since sdk-v2 c8ed37a; "Show removed" on a6bf367).
 - **Built:**
   - listing from the realm root, with whose-labels, the kind filter and honest coverage;
   - in-tab navigation and the breadcrumb;
   - per-(folder, name) holds;
   - New folder, Rename, and Remove (a release), with Restore offered right after;
+  - "Show removed": the person's own removed entries in the folder on screen, each with Restore (`apps/files/removed-list.ts`);
   - one review-and-send dialog (`apps/files/folder-save.ts`).
 - **Not yet:**
   - Move, with the picker and `via`;
   - New text file and Upload;
   - "Remove and block this name";
-  - "Show removed";
   - multi-select batches;
   - the lazy "also: …" marker.
 
@@ -214,7 +214,12 @@ Remove "pet.jpg" from 0x12…ab?
 - **Restore.**
   - Restore plans a bind at the same place and name (`planRestoreEntries`), after either a removal or a block.
   - **Right after a removal,** the banner offers it: "Removed · Restore".
-  - **Later,** "Show removed" in the listing's menu shows the person's own removed entries, greyed, each with Restore (L5: shadowing is inspectable).
+  - **Later,** "Show removed" (a switch in the listing's toolbar, with a connected account) lists the person's own removed entries in the folder on screen, each with Restore and its state ("Removed", or "Removed and blocked"). It reads `listRemoved` for the connected account, never the Lens: it shows what *you* removed, not what anyone hid (L5: shadowing is inspectable).
+    - **Nothing is said to be empty unless the whole list was read** (COMPLETE): "You haven't removed anything here." An empty page with more to read says "None found yet", with Keep looking. A list the network can't vouch for says so. Anything but PRESENT is "can't be listed right now", with Try again, never "nothing removed". Coverage only gets weaker across pages, as in the listing (`removed-model.ts`).
+    - **Row labels come from a table keyed by the row's state,** so the tag release's states (you hid someone else's entry: Unhide) slot in without reshaping the row. A state the client doesn't know shows raw.
+    - **It reads again** whenever a save touching the folder lands, keeping its rows shown meanwhile.
+  - **Restoring a folder needs the path to it** (`via`: from the realm's root, by the names on the trail), so the SDK can check it never lands inside itself. In a folder opened by its link the trail has no names: a folder's Restore is disabled there, with "Open this folder from the root to restore a folder here." A file restores anywhere. The SDK checks the path against the chain, so a stale trail is refused, never trusted.
+  - **The review says where else the target is placed now** (`alsoPlaced`, by anyone): "It's in N other places now too; restoring puts it here as well." Nothing is said when the index can't vouch for the count (never "0").
   - If someone else's entry now holds the name, Restore says so before the review.
 - **Another author's entry** has no Remove. Hiding it waits on contracts.
 
@@ -257,7 +262,7 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.remove.yes` | Remove |
 | `files.restore` | Restore |
 | `files.restore.taken` | Someone else's entry is now called {$name} here. Restoring puts yours back beside it; your lens decides which one shows. |
-| `files.showRemoved` | Show removed |
+| `files.removed.toggle` | Show removed |
 | `files.notYours` | This is {$author}'s entry. You can rename, move or remove only your own. |
 | `files.list.partialEmpty` | Nothing in the first {$count} entries. |
 | `files.list.keepLooking` | Keep looking |

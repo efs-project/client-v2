@@ -6,6 +6,11 @@
 // a file it also returns the file opened under the Lens (`open`), which the Preview reuses, so a
 // file link costs one batched read more than before and nothing else. Until it answers, nothing
 // reads the id as a missing file, so a folder's link never shows "Confirmed not present".
+//
+// The kind always answers for the link in the URL and the session now: while a new link (or the
+// same link in a new session) resolves it is pending, or a folder already known in this tab,
+// never an earlier answer. So nothing acting on it (the listing following the URL with its trail)
+// can mistake the folder just left for the one arrived at, or "no reader yet" for an answer.
 
 import type { Efs, Lens, Reason } from '@efs/sdk';
 import type { FolderRef, OpenResult } from '@efs/sdk/files';
@@ -13,7 +18,7 @@ import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { effect } from '../../state/effect.ts';
-import { type ReadonlySignal, state } from '../../state/signals.ts';
+import { computed, type ReadonlySignal, state } from '../../state/signals.ts';
 import type { FolderNav } from './navigation.ts';
 import type { LinkState } from './target.ts';
 
@@ -54,8 +59,26 @@ export function objectKindState(
   nav: FolderNav,
   scope: OwnerScope,
 ): ObjectKindState {
-  const kind = state<ObjectKind>({ status: 'none' });
+  /** Folders this tab has resolved, by id (a folder stays a folder), in session `foldersFor`. */
   const folders = new Map<string, FolderRef>();
+  let foldersFor: Efs | undefined;
+  /** The last answer, and the link and session it is for. */
+  const answer = state<{
+    readonly key: string;
+    readonly efs: Efs | undefined;
+    readonly kind: ObjectKind;
+  }>({ key: 'none', efs: undefined, kind: { status: 'none' } });
+  const keyOf = (l: LinkState) => (l.status === 'target' ? l.canonical : l.status);
+  const kind = computed<ObjectKind>(() => {
+    const l = link.get();
+    const efs = verifiedEfs(host.reader.get());
+    if (l.status !== 'target' || l.target.kind !== 'file') return { status: 'none' };
+    const a = answer.get();
+    if (a.key === keyOf(l) && a.efs === efs) return a.kind;
+    const folder =
+      efs && efs === foldersFor ? folders.get(l.target.subject.toLowerCase()) : undefined;
+    return folder ? { status: 'folder', folder } : { status: 'pending' };
+  });
   let resolved: string | undefined;
   let resolvedEfs: Efs | undefined;
   let run: OwnerScope | undefined;
@@ -63,29 +86,31 @@ export function objectKindState(
   const resolve = (efs: Efs | undefined, l: LinkState) => {
     run?.dispose();
     run = undefined;
+    const key = keyOf(l);
+    const set = (k: ObjectKind) => answer.set({ key, efs, kind: k });
     if (!efs || l.status !== 'target' || l.target.kind !== 'file') {
-      kind.set({ status: 'none' });
+      set({ status: 'none' });
       return;
     }
     const subject = l.target.subject;
     const id = subject.toLowerCase();
     const folder = folders.get(id);
     if (folder) {
-      kind.set({ status: 'folder', folder });
+      set({ status: 'folder', folder });
       return;
     }
     const mine = scope.child();
     run = mine;
     const lens = readLens(l, nav);
     const o = { signal: mine.signal, ...(lens ? { lens } : {}) };
-    kind.set({ status: 'pending' });
+    set({ status: 'pending' });
     void (async () => {
       try {
         const openObject = await loadOpenObject();
         const object = await openObject(efs, subject, o);
         if (mine.signal.aborted) return;
         if (object.status === 'FOLDER') folders.set(id, object.folder);
-        kind.set(
+        set(
           object.status === 'FOLDER'
             ? { status: 'folder', folder: object.folder }
             : object.status === 'FILE'
@@ -99,7 +124,7 @@ export function objectKindState(
       } catch (error) {
         if (mine.signal.aborted) return;
         console.error(error);
-        kind.set({
+        set({
           status: 'unknown',
           reason: { code: 'CLIENT_ERROR', retry: 'transient' } as Reason,
         });
@@ -111,6 +136,11 @@ export function objectKindState(
     const l = link.get();
     const key = `${l.status === 'target' ? l.canonical : l.status}|${attempt}`;
     if (key === resolved && efs === resolvedEfs) return;
+    // Another session (network, deployment): what was a folder there is unknown here.
+    if (efs !== foldersFor) {
+      folders.clear();
+      foldersFor = efs;
+    }
     resolved = key;
     resolvedEfs = efs;
     queueMicrotask(() => resolve(efs, l));

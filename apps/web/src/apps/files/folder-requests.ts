@@ -22,7 +22,19 @@ export type FolderRequest =
       /** Masks the name (only offered to the folder's owner); a release otherwise. */
       readonly hide: boolean;
     }
-  | { readonly kind: 'restore'; readonly entries: readonly EntryRef[] };
+  | { readonly kind: 'restore'; readonly entries: readonly RestoreEntry[] };
+
+/**
+ * The path to an entry's folder from the start of the person's view: what a folder restore (or
+ * move) needs so the SDK can check it never lands inside itself.
+ */
+export interface ViewPath {
+  readonly from: FolderRef;
+  readonly segments: readonly string[];
+}
+
+/** One entry to restore; a folder needs the path to its folder (`via`). */
+export type RestoreEntry = EntryRef & { readonly via?: ViewPath };
 
 const place = (folder: FolderRef, name: string): Place => ({
   folder: folder.directory.toLowerCase(),
