@@ -15,6 +15,9 @@
 // is replaced with that object link (rename-proof, as every link the app gives out). A path that
 // leads nowhere says which name, and why.
 //
+// A file no one in the view's Lens has a version of is read in its own place (you, then its
+// creator, then that Lens), as a folder is: a link to it never reads "not present" for that alone.
+//
 // The kind always answers for the link in the URL and the session now: while a new link (or the
 // same link in a new session) resolves it is pending, or a folder already known in this tab,
 // never an earlier answer. So nothing acting on it (the listing following the URL with its trail)
@@ -181,10 +184,34 @@ export function objectKindState(
     set({ status: 'pending' });
     void (async () => {
       try {
-        const { openObject } = await loadFiles();
+        const { openFile, openObject } = await loadFiles();
         const object = await openObject(efs, subject, o);
         if (mine.signal.aborted) return;
         if (object.status === 'FOLDER') folders.set(id, object.folder);
+        // No author in the view's Lens has a version of this file: read it in its own place, as
+        // a folder lists in its owner's (you, then its creator, then that Lens). A file opened
+        // from a tag or a link is then never "not present" only because its creator isn't in the
+        // reader's Lens. A link carrying its own Lens is read in that Lens alone.
+        if (object.status === 'FILE' && object.open.status === 'ABSENT_PROVEN' && !l.lens) {
+          const own = efs.lens.place({
+            ...(reader ? { reader: reader as never } : {}),
+            owner: object.creator,
+            base: lens ?? efs.lens.default,
+          });
+          const before = (lens ?? efs.lens.default).principals.map((p) => p.toLowerCase());
+          const widened = own.principals.some((p) => !before.includes(p.toLowerCase()));
+          if (widened) {
+            const open = await openFile(
+              efs,
+              { kind: 'file', subject: subject as never },
+              { signal: mine.signal, lens: own },
+            );
+            if (mine.signal.aborted) return;
+            nav.rememberLens(subject, own);
+            set({ status: 'file', open, lens: own });
+            return;
+          }
+        }
         set(
           object.status === 'FOLDER'
             ? { status: 'folder', folder: object.folder }

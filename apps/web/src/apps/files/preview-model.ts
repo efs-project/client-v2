@@ -43,6 +43,11 @@ export type PreviewState =
   | { readonly phase: 'not-present'; readonly open: Exclude<OpenResult, Present> }
   /** Opened; larger than the automatic preview limit, so nothing is fetched until asked. */
   | { readonly phase: 'too-large'; readonly open: Present }
+  /**
+   * Opened from a tag's public tier (the media gate): nobody the person trusts vouched for it, so
+   * nothing is fetched until they ask ("Show preview").
+   */
+  | { readonly phase: 'gated'; readonly open: Present }
   | { readonly phase: 'reading'; readonly open: Present }
   /** Read finished. `content` is present only when the bytes are VERIFIED. */
   | {
@@ -87,6 +92,8 @@ export function classifyContent(bytes: Uint8Array, declared?: string): Content {
 export interface PreviewOptions {
   /** Read past PREVIEW_MAX_BYTES (the person asked to load it). */
   readonly force?: boolean;
+  /** Behind the media gate: open it, then fetch nothing until the person asks. */
+  readonly gated?: boolean;
   /** The Lens to resolve the file's head under (a shared link's); the default otherwise. */
   readonly lens?: Lens;
   /**
@@ -111,13 +118,17 @@ export async function runPreview(
   target: PreviewTarget,
   signal: AbortSignal,
   emit: (state: PreviewState) => void,
-  { force = false, lens, allowOrigins, opened }: PreviewOptions = {},
+  { force = false, gated = false, lens, allowOrigins, opened }: PreviewOptions = {},
 ): Promise<void> {
   emit({ phase: 'opening' });
   const open = opened ?? (await reads.openFile(efs, target, lens ? { signal, lens } : { signal }));
   if (signal.aborted) return;
   if (open.status !== 'PRESENT') {
     emit({ phase: 'not-present', open });
+    return;
+  }
+  if (gated) {
+    emit({ phase: 'gated', open });
     return;
   }
   if (!force && open.file.size > PREVIEW_MAX_BYTES) {

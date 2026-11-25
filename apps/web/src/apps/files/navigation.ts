@@ -46,6 +46,14 @@ export interface FolderNav {
   rememberLens(subject: string, lens: Lens): void;
   /** The Lens `subject` was last listed in, in this tab. */
   lensFor(subject: string): Lens | undefined;
+  /**
+   * The media gate: `subject` was opened from a tag's public tier (nobody the person trusts
+   * vouched for it), so the Preview shows its Type, size and author before any content.
+   */
+  gate(subject: string): void;
+  /** "Show preview": the person lifted the gate for `subject` (this tab). */
+  ungate(subject: string): void;
+  readonly gated: ReadonlySignal<ReadonlySet<string>>;
 }
 
 /**
@@ -63,7 +71,21 @@ export function createFolderNav(): FolderNav {
   const path = state<readonly NavStep[]>([]);
   const browsing = state(false);
   const lenses = new Map<string, Lens>();
+  const gated = state<ReadonlySet<string>>(new Set());
   return {
+    gated,
+    gate(subject) {
+      const id = subject.toLowerCase();
+      if (gated.get().has(id)) return;
+      gated.set(new Set([...gated.get(), id]));
+    },
+    ungate(subject) {
+      const id = subject.toLowerCase();
+      if (!gated.get().has(id)) return;
+      const next = new Set(gated.get());
+      next.delete(id);
+      gated.set(next);
+    },
     rememberLens(subject, lens) {
       lenses.set(subject.toLowerCase(), lens);
     },

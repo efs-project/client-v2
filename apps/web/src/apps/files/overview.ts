@@ -28,6 +28,7 @@ import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
 import { type PreviewReads, runPreview } from './preview-model.ts';
+import type { PlaceLink } from './topic.ts';
 
 const loadReads = async (): Promise<PreviewReads> => {
   const { openFile, readBytes } = await import('@efs/sdk/files');
@@ -55,11 +56,14 @@ export class EfsFilesOverview extends EfsElement {
     host: { attribute: false },
     nav: { attribute: false },
     shown: { attribute: false },
+    place: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
   /** What the Entries pane shows now (published by the listing). */
   declare shown: ReadonlySignal<ListingState | undefined>;
+  /** A tag or an address shown in Entries instead of a folder: no folder's README then. */
+  declare place: ReadonlySignal<PlaceLink | undefined> | undefined;
 
   #readme = state<Readme>({ phase: 'none' });
   #loaded: string | undefined;
@@ -228,6 +232,12 @@ export class EfsFilesOverview extends EfsElement {
     const t = this.host.translator.t.bind(this.host.translator);
     const notice = readerNotice(this, this.host, t);
     if (notice) return html`<div class="wa-stack wa-gap-m efs-files-empty">${notice}</div>`;
+    const place = this.place?.get();
+    if (place) {
+      return html`<p class="efs-quiet efs-overview-place">
+        ${t(place.status === 'topic' ? 'files.overview.tag' : 'files.overview.address')}
+      </p>`;
+    }
     const s = this.shown.get();
     if (!s) return html`<p class="efs-quiet">${t('files.overview.empty')}</p>`;
     if (s.phase !== 'page') return nothing;

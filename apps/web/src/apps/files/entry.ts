@@ -15,6 +15,7 @@ import { type ObjectKindState, objectKindState } from './object-kind.ts';
 import type { EfsFilesOverview } from './overview.ts';
 import type { EfsFilesPreview } from './preview.ts';
 import { type LinkState, linkState } from './target.ts';
+import type { EfsFilesTopic, PlaceLink, PlaceOpened } from './topic.ts';
 import type { EfsFilesTree } from './tree.ts';
 import type { EfsFilesView, FilesViewKind } from './views.ts';
 
@@ -33,6 +34,12 @@ interface Shared {
   readonly composer: Composer;
   /** What the Entries pane lists now: the Overview finds the folder's README in it. */
   readonly shown: Signal.State<ListingState | undefined>;
+  /**
+   * The tag or address the Entries pane lists instead of a folder: the route's, or the one a row
+   * was opened from while that row's link is open (the list stays beside its Preview).
+   */
+  readonly place: ReadonlySignal<PlaceLink | undefined>;
+  readonly opened: Signal.State<PlaceOpened | undefined>;
 }
 
 /** The Overview pane: the folder's README, or its summary. */
@@ -41,15 +48,22 @@ function overview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement
   element.host = host;
   element.nav = shared.nav;
   element.shown = shared.shown;
+  element.place = shared.place;
   element.start(scope);
   return element;
 }
 
-function view(host: AppHost, kind: FilesViewKind, nav: FolderNav): HTMLElement {
+function view(
+  host: AppHost,
+  kind: FilesViewKind,
+  nav: FolderNav,
+  place: ReadonlySignal<PlaceLink | undefined>,
+): HTMLElement {
   const element = document.createElement('efs-files-view') as EfsFilesView;
   element.kind = kind;
   element.host = host;
   element.nav = nav;
+  element.place = place;
   return element;
 }
 
@@ -62,15 +76,35 @@ function tree(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement {
   return element;
 }
 
-function listing(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement {
-  const element = document.createElement('efs-files-listing') as EfsFilesListing;
-  element.host = host;
-  element.nav = shared.nav;
-  element.object = shared.object;
-  element.composer = shared.composer;
-  element.shown = shared.shown;
-  element.start(scope);
-  return element;
+/**
+ * The Entries pane: a folder's listing, or a tag's (or an address's) list while one is shown.
+ * Both stay mounted; the listing reads nothing while it's hidden.
+ */
+function entries(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'efs-entries-host';
+  const list = document.createElement('efs-files-listing') as EfsFilesListing;
+  list.host = host;
+  list.nav = shared.nav;
+  list.object = shared.object;
+  list.composer = shared.composer;
+  list.shown = shared.shown;
+  const placed = computed(() => shared.place.get() !== undefined);
+  list.suspended = placed;
+  const topic = document.createElement('efs-files-topic') as EfsFilesTopic;
+  topic.host = host;
+  topic.nav = shared.nav;
+  topic.place = shared.place;
+  topic.opened = shared.opened;
+  box.append(list, topic);
+  effect(scope, () => {
+    const on = placed.get();
+    list.hidden = on;
+    topic.hidden = !on;
+  });
+  list.start(scope);
+  topic.start(scope);
+  return box;
 }
 
 function preview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement {
@@ -100,6 +134,13 @@ export const entry: AppEntry = {
     // an object link names a folder or a file (one openObject read): shared by the panes.
     const nav = createFolderNav();
     const link = computed(() => linkState(host.location.get()));
+    const opened = state<PlaceOpened | undefined>(undefined);
+    const place = computed<PlaceLink | undefined>(() => {
+      const l = link.get();
+      if (l.status === 'topic' || l.status === 'home') return l;
+      const o = opened.get();
+      return l.status === 'target' && o && o.link === l.canonical ? o.place : undefined;
+    });
     const composer = createComposer();
     const shared: Shared = {
       nav,
@@ -107,6 +148,8 @@ export const entry: AppEntry = {
       object: objectKindState(host, link, nav, scope),
       composer,
       shown: state<ListingState | undefined>(undefined),
+      place,
+      opened,
     };
     // A new file is written where it was started: leaving that place ends the composer (its text
     // stays kept, and the folder's listing offers it back).
@@ -131,7 +174,7 @@ export const entry: AppEntry = {
         {
           id: 'entries',
           title: 'files.entries.title',
-          create: (s) => listing(host, shared, s),
+          create: (s) => entries(host, shared, s),
         },
       ],
       [
@@ -146,12 +189,14 @@ export const entry: AppEntry = {
     return {
       views,
       defaultLayout: DEFAULT_LAYOUT,
-      location: view(host, 'location', nav),
+      location: view(host, 'location', nav, place),
       navigation: tree(host, nav, scope),
       // A link opens on what it names, also on a phone: a folder on its Entries, a file on its
       // Preview; undefined until openObject has said which.
       linkView: computed(() => {
         if (composer.current.get()) return 'preview';
+        const l = link.get();
+        if (l.status === 'topic' || l.status === 'home') return 'entries';
         const kind = shared.object.kind.get().status;
         if (kind === 'folder') return 'entries';
         return kind === 'pending' ? undefined : 'preview';
