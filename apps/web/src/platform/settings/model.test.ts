@@ -19,7 +19,7 @@ const config: OperatorConfig = {
       id: 'local',
       label: 'Local chain',
       chainId: 31337,
-      core: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
+      core: '0x870aa1d6873256e38f82e348c23f707b7e890c1c',
       deployment: './deployments/local.json',
       release: './deployments/release.json',
       rpcs: [{ url: 'http://127.0.0.1:8545/', enabled: true }],
@@ -177,7 +177,7 @@ describe('findNetwork', () => {
       findNetwork(config, {
         kind: 'full',
         chainId: 31337,
-        ledger: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
+        ledger: '0x870aa1d6873256e38f82e348c23f707b7e890c1c',
       })?.id,
     ).toBe('local');
     expect(findNetwork(config, { kind: 'alias', id: 'mainnet' })).toBeUndefined();
@@ -185,7 +185,7 @@ describe('findNetwork', () => {
       findNetwork(config, {
         kind: 'full',
         chainId: 1,
-        ledger: '0x984bf266ea4f907afe58b5c25e31d3e0ba503373',
+        ledger: '0x870aa1d6873256e38f82e348c23f707b7e890c1c',
       }),
     ).toBeUndefined();
   });
