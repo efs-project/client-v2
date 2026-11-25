@@ -26,16 +26,33 @@ export const save = (page: Page, outcome: string) =>
 export const editor = (page: Page) => page.locator('efs-file-editor');
 export const reviewDialog = (page: Page) => page.locator('wa-dialog.efs-edit-review');
 
-export async function openFile(page: Page, chain: TestChain): Promise<void> {
-  await page.goto(`./#/r/testnet/${objectLink(chain.ids.file as string)}`);
+/**
+ * The seeded file's link. `shared`: the link carries the sharer's Lens (the deployment's default,
+ * the fixture author first), so "you first" doesn't apply: the view is the sharer's.
+ */
+export function fileLink(chain: TestChain, shared = false): string {
+  const subject = chain.ids.file as `0x${string}`;
+  if (!shared) return objectLink(subject);
+  const principals = (JSON.parse(chain.deployment) as { defaultLensPrincipals: string[] })
+    .defaultLensPrincipals;
+  return link({ kind: 'object', subject, lens: { principals } as never });
+}
+
+export async function openFile(page: Page, chain: TestChain, shared = false): Promise<void> {
+  await page.goto(`./#/r/testnet/${fileLink(chain, shared)}`);
   await booted(page);
 }
 
-export async function start(page: Page, chain: TestChain, expected = SEEDED): Promise<void> {
+export async function start(
+  page: Page,
+  chain: TestChain,
+  expected = SEEDED,
+  shared = false,
+): Promise<void> {
   await chain.attach(page);
   await serveConfig(page);
   await serveDeployment(page, chain.deployment);
-  await openFile(page, chain);
+  await openFile(page, chain, shared);
   await expect(preview(page).locator('.efs-preview-text')).toHaveText(expected);
 }
 
@@ -64,16 +81,29 @@ export async function openReview(page: Page, chain: TestChain): Promise<Locator>
   return review;
 }
 
-/** Edit → connect → Review, for a one-part edit as anvil #6 (not in the default Lens). */
-export async function editAndReview(page: Page, chain: TestChain, text: string): Promise<Locator> {
+/**
+ * Edit → connect → Review, for a one-part edit as anvil #6 of the fixture author's file. `shared`:
+ * the link carries the sharer's Lens (see fileLink).
+ */
+export async function editAndReview(
+  page: Page,
+  chain: TestChain,
+  text: string,
+  shared = false,
+): Promise<Locator> {
   await editAndConnect(page, chain, text);
   const review = await openReview(page, chain);
   await expect(review).toContainText('Your edit appears to anyone whose lens includes you.');
   await expect(review).toContainText('One approval in your wallet.');
-  // The default Lens shows the fixture author's version first: said before Send, not after.
-  await expect(review.locator('.efs-review-not-visible')).toContainText(
-    /Your edit will be saved, but this view shows .*version first/,
-  );
+  if (shared) {
+    // The sharer's Lens shows the fixture author's version first: said before Send, not after.
+    await expect(review.locator('.efs-review-not-visible')).toContainText(
+      /Your edit will be saved, but this view shows .*version first/,
+    );
+  } else {
+    // "You first" (D10): connected, this view puts the person's own version first.
+    await expect(review.locator('.efs-review-not-visible')).toHaveCount(0);
+  }
   await expect(review).toContainText("You're editing another author's version.");
   return review;
 }

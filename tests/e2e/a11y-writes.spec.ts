@@ -31,7 +31,8 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     const chain = await testChain('client-edit-one-approval', 'replayed for accessibility');
     try {
-      await start(page, chain);
+      // The recorded flow opens the file with the sharer's Lens (edit.spec.ts).
+      await start(page, chain, undefined, true);
       expect(await axe(page), 'Preview').toEqual([]);
 
       await activate(page, 'wa-button.efs-edit-start');

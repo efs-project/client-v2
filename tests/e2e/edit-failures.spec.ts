@@ -78,7 +78,7 @@ test('storage lost right after a send: "couldn\'t confirm", saving paused, never
 test('my own version changed before Send (E_CAS): told first, then one send', async ({ page }) => {
   const chain = await testChain(
     'client-cas-before-send',
-    "Edit as anvil #6 and review; meanwhile #6 saves this file elsewhere. Send is refused before the wallet (E_CAS); the editor says the person's own version changed and offers to save anyway: one eth_sendTransaction in all.",
+    "Edit as anvil #6 and review; meanwhile #6 saves this file elsewhere. Send is refused before the wallet (E_CAS); planned again under \"you first\", #6's own newer version is the view's head: the editor says the person's own version changed and offers to save over it: one eth_sendTransaction in all.",
   );
   try {
     await start(page, chain);
@@ -89,6 +89,34 @@ test('my own version changed before Send (E_CAS): told first, then one send', as
     chain.step(
       'Send: refused before the wallet (E_CAS); dropped; planned again: own version changed',
     );
+    const changed = editor(page).locator('.efs-edit-base-changed');
+    await expect(changed).toContainText(
+      'Your own version of this file changed since you opened it',
+    );
+    expect(sendRequests(chain), 'nothing was sent').toHaveLength(0);
+    await changed.locator('wa-button.efs-edit-save-over').click();
+    await reviewDialog(page).locator('wa-button.efs-review-send').click();
+    chain.step('Save my edit over the new version, Send');
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    expect(sendRequests(chain)).toHaveLength(1);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("my own version changed before Send, in a sharer's Lens: told first, then saved anyway, one send", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-cas-before-send-shared',
+    "As above, from a link carrying the sharer's Lens (the fixture author first): planned again, the plan still goes through (the view's head is the author's), so the editor says the person's own version changed and offers to save anyway: one eth_sendTransaction in all.",
+  );
+  try {
+    await start(page, chain, undefined, true);
+    const review = await editAndReview(page, chain, 'Mine, from this tab.\n', true);
+    await chain.editAs?.(6, 'Mine, from another tab.\n');
+    chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
+    await review.locator('wa-button.efs-review-send').click();
     await expect(editor(page).locator('.efs-edit-own-changed')).toContainText(
       'Your own version of this file changed since you opened it',
     );

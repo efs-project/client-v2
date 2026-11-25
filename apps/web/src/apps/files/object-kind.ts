@@ -44,11 +44,27 @@ export interface ObjectKindState {
   retry(): void;
 }
 
-/** The Lens an object link is read in: the link's, else the one it was listed in, in this tab. */
-export function readLens(l: LinkState, nav: FolderNav | undefined): Lens | undefined {
+/**
+ * The Lens an object link is read in: the link's own when it carries one (the sharer's view);
+ * otherwise "you first" (D10): the connected account, then the Lens it was listed in this tab (the
+ * place's owner, then the default), else the default. Undefined is the SDK's default.
+ */
+export function readLens(
+  efs: Efs,
+  l: LinkState,
+  nav: FolderNav | undefined,
+  reader: string | undefined,
+): Lens | undefined {
   if (l.status !== 'target') return undefined;
   if (l.lens) return l.lens;
-  return l.target.kind === 'file' ? nav?.lensFor(l.target.subject) : undefined;
+  const listed = l.target.kind === 'file' ? nav?.lensFor(l.target.subject) : undefined;
+  return reader ? efs.lens.mineFirst(reader as never, listed ?? efs.lens.default) : listed;
+}
+
+/** The connected account, when there is one on this network. */
+export function readerOf(host: AppHost): string | undefined {
+  const a = host.saving.availability.get();
+  return a.status === 'READY' ? a.account : undefined;
 }
 
 /**
@@ -64,19 +80,22 @@ export function objectKindState(
   /** Folders this tab has resolved, by id (a folder stays a folder), in session `foldersFor`. */
   const folders = new Map<string, FolderRef>();
   let foldersFor: Efs | undefined;
-  /** The last answer, and the link and session it is for. */
+  /** The last answer, and the link, session and connected account (its Lens) it is for. */
   const answer = state<{
     readonly key: string;
     readonly efs: Efs | undefined;
     readonly kind: ObjectKind;
   }>({ key: 'none', efs: undefined, kind: { status: 'none' } });
-  const keyOf = (l: LinkState) => (l.status === 'target' ? l.canonical : l.status);
+  const readerFor = (l: LinkState) =>
+    l.status === 'target' && !l.lens ? readerOf(host) : undefined;
+  const keyOf = (l: LinkState, reader: string | undefined) =>
+    l.status === 'target' ? `${l.canonical}|${reader ?? ''}` : l.status;
   const kind = computed<ObjectKind>(() => {
     const l = link.get();
     const efs = verifiedEfs(host.reader.get());
     if (l.status !== 'target' || l.target.kind !== 'file') return { status: 'none' };
     const a = answer.get();
-    if (a.key === keyOf(l) && a.efs === efs) return a.kind;
+    if (a.key === keyOf(l, readerFor(l)) && a.efs === efs) return a.kind;
     const folder =
       efs && efs === foldersFor ? folders.get(l.target.subject.toLowerCase()) : undefined;
     return folder ? { status: 'folder', folder } : { status: 'pending' };
@@ -85,10 +104,10 @@ export function objectKindState(
   let resolvedEfs: Efs | undefined;
   let run: OwnerScope | undefined;
   let attempt = 0;
-  const resolve = (efs: Efs | undefined, l: LinkState) => {
+  const resolve = (efs: Efs | undefined, l: LinkState, reader: string | undefined) => {
     run?.dispose();
     run = undefined;
-    const key = keyOf(l);
+    const key = keyOf(l, reader);
     const set = (k: ObjectKind) => answer.set({ key, efs, kind: k });
     if (!efs || l.status !== 'target' || l.target.kind !== 'file') {
       set({ status: 'none' });
@@ -103,7 +122,7 @@ export function objectKindState(
     }
     const mine = scope.child();
     run = mine;
-    const lens = readLens(l, nav);
+    const lens = readLens(efs, l, nav, reader);
     const o = { signal: mine.signal, ...(lens ? { lens } : {}) };
     set({ status: 'pending' });
     void (async () => {
@@ -136,7 +155,9 @@ export function objectKindState(
   effect(scope, () => {
     const efs = verifiedEfs(host.reader.get());
     const l = link.get();
-    const key = `${l.status === 'target' ? l.canonical : l.status}|${attempt}`;
+    // An identity change reorders the view ("you first"): a file is read again under it.
+    const reader = readerFor(l);
+    const key = `${keyOf(l, reader)}|${attempt}`;
     if (key === resolved && efs === resolvedEfs) return;
     // Another session (network, deployment): what was a folder there is unknown here.
     if (efs !== foldersFor) {
@@ -145,13 +166,14 @@ export function objectKindState(
     }
     resolved = key;
     resolvedEfs = efs;
-    queueMicrotask(() => resolve(efs, l));
+    queueMicrotask(() => resolve(efs, l, reader));
   });
   return {
     kind,
     retry() {
       attempt++;
-      resolve(verifiedEfs(host.reader.get()), link.get());
+      const l = link.get();
+      resolve(verifiedEfs(host.reader.get()), l, readerFor(l));
     },
   };
 }

@@ -22,6 +22,12 @@ export interface EditDraft {
    * changed still says so at Review, instead of saving over the new version unasked.
    */
   readonly base: RevisionRef;
+  /**
+   * How many admissions the ledger had when the file was opened for this edit: a later HEAD that
+   * is the person's own and no newer than this was already there (a reorder, "you first"), not
+   * a change. Kept with the base, so coming back later still tells the two apart.
+   */
+  readonly since?: bigint;
 }
 
 /** An unsaved new file: its text, and where it is to be created. */

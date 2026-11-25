@@ -122,3 +122,54 @@ test('"Review changes" asks before replacing a newer unsaved edit of the same fi
     await chain.finish();
   }
 });
+
+test('"you first": a guest\'s edit keeps the version it started from when connecting puts your own first; saving over yours is asked, never assumed', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-you-first',
+    "Anvil #6 has its own version of docs/readme.txt (saved from Node first). A guest opens the file (the fixture author's version), edits it, then connects as #6: the view now puts #6's version first, said in the Preview; the editor keeps the guest's text and its base. Review finds the reorder (BASE_CHANGED, #6's own head, no newer than the open), asks; keep editing sends nothing; save over my version plans from #6's head: one send.",
+  );
+  try {
+    await chain.editAs?.(6, 'Mine, from before.\n');
+    await start(page, chain);
+    chain.step("A guest: the default Lens shows the fixture author's version");
+    await editAndConnect(page, chain, 'Edited as a guest.\n');
+    // Connected: "you first" shows #6's own version, said; the edit keeps its text and its base.
+    await expect(preview(page).locator('.efs-preview-reordered')).toContainText(
+      /Showing your version · also: .+'s/,
+    );
+    await expect(textarea(page)).toHaveValue('Edited as a guest.\n');
+    await expect(editor(page).locator('.efs-edit-kept')).toContainText(
+      'This view now shows your own version first',
+    );
+    chain.step('Connect as #6: the view puts its own version first; the edit is unchanged');
+
+    await page.locator('wa-button.efs-edit-review-button').click();
+    const reordered = editor(page).locator('.efs-edit-reordered');
+    await expect(reordered).toContainText(
+      'You connected, and this view now shows your own version first.',
+    );
+    await expect(editor(page)).not.toContainText('This file changed since you opened it');
+    await reordered.locator('wa-button.efs-edit-keep-started').click();
+    await expect(reordered).toHaveCount(0);
+    await expect(textarea(page)).toHaveValue('Edited as a guest.\n');
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step(
+      'Review: a reorder, not a change; keep editing the version started from: nothing sent',
+    );
+
+    await page.locator('wa-button.efs-edit-review-button').click();
+    await editor(page).locator('.efs-edit-reordered wa-button.efs-edit-save-over-mine').click();
+    const review = reviewDialog(page);
+    await expect(review).toHaveAttribute('open', '');
+    await expect(review).not.toContainText("You're editing another author's version.");
+    await review.locator('wa-button.efs-review-send').click();
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('Edited as a guest.\n');
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Save over my version: planned from #6’s head, one send; the view shows it');
+  } finally {
+    await chain.finish();
+  }
+});

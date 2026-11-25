@@ -61,12 +61,14 @@ test('edit, review, one approval: Saved · confirming, and Show my version reads
   const text = 'Meeting moved to 11:00.\n';
   const chain = await testChain(
     'client-edit-one-approval',
-    'Edit docs/readme.txt as anvil #6 from the Preview: connect, review (not visible in the default Lens), one approval, Saved · confirming; Show my version reads the edit back.',
+    "Edit docs/readme.txt as anvil #6 from a link carrying the sharer's Lens (the fixture author first): connect, review (not visible in that Lens), one approval, Saved · confirming; Show my version reads the edit back.",
   );
   try {
-    await start(page, chain);
-    chain.step('Open docs/readme.txt by object link: pin, openFile, readBytes');
-    const review = await editAndReview(page, chain, text);
+    await start(page, chain, undefined, true);
+    chain.step(
+      "Open docs/readme.txt by object link with the sharer's Lens: pin, openFile, readBytes",
+    );
+    const review = await editAndReview(page, chain, text, true);
     await review.locator('wa-button.efs-review-send').click();
     chain.step('Send: runSequence (one part, one eth_sendTransaction)');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');

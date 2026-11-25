@@ -21,7 +21,7 @@ import { placeLens } from './folder-model.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
-import type { ObjectKind, ObjectKindState } from './object-kind.ts';
+import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
 
@@ -122,6 +122,12 @@ export class EfsFilesPreview extends EfsElement {
   /** Open results from the object-kind resolver already shown once (never reused after). */
   #usedOpens = new WeakSet<object>();
   #refreshed = new Set<string>();
+  /** The version shown last (which file, under which account, by whom): to tell a reorder. */
+  #lastShown: { canonical: string; reader: string | undefined; author: string | null } | undefined;
+  /** After "you first" reordered this file's view: whose version showed before. */
+  #reordered = state<{ readonly canonical: string; readonly author: string } | undefined>(
+    undefined,
+  );
   /** New files handed to the banner from here: opened by their link once Saved, if still here. */
   #created = new Map<
     string,
@@ -260,6 +266,9 @@ export class EfsFilesPreview extends EfsElement {
           this.#mediaUrl.set(this.#mediaUrlFor(s, run));
           this.#mediaFailed.set(false);
           this.#state.set(s);
+          if ('open' in s && s.open.status === 'PRESENT' && !this.#mine.get()) {
+            this.#noteReorder(efs, link.canonical, s.open.file.author);
+          }
         };
         return runPreview(reads, efs, link.target, run.signal, show, {
           force,
@@ -328,10 +337,35 @@ export class EfsFilesPreview extends EfsElement {
    * tab, the Lens it was listed in; else the default. "Mine first" goes in front of that.
    */
   #viewLens(efs: Efs, link: Extract<LinkState, { status: 'target' }>): Lens | undefined {
-    const listed = link.target.kind === 'file' ? this.nav?.lensFor(link.target.subject) : undefined;
-    const base = link.lens ?? listed;
     const mine = this.#mine.get();
-    return mine ? efs.lens.mineFirst(mine as never, base ?? efs.lens.default) : base;
+    if (!mine) return readLens(efs, link, this.nav, readerOf(this.host));
+    const listed = link.target.kind === 'file' ? this.nav?.lensFor(link.target.subject) : undefined;
+    return efs.lens.mineFirst(mine as never, link.lens ?? listed ?? efs.lens.default);
+  }
+
+  /**
+   * "You first" put the person's own version in front of the one shown before (they connected or
+   * switched account): said, never silent. Called with each version shown.
+   */
+  #noteReorder(efs: Efs, canonical: string, author: string | null): void {
+    const reader = readerOf(this.host);
+    const me = reader ? efs.lens.principalOf(reader as never).toLowerCase() : undefined;
+    const last = this.#lastShown;
+    this.#lastShown = { canonical, reader, author };
+    const now = this.#reordered.get();
+    if (now && (now.canonical !== canonical || author?.toLowerCase() !== me)) {
+      this.#reordered.set(undefined);
+    }
+    if (
+      last?.canonical === canonical &&
+      last.reader !== reader &&
+      me !== undefined &&
+      author?.toLowerCase() === me &&
+      last.author !== null &&
+      last.author.toLowerCase() !== me
+    ) {
+      this.#reordered.set({ canonical, author: last.author });
+    }
   }
 
   /** Set when the editor closes: focus goes back to Edit once the file is on screen again. */
@@ -682,6 +716,7 @@ export class EfsFilesPreview extends EfsElement {
                     .host=${this.host}
                     .efs=${verifiedEfs(this.host.reader.get())}
                     .file=${open.file}
+                    .since=${open.basis.admissions}
                     .link=${this.#canonical()}
                     .original=${content?.kind === 'text' ? content.text : ''}
                     .draft=${this.#draftText.get()}
@@ -803,7 +838,15 @@ export class EfsFilesPreview extends EfsElement {
         ${this.#unreachableDraft(s, t, named.status !== 'pending')} ${this.#object(named, t)}
       </div>`;
     }
+    const reordered = this.#reordered.get();
     return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
+      ${
+        reordered?.canonical === link.canonical
+          ? html`<p class="efs-quiet efs-preview-reordered" role="status">
+              ${t('files.preview.reordered', { author: shortId(reordered.author) })}
+            </p>`
+          : nothing
+      }
       ${this.#unreachableDraft(s, t)}
       ${s ? this.#body(s, t) : html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${t('files.preview.opening')}</p>`}
     </div>`;

@@ -82,7 +82,13 @@ type Phase =
     }
   /** The send threw: it may or may not have gone out. The banner settles it. */
   | { readonly phase: 'unconfirmed'; readonly noJournal: boolean }
-  | { readonly phase: 'base-changed'; readonly head: RevisionRef | null }
+  /** `own`: the new HEAD is the person's own version, saved since the edit began (another tab). */
+  | { readonly phase: 'base-changed'; readonly head: RevisionRef | null; readonly own?: boolean }
+  /**
+   * "You first" now shows the person's own version, which was already there when the edit began:
+   * a reorder, not a change. Saving over it, or keeping the version they started from, is theirs.
+   */
+  | { readonly phase: 'reordered'; readonly head: RevisionRef }
   /** The person's own version moved (another tab or device) while they edited another's. */
   | { readonly phase: 'own-changed'; readonly plan: Planned; readonly writer: EfsWriter }
   | { readonly phase: 'plan-failed'; readonly message: MessageId }
@@ -109,6 +115,10 @@ export const shortId = (id: string): string =>
   id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 
 const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
+
+/** Whether `author` is the principal of the writer that planned: judged by the signer. */
+const signedBy = (writer: EfsWriter, author: string | undefined): boolean =>
+  author !== undefined && writer.principal.toLowerCase() === author.toLowerCase();
 const loadCreate = async () => (await import('@efs/sdk/files')).planCreateFile;
 const loadCheckName = async () => (await import('@efs/sdk')).checkName;
 
@@ -139,6 +149,7 @@ export class EfsFileEditor extends EfsElement {
     create: { attribute: false },
     realm: { attribute: false },
     route: { attribute: false },
+    since: { attribute: false },
   };
   declare host: AppHost;
   declare efs: Efs;
@@ -150,6 +161,8 @@ export class EfsFileEditor extends EfsElement {
   declare realm: RealmRef | undefined;
   /** Create mode: the route to come back to ("Review changes"), where it was started. */
   declare route: string | undefined;
+  /** The ledger's admissions when the file on screen was opened (its read's basis). */
+  declare since: bigint | undefined;
   /** The file's canonical link (to come back to it from the banner). */
   declare link: string;
   declare original: string;
@@ -174,6 +187,8 @@ export class EfsFileEditor extends EfsElement {
   /** A re-read this editor needs: running, failed (or timed out), or the journal is off here. */
   #holding = state<'no' | 'checking' | 'failed' | 'no-journal'>('no');
   #base: RevisionRef | undefined;
+  /** The admissions when this edit began (kept with its base): what a reorder is measured from. */
+  #since: bigint | undefined;
   #controller = new AbortController();
   /** Create mode: the name as typed now, and the SDK's checkName once loaded. */
   #name = state('');
@@ -201,6 +216,7 @@ export class EfsFileEditor extends EfsElement {
     this.#restored = kept;
     this.#text.set(this.draft ?? kept?.text ?? this.original);
     this.#base = kept && 'base' in kept ? kept.base : this.#fileBase();
+    this.#since = kept && 'base' in kept ? kept.since : this.since;
     this.#controller = new AbortController();
     this.#keep();
   }
@@ -240,7 +256,13 @@ export class EfsFileEditor extends EfsElement {
     if (text === this.original) drafts.drop(key);
     else if (this.create) {
       drafts.keep(key, { text, create: { ...this.create, name: this.#name.get() } });
-    } else if (base) drafts.keep(key, { text, base });
+    } else if (base) {
+      drafts.keep(key, {
+        text,
+        base,
+        ...(this.#since !== undefined ? { since: this.#since } : {}),
+      });
+    }
   }
 
   #fileBase(): RevisionRef | undefined {
@@ -271,6 +293,15 @@ export class EfsFileEditor extends EfsElement {
     }
     const moved = kept.base.recordId.toLowerCase() !== this.file.revision.toLowerCase();
     if (!moved && !this.resumed) return nothing;
+    const a = this.host.saving.availability.get();
+    const mine =
+      a.status === 'READY' &&
+      this.file.author?.toLowerCase() ===
+        this.efs.lens.principalOf(a.account as never).toLowerCase();
+    // The view now puts the person's own version first: Review tells a reorder from a change.
+    if (moved && mine) {
+      return html`<p class="efs-quiet efs-edit-kept">${t('files.edit.keptMine')}</p>`;
+    }
     return html`<p class="efs-quiet efs-edit-kept">
       ${t(moved ? 'files.edit.keptChanged' : 'files.edit.kept')}
     </p>`;
@@ -393,7 +424,15 @@ export class EfsFileEditor extends EfsElement {
           );
           return;
         case 'BASE_CHANGED':
-          this.#phase.set({ phase: 'base-changed', head: result.head });
+          this.#phase.set(
+            result.head && this.#isReorder(writer, result.headAuthor, result.headAdmission)
+              ? { phase: 'reordered', head: result.head }
+              : {
+                  phase: 'base-changed',
+                  head: result.head,
+                  ...(result.head && signedBy(writer, result.headAuthor) ? { own: true } : {}),
+                },
+          );
           return;
         case 'TOO_LARGE':
           this.#phase.set({ phase: 'plan-failed', message: 'files.edit.tooLarge' });
@@ -406,6 +445,23 @@ export class EfsFileEditor extends EfsElement {
       console.error(error);
       this.#phase.set({ phase: 'plan-failed', message: 'files.edit.failed' });
     }
+  }
+
+  /**
+   * Whether a HEAD that isn't this edit's base is only a reorder: the version of the account that
+   * planned (the signer, never whichever account is on screen now), set no later than when this
+   * edit began (`headAdmission` ≤ the opening basis's admissions). Anything else, or anything
+   * unknown, is a change.
+   */
+  #isReorder(
+    writer: EfsWriter,
+    author: string | undefined,
+    admission: bigint | undefined,
+  ): boolean {
+    if (admission === undefined || this.#since === undefined || admission > this.#since) {
+      return false;
+    }
+    return signedBy(writer, author);
   }
 
   /** Create mode: plans the new file at its folder and (current) name, in the folder's Lens. */
@@ -787,7 +843,9 @@ export class EfsFileEditor extends EfsElement {
         return html`<wa-callout variant="warning" size="small" class="efs-edit-base-changed">
           <span slot="icon">${appIcon('triangle-exclamation')}</span>
           <div class="wa-stack wa-gap-xs">
-            <p role="alert">${t(s.head ? 'files.edit.baseChanged' : 'files.edit.baseGone')}</p>
+            <p role="alert">
+              ${t(s.head ? (s.own ? 'files.edit.ownBaseChanged' : 'files.edit.baseChanged') : 'files.edit.baseGone')}
+            </p>
             <div class="wa-cluster wa-gap-xs">
               ${
                 s.head
@@ -798,6 +856,29 @@ export class EfsFileEditor extends EfsElement {
               }
               <wa-button size="s" appearance="outlined" @click=${() => this.#done({ showLatest: true })}
                 >${t('files.edit.showLatest')}</wa-button
+              >
+            </div>
+          </div>
+        </wa-callout>`;
+      case 'reordered':
+        return html`<wa-callout variant="neutral" size="small" class="efs-edit-reordered">
+          <span slot="icon">${appIcon('circle-info')}</span>
+          <div class="wa-stack wa-gap-xs">
+            <p role="alert">${t('files.edit.reordered')}</p>
+            <div class="wa-cluster wa-gap-xs">
+              <wa-button
+                size="s"
+                variant="brand"
+                class="efs-edit-save-over-mine"
+                @click=${() => void this.#plan(s.head)}
+                >${t('files.edit.saveOverMine')}</wa-button
+              >
+              <wa-button
+                size="s"
+                appearance="outlined"
+                class="efs-edit-keep-started"
+                @click=${() => this.#phase.set({ phase: 'editing' })}
+                >${t('files.edit.keepStarted')}</wa-button
               >
             </div>
           </div>
