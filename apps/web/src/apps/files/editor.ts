@@ -115,6 +115,10 @@ export const shortId = (id: string): string =>
   id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 
 const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
+
+/** Whether `author` is the principal of the writer that planned: judged by the signer. */
+const signedBy = (writer: EfsWriter, author: string | undefined): boolean =>
+  author !== undefined && writer.principal.toLowerCase() === author.toLowerCase();
 const loadCreate = async () => (await import('@efs/sdk/files')).planCreateFile;
 const loadCheckName = async () => (await import('@efs/sdk')).checkName;
 
@@ -421,12 +425,12 @@ export class EfsFileEditor extends EfsElement {
           return;
         case 'BASE_CHANGED':
           this.#phase.set(
-            result.head && this.#isReorder(result.headAuthor, result.headAdmission)
+            result.head && this.#isReorder(writer, result.headAuthor, result.headAdmission)
               ? { phase: 'reordered', head: result.head }
               : {
                   phase: 'base-changed',
                   head: result.head,
-                  ...(result.head && this.#isMine(result.headAuthor) ? { own: true } : {}),
+                  ...(result.head && signedBy(writer, result.headAuthor) ? { own: true } : {}),
                 },
           );
           return;
@@ -444,21 +448,20 @@ export class EfsFileEditor extends EfsElement {
   }
 
   /**
-   * Whether a HEAD that isn't this edit's base is only a reorder: the connected account's own
-   * version, set no later than when this edit began (`headAdmission` ≤ the opening basis's
-   * admissions). Anything else, or anything unknown, is a change.
+   * Whether a HEAD that isn't this edit's base is only a reorder: the version of the account that
+   * planned (the signer, never whichever account is on screen now), set no later than when this
+   * edit began (`headAdmission` ≤ the opening basis's admissions). Anything else, or anything
+   * unknown, is a change.
    */
-  #isReorder(author: string | undefined, admission: bigint | undefined): boolean {
-    if (admission === undefined || this.#since === undefined || admission > this.#since)
+  #isReorder(
+    writer: EfsWriter,
+    author: string | undefined,
+    admission: bigint | undefined,
+  ): boolean {
+    if (admission === undefined || this.#since === undefined || admission > this.#since) {
       return false;
-    return this.#isMine(author);
-  }
-
-  /** Whether `author` is the connected account. */
-  #isMine(author: string | undefined): boolean {
-    const a = this.host.saving.availability.get();
-    if (a.status !== 'READY' || !author) return false;
-    return this.efs.lens.principalOf(a.account as never).toLowerCase() === author.toLowerCase();
+    }
+    return signedBy(writer, author);
   }
 
   /** Create mode: plans the new file at its folder and (current) name, in the folder's Lens. */
