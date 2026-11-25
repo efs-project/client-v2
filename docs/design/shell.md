@@ -195,6 +195,18 @@ require-trusted-types-for 'script'; trusted-types lit-html
 - Unusable Web Awesome helpers under this policy: `wa-markdown` and `wa-include` (they assign HTML strings), and the string forms of toast helpers. Markdown rendering will need our own Trusted-Types-safe renderer.
 - The SDK confirmed (2026-11-24) its browser entry points use no WebAssembly, eval, workers or DOM sinks, so it needs nothing beyond `connect-src`.
 
+## Accessibility of the write flow
+
+- **One live region announces saves.** A polite, visually hidden `role="status"` paragraph (`.efs-announcer`) is always in the shell; when a save's outcome changes ("Saved · confirming", "Saved", "Partially saved (2 of 5)…"), the shell writes the banner's words into it. Regions inserted along with their text (the banner appears only once there are saves) aren't reliably read out, so banner rows themselves carry no live role and nothing is said twice.
+- **Focus is never dropped.** Opening Edit focuses the text; closing the editor (sent, cancelled, or "show the newer version") returns focus to Edit once the file is back on screen, or to the Preview pane if Edit isn't offered. A reload enters "opening" at once, so focus waits for the new content rather than landing on the old.
+- **Keyboard only, axe clean:** `tests/e2e/a11y-writes.spec.ts` drives Edit → connect → Review → Send from the keyboard and runs axe (WCAG 2.2 A/AA) on the Preview, editor, wallet dialog, review dialog and banner, light and dark.
+- **Preferences:** `prefers-contrast: more` (quiet text and borders at full contrast, thicker focus ring) and `prefers-reduced-transparency` (solid overlays) join `forced-colors` and color scheme; Web Awesome handles reduced motion in its components.
+- **Not automated:** a screen-reader pass (VoiceOver, NVDA) needs a person; see the PR notes.
+
+## Time budgets
+
+`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **1.5 s**, or the first verified file text (`efs:preview-verified`) within **4 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report. Measured locally at the slice: median 160 ms and 640 ms. The budgets are provisional until CI's numbers are in, then set to about twice CI's median.
+
 ## Startup budget
 
 Lit, Signals and Web Awesome are now startup code, a deliberate change from C0 (whose startup set was 13,615 B brotli). The 250 KiB budget is now a failing gate in `tools/build/check-graph.ts`, and counts the icon sprite as well as everything `index.html` loads.

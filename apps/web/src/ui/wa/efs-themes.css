@@ -68,3 +68,28 @@
     --wa-color-focus: Highlight;
   }
 }
+
+/* More contrast asked for: quiet text and borders take the normal text color, and the focus
+   ring is thicker. (Quiet text already meets 4.5:1; this goes as far as the person asked.)
+   Unlayered, so it wins over every theme and over inverted sections. */
+@media (prefers-contrast: more) {
+  :root,
+  .wa-light,
+  .wa-dark,
+  .wa-invert {
+    --wa-color-text-quiet: var(--wa-color-text-normal);
+    --wa-color-surface-border: var(--wa-color-text-normal);
+    --wa-focus-ring-width: 0.25rem;
+  }
+}
+
+/* Less transparency asked for: overlays behind dialogs and drawers become solid. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  .wa-light,
+  .wa-dark,
+  .wa-invert {
+    --wa-color-overlay-modal: var(--wa-color-surface-lowered);
+    --wa-color-overlay-inline: var(--wa-color-surface-lowered);
+  }
+}
