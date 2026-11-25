@@ -219,7 +219,12 @@ export class EfsFileEditor extends EfsElement {
     if (holding === 'failed') return { hold: { kind: 'check-failed' }, lapsed: false };
     if (holding === 'no-journal') return { hold: { kind: 'no-journal' }, lapsed: false };
     const mine = this.file.file.toLowerCase();
-    if (this.host.saving.unconfirmed.get().some((u) => u.file.toLowerCase() === mine)) {
+    // An unconfirmed edit of this file, or an unconfirmed send that names nothing, pauses saving.
+    // A folder operation's unconfirmed send names its places, which an edit doesn't touch.
+    const paused = this.host.saving.unconfirmed
+      .get()
+      .some((u) => u.file?.toLowerCase() === mine || (u.file === undefined && !u.places));
+    if (paused) {
       return { hold: { kind: 'paused' }, lapsed: false };
     }
     const a = this.host.saving.availability.get();

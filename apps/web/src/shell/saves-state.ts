@@ -70,8 +70,13 @@ export type CheckResult = 'read' | 'no-journal' | 'failed' | 'timeout';
 
 /** A send that threw and may have gone out: saving that file pauses until a check finds it. */
 export interface Unconfirmed {
-  /** The edited file's SubjectId. */
-  readonly file: string;
+  /** An edit: the edited file's SubjectId. */
+  readonly file?: string;
+  /**
+   * A folder operation: every (folder, name) it touches. With neither `file` nor `places`, the
+   * send holds every new save until a check finds it.
+   */
+  readonly places?: readonly { readonly folder: string; readonly name: string }[];
   /** The save's record, when the SDK said it exists. */
   readonly sequenceId?: Hex;
 }

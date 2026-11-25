@@ -9,12 +9,14 @@
 // - Nothing reads as empty unless the SDK proved it (COMPLETE); see listingNotice.
 
 import type { Efs, Lens } from '@efs/sdk';
-import { link } from '@efs/sdk';
-import type { EntryKind, FolderRef, FolderRow } from '@efs/sdk/files';
+import type { EntryKind, EntryRef, FolderRef, FolderRow } from '@efs/sdk/files';
+import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
+import { placeKey, touchesOf } from '../../shell/save-hold.ts';
+import { unsettled } from '../../shell/saves-state.ts';
 import { effect } from '../../state/effect.ts';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -28,6 +30,7 @@ import {
   listingNotice,
   startListing,
 } from './folder-model.ts';
+import type { EfsFolderSave, FolderAsk, FolderSavedDetail } from './folder-save.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 
@@ -83,6 +86,11 @@ export class EfsFilesListing extends EfsElement {
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
   #efs: Efs | undefined;
+  /** Saves this pane handed to the banner, and those it has already reloaded for. */
+  #handedOff = new Set<string>();
+  #reloadedFor = new Set<string>();
+  /** The entry the person just removed here, offered back with Restore (this tab only). */
+  #removed = state<EntryRef | undefined>(undefined);
 
   protected override createRenderRoot() {
     return this;
@@ -111,6 +119,46 @@ export class EfsFilesListing extends EfsElement {
       this.#loaded = key;
       queueMicrotask(() => this.#load(efs, folder, kind));
     });
+    // A save handed off from here is on the ledger (every part committed): list again, once.
+    effect(scope, () => {
+      for (const p of this.host.saving.saves.get()) {
+        if (!this.#handedOff.has(p.sequenceId) || this.#reloadedFor.has(p.sequenceId)) continue;
+        if (p.committed < p.total) continue;
+        this.#reloadedFor.add(p.sequenceId);
+        queueMicrotask(() => this.#retry());
+      }
+    });
+  }
+
+  /** The folder dialog: New folder, Rename, Remove and Restore (from a click). */
+  #ask(ask: FolderAsk): void {
+    const dialog = this.querySelector<EfsFolderSave>('efs-files-folder-save');
+    dialog?.open(ask);
+  }
+
+  /** The name the folder now shown goes by: its row's name, or the root's. */
+  #folderName(): string {
+    return this.nav.path.get().at(-1)?.name ?? this.host.translator.t('files.location.root');
+  }
+
+  /** Whether `author` is the connected account. */
+  #isMine(author: string): boolean {
+    const reader = this.#reader();
+    return (
+      reader !== undefined &&
+      this.#efs?.lens.principalOf(reader as never).toLowerCase() === author.toLowerCase()
+    );
+  }
+
+  /** The (folder, name) places an unsettled save of this tab's journal touches. */
+  #pending(): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (const p of this.host.saving.saves.get()) {
+      if (!unsettled(p)) continue;
+      const touches = touchesOf(p.effect);
+      if (touches.kind === 'places') for (const key of touches.keys) keys.add(key);
+    }
+    return keys;
   }
 
   /** The folder now shown: the last one opened, else the realm's root. */
@@ -213,8 +261,9 @@ export class EfsFilesListing extends EfsElement {
     >`;
   }
 
-  #row(row: FolderRow, owner: string | undefined) {
+  #row(row: FolderRow, folder: FolderRef, pending: ReadonlySet<string>, lens: Lens | undefined) {
     const t = this.host.translator.t.bind(this.host.translator);
+    const saving = pending.has(placeKey(folder.directory, row.name) ?? '');
     const meta = html`<span class="efs-entry-meta efs-quiet">
       <span>${t(KIND_LABEL[row.kind])}</span>
       ${
@@ -222,46 +271,76 @@ export class EfsFilesListing extends EfsElement {
           ? html`<span>${t('files.list.size', { size: Number(row.size) })}</span>`
           : nothing
       }
-      ${this.#whose(row, owner)}
+      ${this.#whose(row, folder.owner)}
+      ${saving ? html`<span class="efs-entry-saving" role="status">${t('files.pending')}</span>` : nothing}
     </span>`;
+    // Rename and Remove only on the person's own entries (another author's is theirs to change).
+    const entry: EntryRef = { folder, name: row.name };
+    const actions =
+      this.#isMine(row.author) && row.kind !== 'invalid'
+        ? html`<span class="efs-entry-actions">
+            <wa-button
+              size="s"
+              appearance="plain"
+              class="efs-entry-rename"
+              ?disabled=${saving}
+              @click=${() => this.#ask({ kind: 'rename', from: entry })}
+              >${appIcon('pen-to-square', t('files.rename.button', { name: row.name }))}</wa-button
+            >
+            <wa-button
+              size="s"
+              appearance="plain"
+              class="efs-entry-remove"
+              ?disabled=${saving}
+              @click=${() =>
+                this.#ask({
+                  kind: 'remove',
+                  entry,
+                  folderName: this.#folderName(),
+                  isFolder: row.kind === 'folder',
+                  hide: false,
+                })}
+              >${appIcon('trash', t('files.remove.button', { name: row.name }))}</wa-button
+            >
+          </span>`
+        : nothing;
     const name = html`<span class="efs-entry-name" translate="no">${row.name}</span>`;
     const target = row.target;
+    let open: unknown;
     if (row.kind === 'folder' && target?.kind === 'folder') {
-      return html`<li class="efs-entry" data-kind="folder">
-        <button
-          type="button"
-          class="efs-entry-open"
-          @click=${() => this.nav.open({ folder: target, name: row.name })}
-        >
-          ${appIcon('folder')} ${name}
-        </button>
-        ${meta}
-      </li>`;
-    }
-    if (row.kind === 'file' && target?.kind === 'file') {
+      open = html`<button
+        type="button"
+        class="efs-entry-open"
+        @click=${() => this.nav.open({ folder: target, name: row.name })}
+      >
+        ${appIcon('folder')} ${name}
+      </button>`;
+    } else if (row.kind === 'file' && target?.kind === 'file') {
       const location = this.host.location.get();
-      const objectLink = link({ kind: 'object', subject: target.subject });
+      // The file opens in the Lens this row was shown in (the place Lens), so the Preview shows the
+      // version the listing did: the person's own file, listed as "yours", isn't "not present".
+      const objectLink = link({
+        kind: 'object',
+        subject: target.subject,
+        ...(lens ? { lens } : {}),
+      });
       const href =
         location.kind === 'realm' ? formatRealmRoute(location.realm, objectLink) : undefined;
-      return html`<li class="efs-entry" data-kind="file">
-        <a
-          class="efs-entry-open"
-          href=${href ?? nothing}
-          @click=${(event: MouseEvent) => {
-            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-            event.preventDefault();
-            this.host.openLink(objectLink);
-          }}
-          >${appIcon('file')} ${name}</a
-        >
-        ${meta}
-      </li>`;
+      open = html`<a
+        class="efs-entry-open"
+        href=${href ?? nothing}
+        @click=${(event: MouseEvent) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+          event.preventDefault();
+          this.host.openLink(objectLink);
+        }}
+        >${appIcon('file')} ${name}</a
+      >`;
+    } else {
+      // Other and invalid rows are shown, never opened as something they aren't.
+      open = html`<span class="efs-entry-open">${appIcon('circle-info')} ${name}</span>`;
     }
-    // Other and invalid rows are shown, never opened as something they aren't.
-    return html`<li class="efs-entry" data-kind=${row.kind}>
-      <span class="efs-entry-open">${appIcon('circle-info')} ${name}</span>
-      ${meta}
-    </li>`;
+    return html`<li class="efs-entry" data-kind=${row.kind}>${open} ${meta} ${actions}</li>`;
   }
 
   #filter() {
@@ -321,8 +400,24 @@ export class EfsFilesListing extends EfsElement {
       ></efs-outcome>`;
     } else {
       const line = listingNotice(s);
-      const owner = s.folder.owner;
+      const folder = s.folder;
+      const pending = this.#pending();
+      const placeLens = this.#efs ? this.#lens(this.#efs, folder) : undefined;
+      const removed = this.#removed.get();
       body = html`${
+        removed && removed.folder.directory === folder.directory
+          ? html`<p class="efs-entries-removed" role="status">
+              ${t('files.list.removed', { name: removed.name })}
+              <wa-button
+                size="s"
+                class="efs-entries-restore"
+                @click=${() => this.#ask({ kind: 'restore', entry: removed })}
+                >${t('files.restore')}</wa-button
+              >
+            </p>`
+          : nothing
+      }
+      ${
         line
           ? html`<p class="efs-entries-notice" role="status">
               ${t(line.id, 'count' in line ? { count: line.count } : {})}
@@ -332,7 +427,7 @@ export class EfsFilesListing extends EfsElement {
         ${
           s.rows.length > 0
             ? html`<ul class="efs-entries" aria-label=${t('files.entries.title')}>
-              ${s.rows.map((row) => this.#row(row, owner))}
+              ${s.rows.map((row) => this.#row(row, folder, pending, placeLens))}
             </ul>`
             : nothing
         }
@@ -372,6 +467,39 @@ export class EfsFilesListing extends EfsElement {
             : nothing
         }`;
     }
-    return html`<div class="wa-stack wa-gap-s efs-listing">${this.#filter()} ${body}</div>`;
+    const efs = this.#efs;
+    const folder = s?.phase === 'page' ? s.folder : undefined;
+    const ready = this.host.saving.availability.get().status !== 'SHARED_GATEWAY';
+    const toolbar = html`<div class="wa-cluster wa-gap-s efs-listing-toolbar">
+      ${this.#filter()}
+      ${
+        folder && ready
+          ? html`<wa-button
+              size="s"
+              class="efs-new-folder"
+              @click=${() =>
+                this.#ask({ kind: 'createFolder', folder, folderName: this.#folderName() })}
+              ><span slot="start">${appIcon('plus')}</span>${t('files.new.folder')}</wa-button
+            >`
+          : nothing
+      }
+    </div>`;
+    return html`<div class="wa-stack wa-gap-s efs-listing" @efs-folder-saved=${this.#onSaved}>
+      ${toolbar} ${body}
+      <efs-files-folder-save
+        .host=${this.host}
+        .efs=${efs}
+        .lens=${efs && folder ? this.#lens(efs, folder) : undefined}
+      ></efs-files-folder-save>
+    </div>`;
   }
+
+  /** A save the dialog handed to the banner: list again once it's on the ledger. */
+  #onSaved = (event: Event) => {
+    const detail = (event as CustomEvent<FolderSavedDetail>).detail;
+    this.#handedOff.add(detail.sequenceId);
+    const ask = detail.ask;
+    if (ask?.kind === 'remove') this.#removed.set(ask.entry);
+    else if (ask?.kind === 'restore') this.#removed.set(undefined);
+  };
 }
