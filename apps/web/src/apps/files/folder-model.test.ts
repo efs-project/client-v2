@@ -190,6 +190,23 @@ describe('continueListing', () => {
     expect(s.next).toBe(cursor);
   });
 
+  it('a weaker coverage on an earlier page is kept: the warning never disappears on Keep looking', async () => {
+    const unvouched = reason('INDEX_STALE', 'transient');
+    const reads = readsOf(
+      present([row('a.txt')], { state: 'UNKNOWN', reason: unvouched }, { next: cursor }),
+      present([row('b.txt')], { state: 'PARTIAL', why: 'RESUMED' }),
+    );
+    const s = pageOf(await continueListing(reads, efs, await first(reads), {}, signal()));
+    expect(s.coverage).toEqual({ state: 'UNKNOWN', reason: unvouched });
+    expect(listingNotice(s)).toEqual({ id: 'files.list.coverageUnknown' });
+    const partial = readsOf(
+      present([row('a.txt')], { state: 'PARTIAL', why: 'INDEX_PARTIAL' }, { next: cursor }),
+      present([row('b.txt')], { state: 'PARTIAL', why: 'RESUMED' }),
+    );
+    const t = pageOf(await continueListing(partial, efs, await first(partial), {}, signal()));
+    expect(listingNotice(t)).toEqual({ id: 'files.list.indexPartial' });
+  });
+
   it('a resumed listing that ended with no rows at all is "none found", never "empty"', async () => {
     const reads = readsOf(
       present([], { state: 'PARTIAL', why: 'MORE_PAGES' }, { next: cursor, filtered: 4 }),

@@ -64,6 +64,15 @@ export type ListingState =
 
 type Page = Extract<ListingState, { phase: 'page' }>;
 
+/** How little a coverage vouches for: an unvouched or index-partial page taints the whole listing. */
+const weakness = (c: FolderCoverage): number =>
+  c.state === 'UNKNOWN' ? 3 : c.state === 'PARTIAL' ? (c.why === 'INDEX_PARTIAL' ? 2 : 1) : 0;
+
+/** The listing's coverage after another page: never stronger than any page read so far. */
+export function weakest(before: FolderCoverage, page: FolderCoverage): FolderCoverage {
+  return weakness(before) > weakness(page) ? before : page;
+}
+
 function fromPage(page: FolderPage, before?: Page): ListingState {
   if (page.status !== 'PRESENT') {
     const phase =
@@ -80,7 +89,7 @@ function fromPage(page: FolderPage, before?: Page): ListingState {
     rows: before ? [...before.rows, ...page.rows] : page.rows,
     hidden: (before?.hidden ?? 0) + page.skipped.hidden,
     filtered: (before?.filtered ?? 0) + page.skipped.filtered,
-    coverage: page.coverage,
+    coverage: before ? weakest(before.coverage, page.coverage) : page.coverage,
     ...(page.next ? { next: page.next } : {}),
     more: { status: 'idle' },
   };
