@@ -40,9 +40,33 @@ describe('linkState', () => {
     expect(at('~efs/o/0x1234')).toMatchObject({ status: 'invalid' });
     expect(at('~efs/o/0x1?lens=alice.eth')).toMatchObject({ status: 'invalid' });
     // A bare path is a topic; a first segment of 0x + 40 hex is an address (home).
-    expect(at('cars/tesla')).toEqual({ status: 'path', kind: 'topic' });
-    expect(at(`0x${'ab'.repeat(20)}/photos/cat.jpg`)).toEqual({ status: 'path', kind: 'home' });
+    expect(at('cars/tesla')).toEqual({ status: 'soon', kind: 'topic' });
+    expect(at(`0x${'ab'.repeat(20)}/photos/cat.jpg`)).toEqual({ status: 'soon', kind: 'home' });
     // Anything else starting with ~ is the system's, and refused.
     expect(at('~other/x')).toMatchObject({ status: 'invalid' });
+    // ~root and ~home are reserved names, never a link of their own.
+    expect(at('~root')).toEqual({ status: 'invalid', rule: 'reserved-name' });
+    expect(at('~root/docs')).toEqual({ status: 'invalid', rule: 'reserved-name' });
+    expect(at('~home')).toEqual({ status: 'invalid', rule: 'reserved-name' });
+    expect(at(`~home/0x${'ab'.repeat(20)}`)).toEqual({ status: 'invalid', rule: 'reserved-name' });
+  });
+
+  it('opens a path from a folder by its id as a path, never as the folder itself', () => {
+    const state = at(`${link({ kind: 'object', subject: RECORD })}/docs/read%20me.md`);
+    expect(state).toEqual({
+      status: 'path',
+      link: { kind: 'path', folder: RECORD, names: ['docs', 'read me.md'] },
+      canonical: `~efs/o/${RECORD}/docs/read%20me.md`,
+    });
+    // One trailing "/" is ignored; its names keep their case; a name breaking files-name/2 refuses.
+    expect(at(`~efs/o/${RECORD}/Docs/`)).toMatchObject({
+      status: 'path',
+      link: { names: ['Docs'] },
+    });
+    expect(at(`~efs/o/${RECORD}/~efs`)).toMatchObject({ status: 'invalid', rule: 'bad-name' });
+    // The sharer's Lens travels with the path.
+    const shared = at(`~efs/o/${RECORD}/a.txt?lens=0x${'12'.repeat(20)}`);
+    if (shared.status !== 'path') throw new Error('expected a path');
+    expect(shared.link.lens?.principals).toHaveLength(1);
   });
 });

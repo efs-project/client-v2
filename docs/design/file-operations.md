@@ -91,6 +91,11 @@ Draft flows and copy for the integration owner's (PM's) review. Revised for the 
     - No link ever addresses a named file through a topic. Whether a file's name is its own mechanism or a path's last word is still open.
   - **No depth limit** on folder paths under an address (James, 2026-11-25). The only cap is the router's 8,192 characters, and a longer route is refused visibly, never cut.
   - The canonical form replaces a typed link, as object links do today.
+  - **A path from a folder by its id opens** (`~efs/o/<folder>/<name>/…`, sdk-v2 db9dc26). The app reads it, and still never gives one out:
+    - `openPath` looks the names up: under the link's own Lens, else you first, then the start folder's creator, then the default.
+    - What the names lead to opens by its own object link, which replaces the path in the URL, as clicking through the names would. A folder gets the trail of the folders the names passed through (a start other than the shared root comes first, by its short id). A file is read in the Lens its row was chosen in.
+    - A path that leads nowhere stays in the URL and says which name, and why: nothing by that name, hidden by an author in the Lens, or a file in the middle of the path. An id that isn't a folder (a file included) is INVALID; an id nothing has is "Confirmed not present".
+    - `~root` and `~home` are reserved names: refused as links before any read.
 - **The breadcrumb.**
   - **For a folder path under an address,** it comes from the resolved chain, with each segment's author, so "whose `/photos`" is answerable (#36 hard case 4).
   - **For a folder opened by its object link,** it shows how the person got there in this tab, because folders form a graph and have no single parent (#36 hard case 5). Opened fresh from a link, it shows only the folder's own name.
@@ -185,6 +190,7 @@ They are one SDK operation: one atomic change of placement. It releases the entr
 - **Several at once.**
   - Selecting several entries and choosing Move, or Remove, makes one review and one prompt (A1: "reorganizing 50 items is one ceremony"). `planMoveEntries` and `planRemoveEntries` take the whole selection.
   - The SDK splits the batch by gas, and a partial batch uses the banner's existing Continue / Stop.
+    - Since sdk-v2 db9dc26 each part counts the kernel's per-bind index floor, so no part goes over the 2^24 cap (batches of about 40 or more were refused on every try before). 64 files measured on the fixture chain (`folder-writes.spec.ts`, live only): Move takes 5 parts, Remove 2. The floor is a safe upper bound until the tag release, so the counts shrink then.
   - **A batch is all or nothing at plan time.** If any item is refused, nothing is planned. The answer is REFUSED, with each refused item's `index` and `code`.
   - The dialog then lists those items with their reasons, and offers "Leave these out and review the rest", which plans again without them. It never sends a part of the selection silently.
 

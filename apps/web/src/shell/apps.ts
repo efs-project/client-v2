@@ -36,7 +36,7 @@ export interface ViewDescriptor {
 /** Where the app is: its own UI route, or a realm link it is the handler for. */
 export type AppLocation =
   | { readonly kind: 'app'; readonly rest: string }
-  /** `link` is the SDK's (object, revision, later path); parse it only with the SDK's parseLink. */
+  /** `link` is the SDK's (object, path, revision, …); parse it only with the SDK's parseLink. */
   | { readonly kind: 'realm'; readonly realm: RealmRef; readonly link: string };
 
 /**

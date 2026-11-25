@@ -652,6 +652,24 @@ export class EfsFilesPreview extends EfsElement {
     switch (named.status) {
       case 'folder':
         return html`<p class="efs-quiet efs-preview-folder">${t('files.preview.isFolder')}</p>`;
+      case 'noPath':
+        return html`<div class="wa-stack wa-gap-xs efs-preview-no-path" role="status">
+          <p>
+            ${t(
+              named.why === 'masked'
+                ? 'files.preview.pathMasked'
+                : named.why === 'notFolder'
+                  ? 'files.preview.pathNotFolder'
+                  : 'files.preview.pathAbsent',
+              { name: named.name },
+            )}
+          </p>
+          <div>
+            <wa-button size="s" appearance="outlined" @click=${() => this.object?.retry()}
+              ><span slot="start">${appIcon('rotate-right')}</span>${t('outcome.retry')}</wa-button
+            >
+          </div>
+        </div>`;
       case 'absent':
       case 'invalid':
       case 'unknown':
@@ -838,7 +856,7 @@ export class EfsFilesPreview extends EfsElement {
     const composing = this.composer?.current.get();
     if (composing) return readerNotice(this, this.host, t) ?? this.#compose(composing);
     if (link.status === 'none') return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
-    if (link.status === 'path') {
+    if (link.status === 'soon') {
       return html`<p class="efs-quiet efs-preview-soon">
         ${t(link.kind === 'topic' ? 'files.preview.topicSoon' : 'files.preview.homeSoon')}
       </p>`;
@@ -854,6 +872,13 @@ export class EfsFilesPreview extends EfsElement {
     }
     const notice = readerNotice(this, this.host, t);
     if (notice) return notice;
+    // A path link: looked up, then replaced by the link of what it leads to; until then (or when
+    // it leads nowhere) this pane says so.
+    if (link.status === 'path') {
+      return html`<div class="wa-stack wa-gap-m efs-preview" tabindex="-1">
+        ${this.#object(this.object?.kind.get() ?? { status: 'pending' }, t)}
+      </div>`;
+    }
     const named = link.target.kind === 'file' ? this.object?.kind.get() : undefined;
     const s = this.#state.get();
     if (named && named.status !== 'file' && named.status !== 'none') {

@@ -167,6 +167,61 @@ test('an object link to nothing is proven absent (openFile, then openObject): no
   }
 });
 
+test('a path link opens what its names lead to by its own link; a path leading nowhere says which name, and why', async ({
+  page,
+}) => {
+  const chain = await testChain('client-folders-path-link', 'notes/todo.txt under the realm root.');
+  try {
+    await withNotes(chain);
+    const root = (JSON.parse(chain.deployment) as { root: { directoryRecordId: string } }).root
+      .directoryRecordId;
+    const at = (names: string) => `#/r/testnet/~efs/o/${root}/${names}`;
+    const go = (hash: string) =>
+      page.evaluate((h) => {
+        location.hash = h;
+      }, hash);
+    const objectHash = /^#\/r\/testnet\/~efs\/o\/0x[0-9a-f]{64}$/;
+    const noPath = preview(page).locator('.efs-preview-no-path');
+
+    await open(page, chain, `./${at('notes/todo.txt')}`);
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('buy milk');
+    await expect.poll(() => new URL(page.url()).hash).toMatch(objectHash);
+    chain.step(
+      'A path link to notes/todo.txt: openPath, then the file by its own link (URL replaced)',
+    );
+
+    await go(at('notes'));
+    await expect(row(page, 'todo.txt')).toBeVisible();
+    await expect.poll(() => new URL(page.url()).hash).toMatch(objectHash);
+    // The trail is the folders the names came through: Root, then notes.
+    await expect(crumbs(page)).toHaveCount(2);
+    await expect(crumbs(page).last()).toContainText('notes');
+    await expect(preview(page)).toContainText('This link is a folder');
+    chain.step('A path link to notes/: the folder by its own link, its trail Root > notes');
+
+    await go(at('notes/nothing.txt'));
+    await expect(noPath).toContainText(/Nothing named\W+nothing\.txt\W+is on this path/);
+    expect(new URL(page.url()).hash).toContain('/notes/nothing.txt');
+    chain.step('notes/nothing.txt: no entry by that name; it says which, and the path stays');
+
+    await go(at('notes/todo.txt/more'));
+    await expect(noPath).toContainText(/todo\.txt\W+on this path is a file/);
+    chain.step('notes/todo.txt/more: todo.txt is a file, so the path stops there');
+
+    await go(`#/r/testnet/~efs/o/${chain.ids.file}/more`);
+    await expect(preview(page).locator('efs-outcome')).toContainText('INVALID');
+    chain.step('A path from a file id: INVALID (a file has no names below it)');
+
+    await go('#/r/testnet/~root/notes');
+    await expect(preview(page)).toContainText("This link isn't a valid EFS link");
+    await expect(preview(page)).toContainText('reserved-name');
+    await chain.idle(500);
+    chain.step('~root/notes: a reserved name, refused before any read');
+  } finally {
+    await chain.finish();
+  }
+});
+
 for (const scheme of ['light', 'dark'] as const) {
   test(`320 px: the listing fits with no sideways scroll; keyboard opens a folder; axe clean (${scheme})`, async ({
     page,

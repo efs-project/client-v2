@@ -1074,3 +1074,116 @@ test('Restore unblocks a blocked name: listed as "Removed and blocked", the revi
     await chain.finish();
   }
 });
+
+/** Lists the whole folder on screen: "Keep looking" until there is no next page. */
+async function listAll(page: Page, first: string): Promise<void> {
+  await expect(row(page, first)).toBeVisible();
+  const more = entries(page).locator('wa-button.efs-entries-more');
+  while ((await more.count()) > 0) {
+    await more.click();
+    await expect(entries(page).locator('wa-button.efs-entries-more[loading]')).toHaveCount(0);
+  }
+}
+
+const BULK = Array.from({ length: 64 }, (_, i) => `f${String(i).padStart(2, '0')}.txt`);
+
+test('64 entries selected: Move them all, then Remove them all; every part is sent, and each save completes', async ({
+  page,
+}) => {
+  // The path a kernel floor the planners didn't count broke (sdk-v2 db9dc26): batches of about
+  // 40 or more were planned over the 2^24 cap and refused on every try. The live chain only: its
+  // transcript would be all setup.
+  test.skip(CHAIN_MODE !== 'live', 'live chain only (pnpm test:e2e:live)');
+  test.setTimeout(600_000);
+  const chain = await testChain('client-select-64', 'bulk/ with 64 files and dest/, by anvil #6.');
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const folderIn = async (name: string) =>
+        (
+          (await done(await files.planCreateFolder(efs, writer, { folder: root, name, lens }))) as {
+            created: import('@efs/sdk/files').FolderRef;
+          }
+        ).created;
+      const bulk = await folderIn('bulk');
+      await folderIn('dest');
+      for (const name of BULK) {
+        await done(
+          await files.planCreateFile(efs, writer, {
+            folder: bulk,
+            name,
+            content: new TextEncoder().encode(`${name}\n`),
+            lens,
+          }),
+        );
+      }
+    });
+    await openRoot(page, chain);
+    const prompts = dialog(page).locator('.efs-review-prompts');
+    /** The parts the review says it will send (one approval each: the test wallet doesn't batch). */
+    const parts = async () => {
+      const text = (await prompts.textContent()) ?? '';
+      if (/One approval/.test(text)) return 1;
+      const n = Number(/(\d+)\s*approvals/.exec(text.replace(/[⁦-⁩]/g, ''))?.[1]);
+      expect(n, text).toBeGreaterThan(1);
+      return n;
+    };
+    // Every part committed (COMPLETE): "Saved · confirming", or "Saved" once final. Each save
+    // stays in the banner, and none may show anything else.
+    const complete = page.locator(
+      'efs-saves-banner .efs-save:is([data-outcome="confirming"], [data-outcome="saved"])',
+    );
+    const saves = page.locator('efs-saves-banner .efs-save');
+    const selectAll = async () => {
+      await listAll(page, BULK[0] as string);
+      await expect(entries(page).locator('.efs-entry')).toHaveCount(BULK.length);
+      for (const name of BULK) await select(page, name).check();
+      await expect(selection(page)).toContainText(`${BULK.length} selected`);
+    };
+
+    // Move all 64 into dest/.
+    await row(page, 'bulk').locator('button.efs-entry-open').click();
+    await selectAll();
+    await selection(page).locator('wa-button.efs-selection-move').click();
+    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await pickerRow(page, 'dest').locator('button.efs-entry-open').click();
+    await moveHere(page).click();
+    await expect(dialog(page)).toContainText(/Move these\W+64\W+entries to\W+dest/, {
+      timeout: 60_000,
+    });
+    const moveParts = await parts();
+    const before = sendRequests(chain).length;
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open', '', { timeout: 120_000 });
+    await expect(complete).toHaveCount(1, { timeout: 120_000 });
+    await expect(saves).toHaveCount(1);
+    expect(sendRequests(chain).length - before, 'every move part sent once').toBe(moveParts);
+    await expect(entries(page).locator('.efs-entry')).toHaveCount(0, { timeout: 60_000 });
+    chain.step(`Move 64 into dest/: ${moveParts} parts, each sent once; Saved; bulk/ is empty`);
+
+    // Remove all 64 from dest/.
+    await page.locator('wa-breadcrumb wa-breadcrumb-item').first().click();
+    await row(page, 'dest').locator('button.efs-entry-open').click();
+    await selectAll();
+    await selection(page).locator('wa-button.efs-selection-remove').click();
+    await expect(dialog(page)).toContainText(/Remove\W+64\W+entries from/, { timeout: 60_000 });
+    const removeParts = await parts();
+    const sentBefore = sendRequests(chain).length;
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open', '', { timeout: 120_000 });
+    await expect(entries(page).locator('.efs-entry')).toHaveCount(0, { timeout: 120_000 });
+    await expect(entries(page).locator('.efs-entries-removed')).toContainText(
+      /You removed\W+64\W+entries/,
+      { timeout: 60_000 },
+    );
+    await expect(complete).toHaveCount(2, { timeout: 120_000 });
+    await expect(saves).toHaveCount(2);
+    expect(sendRequests(chain).length - sentBefore, 'every remove part sent once').toBe(
+      removeParts,
+    );
+    chain.step(`Remove 64 from dest/: ${removeParts} parts, each sent once; dest/ is empty`);
+    // The counts shrink once the tag release brings the kernel's own floor: logged, not pinned.
+    console.log(`select-64: ${JSON.stringify({ move: moveParts, remove: removeParts })}`);
+  } finally {
+    await chain.finish();
+  }
+});

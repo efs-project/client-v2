@@ -35,7 +35,8 @@ export interface FolderNav {
   goTo(steps: readonly NavStep[]): void;
   /**
    * The URL arrived at `folder` (undefined: the realm's root): back along the trail to it when it's
-   * there (Back, the breadcrumb), else a trail of its own (resetTo). Nothing when it's the last.
+   * there (Back, the breadcrumb), else a trail of its own (resetTo). Nothing when it's the last,
+   * except that a step without its creator (owner) takes the one `folder` carries.
    */
   arrive(folder: FolderRef | undefined): void;
   /**
@@ -99,9 +100,16 @@ export function createFolderNav(): FolderNav {
       const now = path.get();
       const id = folder.directory.toLowerCase();
       const at = now.findIndex((step) => step.folder.directory.toLowerCase() === id);
-      if (at >= 0 && at === now.length - 1) return;
-      if (at >= 0) this.back(at + 1);
-      else this.resetTo({ folder, name: '' });
+      if (at < 0) {
+        this.resetTo({ folder, name: '' });
+        return;
+      }
+      // Back along the trail to it. A step the trail holds without its creator (the middle
+      // folders of a path link) takes the one this read saw: the place Lens needs it.
+      const kept = now.slice(0, at + 1);
+      const step = kept[at] as NavStep;
+      if (folder.owner && !step.folder.owner) kept[at] = { ...step, folder };
+      if (kept.length !== now.length || kept[at] !== step) path.set(kept);
     },
   };
 }
