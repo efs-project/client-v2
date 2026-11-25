@@ -49,14 +49,27 @@ Evidence goes to `apps/web/dist-evidence/`.
 6. **Every visible string comes from `src/ui/messages/en.json`** (MF2, narrow contract). Data values render in `translate="no"` elements. Use logical CSS (safe-area insets are the one physical exception). Run `pnpm messages` after editing. MF2 wraps arguments in bidi isolates, so tests match names containing arguments by pattern, not exactly.
 7. **Accessibility is a requirement.** Use semantic HTML before ARIA, keep focus visible, target at least 24×24 px, and allow no horizontal scroll at 320 px. axe is a smoke test, not conformance.
 8. **Relative URLs only.** The build must work under any path prefix and from any static host. No CDN, remote font or remote module.
-9. **Web platform changes need evidence.** Consult the pinned guidance in `docs/web-platform/guidance.lock.json`, add or update the row in `docs/web-platform/feature-policy.md`, and fill in the PR template's evidence line (or write `NO_WEB_SURFACE_CHANGE`).
+9. **Web platform changes need evidence.** Consult the pinned guidance in `docs/web-platform/guidance.lock.json`, add or update the row in `docs/web-platform/feature-policy.md`, and give the evidence line (`.github/pull_request_template.md`'s, or `NO_WEB_SURFACE_CHANGE`) in the PR, or in the commit message when there's no PR.
 10. **Web Awesome (3.15, free components) is the component library and theme system.** Load both release-matched skills from the installed package (`apps/web/node_modules/@awesome.me/webawesome/dist/skills/webawesome` and `…/webawesome-design`) before UI work. Import it only through `src/ui/wa/`; theme only with `--wa-*` overrides in `ui/wa/efs-themes.css`. It is startup code. Under our Trusted Types policy never use `unsafeHTML`/`unsafeSVG` (banned), `wa-markdown` or `wa-include`. Icons go through `appIcon()` and the generated sprite; add new ones to `APP_ICONS` and run `pnpm icons`.
+
+## Pushing (during the MVP push)
+
+**The rule is James's, 2026-11-25.**
+- Recorded in planning `Decisions.md` (planning commit `1042fe5`): *"You guys have my permission to push changes to main as we're iterating hard and moving fast. Let's save PRs for really big things that truly need them."*
+- To this repo's dev directly: *"Yes you may push to main during this MVP push. … Use PRs where it makes sense. But once MVP is finished we should go back to the industry standard model."*
+
+**How it's applied:**
+- **Small work goes to `main`** once the local gates pass: `pnpm check`, `pnpm build`, `pnpm test:e2e`, and `pnpm test:e2e:live`. Nothing else enforces the live-chain job. CI runs on every push to `main` and nightly.
+- **Riskier work goes to a branch first.** That covers a new slice, an SDK re-vendor, the save path, or the outcome copy rules. Send the integration owner (PM) the head; after their review, push it to `main` yourself, with no PR.
+- **Never force-push or rewrite `main`.** Fetch first and push only a fast-forward.
+- **A PR only for something really big,** and ask the PM first.
+- **When the MVP is done, go back to PRs for every change.**
 
 ## Don'ts
 
-- Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the PR.
+- Don't add dependencies, `allowBuilds` entries or Vite plugins without saying why in the commit message (or the PR, when there is one).
 - Don't add a Service Worker, public link format, or storage beyond the user's settings record and the SDK's save journal (created only at the first real save); those are deliberately deferred (`docs/design/offline-brief.md`). Remote requests go only through the SDK to endpoints the user can see in Settings.
 - `manifest.webmanifest` is committed with its fixed `id` (`/`, the origin root, so moving the app within its origin never orphans installs; `start_url` and `scope` stay `./`), but `<link rel="manifest">` is emitted only when `efs.config.json` names this origin as `delivery.stableOrigin`: an install anywhere else would be tied to the wrong origin for good. Don't link it unconditionally.
 - On a shared IPFS path gateway (`/ipfs/<cid>/…`, `/ipns/<name>/…`) the app is read-only: nothing is stored (settings last for the tab), no journal is opened, no wallet is touched. Keep it that way for anything new that stores or saves.
-- Don't widen the CSP. If something needs it, say why in the PR (`docs/design/shell.md` lists every exception and its reason).
+- Don't widen the CSP. If something needs it, say why in the commit message or PR (`docs/design/shell.md` lists every exception and its reason).
 - Don't guess a dev server URL or kill processes by port: `pnpm dev:status` gives this worktree's URLs, and `pnpm dev:stop` stops only what this worktree started.
