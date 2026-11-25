@@ -125,6 +125,11 @@ For each (topic, thing), the first of these with a stance decides (§3.1). An UN
 **Denials** (§3.2):
 - **Only lens authors can hide things.** A stranger's "not this" never hides anything from anyone else. In Everyone it shows only as a count ("1 says not this").
 - **A denial is about one place.** "Not this" at `/cars/tesla` hides the thing there and at the place it was filed. It doesn't travel down to children, and says nothing about `/cars`.
+- **In Everyone and Unfiltered, a row exists because a statement exists** (tag PM session's pitfall review, planning `e09ae60`).
+  - A row never needs a positive tag before it shows. Otherwise a few pre-emptive "not this" statements would hide a thing from public views.
+  - The row shows the stances found: "3 say it applies, 1 says not".
+  - **When not every author was read** (a PARTIAL page, or a bounded merge), it says so ("from the first 200 tags"), never implying a full count.
+  - Only a lens author's "not this" hides the row in Everyone, as above.
 
 **Where the owner goes** (our reading of the ruling, agreed with the PM; James can correct it in one line):
 - James: *"automatically add vitalik to our lens list automatically in the middle because we should see that address' data unless we overrode it."*
