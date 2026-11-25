@@ -6,8 +6,11 @@ import { link } from '@efs/sdk';
 import { expect, test } from '@playwright/test';
 import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './support.ts';
 
-/** Milliseconds from navigation start, with the CPU slowed 4×. Set from measurements (PR notes). */
-const BUDGET_MS = { booted: 1500, previewVerified: 4000 };
+/**
+ * Milliseconds from navigation start, with the CPU slowed 4×: about twice CI's median, rounded up
+ * to the next 100 ms (samples in docs/design/shell.md, "Time budgets"). Re-measure, don't bump.
+ */
+const BUDGET_MS = { booted: 700, previewVerified: 3400 };
 
 test('startup and Preview stay within their budgets @chromium-only', async ({ page }, info) => {
   const cdp = await page.context().newCDPSession(page);
