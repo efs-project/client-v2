@@ -115,10 +115,10 @@ test.describe('verified reads (recorded chain traffic)', () => {
     await serveConfig(page);
     await serveDeployment(page);
     const replay = await replayRpc(page, ['pin-verified']);
-    await page.goto('./');
+    // An app route, not the realm's root: the root lists its folder, which this recorded traffic
+    // doesn't cover (folders.spec.ts records the root, its redirect and its listing).
+    await page.goto('./#/files');
     await booted(page);
-    // The bare root became the default realm's root.
-    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
     await expect(indicator(page)).toContainText('Example RPC');
     await expect(page.locator('efs-network-indicator wa-button')).toHaveAttribute(
       'data-status',
@@ -219,7 +219,7 @@ test.describe('verified reads (recorded chain traffic)', () => {
     // shown and verified, with nobody contacted.
     const link = new URL(page.url()).hash;
     await page.evaluate(() => {
-      location.hash = '#/r/testnet/';
+      location.hash = '#/files';
     });
     await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
     await page.evaluate((h) => {

@@ -70,6 +70,19 @@ describe('startListing', () => {
     expect(listingNotice(s as ListingState)).toEqual({ id: 'files.list.empty' });
   });
 
+  it('a COMPLETE page whose rows were all filtered or blocked is never "empty"', async () => {
+    for (const skipped of [{ filtered: 3 }, { hidden: 1 }]) {
+      const s = await startListing(
+        readsOf(present([], { state: 'COMPLETE' }, skipped)),
+        efs,
+        folder,
+        {},
+        signal(),
+      );
+      expect(listingNotice(s as ListingState)).toEqual({ id: 'files.list.nothingShown' });
+    }
+  });
+
   it('PARTIAL INDEX_PARTIAL never reads as empty, with or without rows', async () => {
     for (const rows of [[], [row('a.txt')]]) {
       const s = await startListing(

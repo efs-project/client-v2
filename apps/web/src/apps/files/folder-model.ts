@@ -142,6 +142,7 @@ export async function continueListing(
  */
 export type ListingNotice =
   | { readonly id: 'files.list.empty' }
+  | { readonly id: 'files.list.nothingShown' }
   | { readonly id: 'files.list.noneFound' }
   | { readonly id: 'files.list.partialEmpty'; readonly count: number }
   | { readonly id: 'files.list.indexPartial' }
@@ -155,7 +156,12 @@ export function listingNotice(state: ListingState): ListingNotice | undefined {
     return { id: 'files.list.indexPartial' };
   }
   if (rows.length > 0) return undefined;
-  if (coverage.state === 'COMPLETE') return { id: 'files.list.empty' };
+  if (coverage.state === 'COMPLETE') {
+    // Empty only when nothing was left out: a filter or a block hid what's there.
+    return state.filtered + state.hidden === 0
+      ? { id: 'files.list.empty' }
+      : { id: 'files.list.nothingShown' };
+  }
   // PARTIAL with no rows: more to read, or a resumed listing that ended without proving the whole.
   return state.next
     ? { id: 'files.list.partialEmpty', count: rows.length + state.hidden + state.filtered }

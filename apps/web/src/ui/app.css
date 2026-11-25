@@ -354,6 +354,71 @@ audio.efs-preview-media {
   overflow-wrap: anywhere;
 }
 
+/* ---------- folder listing ---------- */
+.efs-listing {
+  padding: var(--wa-space-m);
+}
+
+.efs-entries-filter {
+  max-inline-size: 14rem;
+}
+
+.efs-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-block-start: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
+
+.efs-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--wa-space-2xs) var(--wa-space-s);
+  padding-block: var(--wa-space-xs);
+  border-block-end: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+}
+
+.efs-entry-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wa-space-xs);
+  min-block-size: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+button.efs-entry-open:focus-visible,
+a.efs-entry-open:focus-visible {
+  outline: var(--wa-focus-ring);
+  outline-offset: var(--wa-focus-ring-offset);
+}
+
+span.efs-entry-open {
+  cursor: default;
+}
+
+.efs-entry-name {
+  overflow-wrap: anywhere;
+}
+
+.efs-entry-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--wa-space-s);
+  font-size: var(--wa-font-size-s);
+}
+
+.efs-entries-notice {
+  margin: 0;
+}
+
 /* ---------- wallet ---------- */
 .efs-wallet-options {
   list-style: none;
