@@ -3,6 +3,7 @@
 // instance), a connected wallet, and the wallet on the network in view. The journal is the SDK's
 // IndexedDB one, which creates storage only at the first real submission.
 
+import type { Address } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
 import { computed, type ReadonlySignal } from '../state/signals.ts';
 import type { NetworkState } from './network-state.ts';
@@ -76,8 +77,15 @@ export function createWriterSession(
           loadActions(),
           loadJournal(),
         ]);
+        // The account named explicitly: the writer signs as exactly the account shown and cached
+        // on, never whatever the wallet lists first later.
         return createWriter(efs, {
-          authorizer: { kind: 'eip1193', profile: 'direct', provider: w.option.provider },
+          authorizer: {
+            kind: 'eip1193',
+            profile: 'direct',
+            provider: w.option.provider,
+            account: w.account as Address,
+          },
           journal: indexedDbJournal(),
         });
       })();

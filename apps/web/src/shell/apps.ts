@@ -3,12 +3,14 @@
 // shell disposes. This is the seam that later grows into independently released modules; it is
 // deliberately not a plugin framework or service locator.
 
+import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { RealmRef } from '../boot/route.ts';
 import type { OwnerScope } from '../platform/scope.ts';
 import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import type { NetworkState } from './network-state.ts';
 import type { ReaderState } from './reader-state.ts';
+import type { WriterAvailability } from './writer-state.ts';
 
 /** One pane in a layout: which view, and optionally its share of the width (0–1). */
 export interface PaneSpec {
@@ -34,7 +36,23 @@ export type AppLocation =
   /** `link` is the SDK's (object, revision, later path); parse it only with the SDK's parseLink. */
   | { readonly kind: 'realm'; readonly realm: RealmRef; readonly link: string };
 
-/** What the shell gives an app. Nothing ambient: no globals, no wallet, no storage handle. */
+/**
+ * Saving, as the shell offers it to apps: never the wallet itself. Only the shell's wallet dialog
+ * prompts for a connection or a network switch, and only after a click; the writer prompts only
+ * when the app sends a plan the person reviewed.
+ */
+export interface SavingHost {
+  /** Whether a save can be prepared now, and if not, why (no wallet, wrong network). */
+  readonly availability: ReadonlySignal<WriterAvailability>;
+  /** Opens the wallet dialog: Connect, or Switch network. Call only from a click. */
+  requestWallet(): void;
+  /** The writer for the connected account, created on first use; undefined unless READY. */
+  writer(): Promise<EfsWriter | undefined>;
+  /** Hands a save's progress to the shell, which shows it and carries it to "Saved". */
+  track(progress: SequenceProgress): void;
+}
+
+/** What the shell gives an app. Nothing ambient: no globals, no wallet object, no storage handle. */
 export interface AppHost {
   readonly translator: Translator;
   readonly network: ReadonlySignal<NetworkState>;
@@ -47,6 +65,7 @@ export interface AppHost {
   navigate(rest: string, options?: { readonly replace?: boolean }): void;
   /** Goes to a link (from the SDK's link()) in the current realm, or the default realm. */
   openLink(link: string, options?: { readonly replace?: boolean }): void;
+  readonly saving: SavingHost;
 }
 
 export interface AppMount {

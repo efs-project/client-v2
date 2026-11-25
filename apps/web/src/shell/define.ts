@@ -3,6 +3,7 @@ import { EfsOutcome } from '../ui/outcome-element.ts';
 import { EfsEndpointList } from './endpoint-list.ts';
 import { EfsNetworkIndicator } from './network-indicator.ts';
 import { EfsPaneHost } from './pane-host.ts';
+import { EfsSavesBanner } from './saves-banner.ts';
 import { EfsSettingsPanel } from './settings-panel.ts';
 import { EfsShell } from './shell.ts';
 import { EfsWallet } from './wallet-ui.ts';
@@ -15,4 +16,5 @@ export function registerShellElements(): void {
   customElements.define('efs-endpoint-list', EfsEndpointList);
   customElements.define('efs-outcome', EfsOutcome);
   customElements.define('efs-wallet', EfsWallet);
+  customElements.define('efs-saves-banner', EfsSavesBanner);
 }

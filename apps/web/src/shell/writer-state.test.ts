@@ -66,7 +66,7 @@ describe('createWriterSession', () => {
     expect(await session.writer()).toBe(first);
     expect(createWriter).toHaveBeenCalledTimes(1);
     expect(createWriter.mock.calls[0]?.[1]).toMatchObject({
-      authorizer: { kind: 'eip1193', profile: 'direct', provider: o.provider },
+      authorizer: { kind: 'eip1193', profile: 'direct', provider: o.provider, account: ACCOUNT },
     });
     wallet.set(connected(31337, o, `0x${'cd'.repeat(20)}`));
     await session.writer();

@@ -27,6 +27,7 @@ export const APP_ICONS = [
   'folder',
   'gear',
   'network-wired',
+  'pen-to-square',
   'plus',
   'rotate-right',
   'server',
@@ -34,6 +35,7 @@ export const APP_ICONS = [
   'triangle-exclamation',
   'upload',
   'wallet',
+  'xmark',
 ] as const;
 
 const OUT = `${WEB}public/icons/efs-icons.svg`;

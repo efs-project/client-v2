@@ -1,7 +1,7 @@
 // The Preview pane: one file's verified contents and the evidence for them. All logic is in
 // preview-model.ts; this element only renders its states and the reader session's.
 
-import type { Efs } from '@efs/sdk';
+import type { Efs, Lens } from '@efs/sdk';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
@@ -11,6 +11,7 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { EDIT_DONE_EVENT, type EditDoneDetail, shortId } from './editor.ts';
 import { readerNotice } from './notice.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
@@ -49,6 +50,12 @@ export class EfsFilesPreview extends EfsElement {
   #run: OwnerScope | undefined;
   #scope: OwnerScope | undefined;
   #loaded: { efs: Efs; key: string } | undefined;
+  /** The editor is open on the file shown. */
+  #editing = state(false);
+  /** "Show my version": the view's Lens with this account first, for this file, in this tab. */
+  #mine = state<string | undefined>(undefined);
+  /** After a save this view won't show: whose version it shows instead. */
+  #notInView = state<string | undefined>(undefined);
 
   protected override createRenderRoot() {
     return this;
@@ -63,6 +70,10 @@ export class EfsFilesPreview extends EfsElement {
       const key = link.status === 'target' ? link.canonical : undefined;
       if (efs === this.#loaded?.efs && key === this.#loaded?.key) return;
       this.#loaded = efs && key ? { efs, key } : undefined;
+      // Another file (or session): close the editor and drop this file's view choices.
+      this.#editing.set(false);
+      this.#mine.set(undefined);
+      this.#notInView.set(undefined);
       queueMicrotask(() => this.#load(efs, link, false));
     });
   }
@@ -89,21 +100,45 @@ export class EfsFilesPreview extends EfsElement {
         }
         return undefined;
       })
-      .then((reads) =>
-        !reads || run.signal.aborted
-          ? undefined
-          : runPreview(reads, efs, link.target, run.signal, (s) => this.#state.set(s), {
-              force,
-              ...(link.lens ? { lens: link.lens } : {}),
-              ...(allowOrigins ? { allowOrigins } : {}),
-            }),
-      )
+      .then((reads) => {
+        if (!reads || run.signal.aborted) return undefined;
+        const lens = this.#viewLens(efs, link);
+        return runPreview(reads, efs, link.target, run.signal, (s) => this.#state.set(s), {
+          force,
+          ...(lens ? { lens } : {}),
+          ...(allowOrigins ? { allowOrigins } : {}),
+        });
+      })
       .catch((error: unknown) => {
         if (run.signal.aborted) return;
         console.error(error);
         this.#state.set({ phase: 'failed' });
       });
   }
+
+  /** The Lens this pane reads under: the link's (else the default), or that with "mine first". */
+  #viewLens(efs: Efs, link: Extract<LinkState, { status: 'target' }>): Lens | undefined {
+    const mine = this.#mine.get();
+    return mine ? efs.lens.mineFirst(mine as never, link.lens ?? efs.lens.default) : link.lens;
+  }
+
+  #onEditDone = (event: Event): void => {
+    const detail = (event as CustomEvent<EditDoneDetail>).detail;
+    event.stopPropagation();
+    const shown = this.#state.get();
+    const author =
+      shown && 'open' in shown && shown.open.status === 'PRESENT' ? shown.open.file.author : null;
+    this.#editing.set(false);
+    const p = detail.progress;
+    this.#notInView.set(
+      p && p.state === 'COMPLETE' && detail.visibleInLens === false ? (author ?? '—') : undefined,
+    );
+    if (p) this.#lastAccount = p.account;
+    if (p || detail.showLatest) this.#reload();
+  };
+
+  /** The account of the last save from this pane (for "Show my version"). */
+  #lastAccount: string | undefined;
 
   #reload(force = false, allowOrigins?: readonly string[]): void {
     this.#load(verifiedEfs(this.host.reader.get()), this.target.get(), force, allowOrigins);
@@ -134,6 +169,60 @@ export class EfsFilesPreview extends EfsElement {
       <dt>${t('files.preview.meta.basis')}</dt>
       <dd translate="no" dir="ltr">${basis.blockNumber.toString()} · ${basis.endpoint}</dd>
     </dl>`;
+  }
+
+  /** Text the editor can round-trip: verified, shown in full, and opened by object link. */
+  #editable(content: Content | undefined): boolean {
+    const link = this.target.get();
+    return (
+      content?.kind === 'text' &&
+      !content.truncated &&
+      link.status === 'target' &&
+      link.target.kind === 'file'
+    );
+  }
+
+  #currentLens(): Lens | undefined {
+    const efs = verifiedEfs(this.host.reader.get());
+    const link = this.target.get();
+    return efs && link.status === 'target' ? this.#viewLens(efs, link) : undefined;
+  }
+
+  #viewNotices(t: Translator['t']) {
+    const other = this.#notInView.get();
+    if (other !== undefined && !this.#mine.get()) {
+      return html`<wa-callout variant="neutral" size="small" class="efs-edit-not-in-view">
+        <span slot="icon">${appIcon('circle-info')}</span>
+        <div class="wa-split wa-gap-s">
+          <p>${t('files.edit.notInView', { author: shortId(other) })}</p>
+          <wa-button
+            size="s"
+            class="efs-edit-show-mine"
+            @click=${() => {
+              this.#mine.set(this.#lastAccount);
+              this.#notInView.set(undefined);
+              this.#reload();
+            }}
+            >${t('files.edit.showMine')}</wa-button
+          >
+        </div>
+      </wa-callout>`;
+    }
+    if (this.#mine.get()) {
+      return html`<p class="wa-cluster wa-gap-xs efs-quiet efs-viewing-mine">
+        ${t('files.edit.viewingMine')}
+        <wa-button
+          size="s"
+          appearance="plain"
+          @click=${() => {
+            this.#mine.set(undefined);
+            this.#reload();
+          }}
+          >${t('files.edit.showShared')}</wa-button
+        >
+      </p>`;
+    }
+    return nothing;
   }
 
   #body(s: PaneState, t: Translator['t']) {
@@ -198,21 +287,45 @@ export class EfsFilesPreview extends EfsElement {
             @efs-retry=${retry}
           ></efs-outcome>
           ${this.#facts(open, t)}
+          ${this.#viewNotices(t)}
           ${
             verified
-              ? html`${
-                  content?.kind === 'text'
-                    ? html`<pre class="efs-preview-text" translate="no">${content.text}</pre>
-                        ${content.truncated ? html`<p class="efs-quiet">${t('files.preview.truncated')}</p>` : nothing}`
-                    : html`<p>${t('files.preview.binary')}</p>`
-                }
-                <div>
-                  <wa-button
-                    size="s"
-                    @click=${() => this.#save(verified, open.file.sha256, content)}
-                    ><span slot="start">${appIcon('download')}</span>${t('files.preview.save')}</wa-button
-                  >
-                </div>`
+              ? this.#editing.get() && this.#editable(content)
+                ? html`<efs-file-editor
+                    .host=${this.host}
+                    .efs=${verifiedEfs(this.host.reader.get())}
+                    .file=${open.file}
+                    .original=${content?.kind === 'text' ? content.text : ''}
+                    .lens=${this.#currentLens()}
+                    @efs-edit-done=${this.#onEditDone}
+                  ></efs-file-editor>`
+                : html`${
+                    content?.kind === 'text'
+                      ? html`<pre class="efs-preview-text" translate="no">${content.text}</pre>
+                          ${content.truncated ? html`<p class="efs-quiet">${t('files.preview.truncated')}</p>` : nothing}`
+                      : html`<p>${t('files.preview.binary')}</p>`
+                  }
+                  <div class="wa-cluster wa-gap-xs">
+                    ${
+                      this.#editable(content)
+                        ? html`<wa-button
+                            size="s"
+                            variant="brand"
+                            class="efs-edit-start"
+                            @click=${() => {
+                              this.#notInView.set(undefined);
+                              this.#editing.set(true);
+                            }}
+                            ><span slot="start">${appIcon('pen-to-square')}</span>${t('files.edit.start')}</wa-button
+                          >`
+                        : nothing
+                    }
+                    <wa-button
+                      size="s"
+                      @click=${() => this.#save(verified, open.file.sha256, content)}
+                      ><span slot="start">${appIcon('download')}</span>${t('files.preview.save')}</wa-button
+                    >
+                  </div>`
               : bytes.blockedOrigins && bytes.blockedOrigins.length > 0
                 ? html`<div class="wa-stack wa-gap-xs efs-publisher-hosts">
                     ${bytes.blockedOrigins.map(

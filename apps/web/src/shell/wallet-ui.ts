@@ -48,6 +48,16 @@ export class EfsWallet extends EfsElement {
     void this.wallet.connect();
   };
 
+  /**
+   * An app asked to save (from a click): connects if nothing is connected yet, otherwise shows the
+   * dialog, which offers the network switch when the wallet is on another chain.
+   */
+  request(): void {
+    const status = this.wallet.state.get().status;
+    if (status === 'CONNECTED' || status === 'CONNECTING' || status === 'DISCOVERING') this.#open();
+    else this.#connect();
+  }
+
   /** The chain the page needs, when a network is in view. */
   #wanted(): { chainId: number; label: string } | undefined {
     const n = this.network;

@@ -88,7 +88,7 @@ describe('createSavesSession', () => {
     ]);
   });
 
-  it('keeps re-checking a confirming save until it is final, then drops it', async () => {
+  it('keeps re-checking a confirming save until it is final, then shows "Saved" until dismissed', async () => {
     const confirming = progress({ state: 'COMPLETE', committed: 5 });
     let rounds = 0;
     const { reader, session } = setup(
@@ -101,12 +101,51 @@ describe('createSavesSession', () => {
       100,
     );
     reader.set(verified);
-    // First "Saved · confirming", then (once final) nothing left to show.
     await vi.waitFor(() => expect(session.state.get().status).toBe('READY'), { interval: 5 });
-    await vi.waitFor(() => expect(session.state.get()).toEqual({ status: 'IDLE' }), {
-      timeout: 500,
-    });
+    await vi.waitFor(
+      () =>
+        expect(session.state.get()).toEqual({
+          status: 'READY',
+          saves: [{ ...confirming, final: true }],
+        }),
+      { timeout: 500 },
+    );
     expect(rounds).toBeGreaterThanOrEqual(2);
+    session.dismiss(confirming.sequenceId);
+    expect(session.state.get()).toEqual({ status: 'IDLE' });
+  });
+
+  it('a save first seen already final (settled elsewhere) is not announced', async () => {
+    const elsewhere = progress({ state: 'COMPLETE', committed: 5 });
+    const { reader, session, view } = setup([{}], [elsewhere], (p) => ({ ...p, final: true }));
+    reader.set(verified);
+    await vi.waitFor(() => expect(view.reconcileSequence).toHaveBeenCalled());
+    await tick();
+    expect(session.state.get()).toEqual({ status: 'IDLE' });
+  });
+
+  it("track shows the writer's progress at once and settles it from there", async () => {
+    const sent = progress({ state: 'COMPLETE', committed: 1, total: 1 });
+    // The journal lists it from now on; the next check finds it final.
+    const { reader, session, view } = setup([{}], [sent], (p) => ({ ...p, final: true }), 50);
+    reader.set(verified);
+    await vi.waitFor(() => expect(view.pendingSequences).toHaveBeenCalledTimes(1));
+    await tick();
+    session.track(sent);
+    expect(session.state.get()).toEqual({ status: 'READY', saves: [sent] });
+    await vi.waitFor(() =>
+      expect(session.state.get()).toEqual({ status: 'READY', saves: [{ ...sent, final: true }] }),
+    );
+  });
+
+  it("one save that can't be read right now keeps its last state and hides nothing", async () => {
+    const a = progress({ sequenceId: `0x${'0a'.repeat(32)}`, state: 'IN_FLIGHT' });
+    const b = progress({ sequenceId: `0x${'0b'.repeat(32)}`, state: 'PARTIAL' });
+    const { reader, session } = setup([{}], [a, b], () => {
+      throw new Error('rpc down');
+    });
+    reader.set(verified);
+    await vi.waitFor(() => expect(session.state.get()).toEqual({ status: 'READY', saves: [a, b] }));
   });
 
   it('a superseded session aborts its reconcile calls and never shows their results', async () => {

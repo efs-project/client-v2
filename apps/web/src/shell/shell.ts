@@ -26,8 +26,14 @@ import {
 import { OPEN_SETTINGS_EVENT } from './network-indicator.ts';
 import type { OsState } from './os-state.ts';
 import type { ReaderSession } from './reader-state.ts';
+import type { SavesSession } from './saves-state.ts';
 import type { EfsSettingsPanel } from './settings-panel.ts';
 import type { WalletSession } from './wallet-state.ts';
+import type { EfsWallet } from './wallet-ui.ts';
+import type { WriterSession } from './writer-state.ts';
+
+/** Below this width (CSS px) the page uses its mobile layout: navigation in a drawer. */
+const MOBILE_BREAKPOINT_PX = 920;
 
 type AppSlot =
   | { readonly status: 'loading'; readonly app: AppDescriptor }
@@ -41,12 +47,16 @@ export class EfsShell extends EfsElement {
     os: { attribute: false },
     reader: { attribute: false },
     wallet: { attribute: false },
+    writer: { attribute: false },
+    saves: { attribute: false },
     translator: { attribute: false },
     apps: { attribute: false },
   };
   declare os: OsState;
   declare reader: ReaderSession;
   declare wallet: WalletSession;
+  declare writer: WriterSession;
+  declare saves: SavesSession;
   declare translator: Translator;
   declare apps: readonly AppDescriptor[];
 
@@ -54,6 +64,12 @@ export class EfsShell extends EfsElement {
   #appScope: OwnerScope | undefined;
   #loadGeneration = 0;
   #shellScope: OwnerScope | undefined;
+  /**
+   * <wa-page> starts as "desktop" and switches only after its first resize measurement, so a
+   * phone would briefly lay out the desktop columns (wider than the screen). Its first render gets
+   * the right view from the window; from then on its own measurement decides.
+   */
+  #initialView = innerWidth < MOBILE_BREAKPOINT_PX ? 'mobile' : 'desktop';
 
   protected override createRenderRoot() {
     return this;
@@ -183,7 +199,21 @@ export class EfsShell extends EfsElement {
         const realm = this.#currentRealm();
         if (realm) this.#go(formatRealmRoute(realm, link), options?.replace);
       },
+      saving: this.#saving(),
     };
+  }
+
+  #saving(): AppHost['saving'] {
+    return {
+      availability: this.writer.availability,
+      requestWallet: () => this.#requestWallet(),
+      writer: () => this.writer.writer(),
+      track: (progress) => this.saves.track(progress),
+    };
+  }
+
+  #requestWallet(): void {
+    this.querySelector<EfsWallet>('efs-wallet')?.request();
   }
 
   #main(slot: AppSlot | undefined, t: Translator['t']) {
@@ -250,8 +280,26 @@ export class EfsShell extends EfsElement {
     const slot = this.#slot.get();
     const mount = slot?.status === 'ready' ? slot.mount : undefined;
     const title: MessageId | undefined = slot && 'app' in slot ? slot.app.title : undefined;
-    return html`<wa-page mobile-breakpoint="920" class="efs-page" @click=${this.#onPageClick}>
+    const saves = this.saves.state.get();
+    return html`<wa-page
+        mobile-breakpoint=${MOBILE_BREAKPOINT_PX}
+        view=${this.#initialView}
+        class="efs-page"
+        @click=${this.#onPageClick}
+      >
         <span slot="skip-to-content">${t('shell.skipLink')}</span>
+        ${
+          // Rendered only when there is something to show: <wa-page> keeps an empty banner hidden.
+          saves.status === 'READY' || saves.status === 'LOAD_FAILED'
+            ? html`<efs-saves-banner
+                slot="banner"
+                .saves=${this.saves}
+                .writer=${this.writer}
+                .translator=${this.translator}
+                @efs-request-wallet=${() => this.#requestWallet()}
+              ></efs-saves-banner>`
+            : nothing
+        }
         <header slot="header" class="wa-split efs-header">
           <div class="wa-cluster wa-gap-s">
             <a class="efs-wordmark" href="#/" translate="no">EFS</a>

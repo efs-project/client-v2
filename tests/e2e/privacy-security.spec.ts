@@ -155,11 +155,13 @@ test('only the expected custom elements are registered', async ({ page }) => {
   expect(new Set(names).size, 'no element is registered twice').toBe(names.length);
   expect(names.filter((n) => n.startsWith('efs-')).sort()).toEqual([
     'efs-endpoint-list',
+    'efs-file-editor',
     'efs-files-preview',
     'efs-files-view',
     'efs-network-indicator',
     'efs-outcome',
     'efs-pane-host',
+    'efs-saves-banner',
     'efs-settings-panel',
     'efs-shell',
     'efs-wallet',
