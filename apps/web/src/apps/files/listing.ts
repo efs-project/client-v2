@@ -181,7 +181,11 @@ export class EfsFilesListing extends EfsElement {
       const folder = browsing ? this.#folder(efs) : undefined;
       const kind = this.#kind.get();
       const reader = this.#reader();
-      const key = efs && folder ? `${folder.directory}|${kind}|${reader ?? ''}` : undefined;
+      // The owner too: a trail step can gain its creator (and so its place Lens) once read.
+      const key =
+        efs && folder
+          ? `${folder.directory}|${folder.owner ?? ''}|${kind}|${reader ?? ''}`
+          : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => this.#load(efs, folder, kind));
@@ -402,7 +406,9 @@ export class EfsFilesListing extends EfsElement {
     const folder = this.#folder(efs);
     const kind = this.#kind.get();
     this.#loaded =
-      efs && folder ? `${folder.directory}|${kind}|${this.#reader() ?? ''}` : undefined;
+      efs && folder
+        ? `${folder.directory}|${folder.owner ?? ''}|${kind}|${this.#reader() ?? ''}`
+        : undefined;
     return this.#load(efs, folder, kind);
   }
 
