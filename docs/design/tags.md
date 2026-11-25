@@ -190,11 +190,17 @@ From everyone else · not checked by anyone you trust · newest first
 
   The client never invents one.
 
-**Tags under this one: junk hidden by default** (§3.6, §7.11).
-- **Curated children come first.** A child shows by default when someone in the lens has listed it with a number of 0 or more. A higher number ranks it higher, marked with who listed it.
-- **Then the top children by count,** up to 8 rows in all. Children with fewer than 2 tags never fill those slots. *(My call on both numbers.)*
-- **A child the lens marked "not this" is hidden,** and appears greyed only in Unfiltered.
-- **Everything else is behind "Show all N",** in count order.
+**Tags under this one: junk hidden by default** (§3.6, §7.11, as refined by the tag PM session, planning `aef00e6`).
+- **Three tiers, up to 8 rows in all by default** (the row count is the client's):
+  1. **Listed by the lens:** children someone in the lens listed with a number of 0 or more, ranked by the number and marked with who listed them.
+  2. **Used by the lens:** children someone in the lens has filed something under, ranked by the lens's count. Friends using `/cars/tesla` is an endorsement even if nobody listed it.
+  3. **The rest,** by global count.
+- **Eligibility for the default rows is the SDK's default,** so every client agrees: a child needs tags from at least 2 different authors. One spammer tagging twice doesn't pass.
+- **A child the lens marked "not this" is hidden.** It appears greyed only in Unfiltered.
+- **Everything else is behind "Show all N".**
+- **A big directory can't be ranked in one read.**
+  - The SDK's children read scans a bounded number of entries and reports PARTIAL.
+  - The heading then says "Top of the first 500 tags under this one", with "Keep looking". It never implies everything was ranked.
 - **Curating is tagging.** A child row's menu offers "List first under /cars/tesla" (a tag of the child into its parent, with a number) and "Don't list under /cars/tesla" (a negative number). Both are ordinary tags, reviewed and signed like any other.
 
 **The Type filter:**
@@ -218,24 +224,27 @@ It's for "what does anyone mean by `tesla`?". **It's grouped by place, never one
 Everything tagged with the word "tesla"    View: [ Everyone ▾ ]  Type: [ All ▾ ]
 4 places
 ───────────────────────────────────────────────────────────────────────────────
+/tesla (just the word)     about 9 tags                             [ Open ]
 /cars/tesla                about 4,210 tags · 12 your lens          [ Open ]
   cat.jpg            Image · tagged by alice.eth
   model-y.pdf        File  · tagged by 0x12…ab
 /companies/tesla           about 48 tags                            [ Open ]
   q3-report.pdf      File  · tagged by bob.eth
 /people/nikola_tesla       about 4 tags                             [ Open ]
-/tesla (just the word)     about 9 tags                             [ Open ]
 Also: "テスラ" is the same as "tesla" (said by carol.eth) · [ Include ]
 ```
 
 **Groups:**
-- **Each group is a place that uses the word,** wherever the word sits in it, with its counts, its newest few items, and Open.
-  - The plain one-word topic is a group too: "/tesla (just the word)".
-  - A word in the middle of a path (`tesla` in `/cars/tesla/model_y`) is grouped at the place where the word sits, `/cars/tesla`. *(My call.)*
+- **A group is a place whose own last word is the word** (§3.4, confirmed by the tag PM session). It shows that place's roll-up, with its counts, its newest few items, and Open.
+  - So `/cars/tesla/model_y` sits in the `/cars/tesla` group, not in a group of its own.
+  - **A place below another group isn't a second group.** `/tesla/cars/tesla` is already inside plain `/tesla`.
+  - The groups are exactly the contracts' "topics that use a word" directory.
 - **Order:**
-  - places the lens has used come first;
-  - then the rest by global count, largest first, so one spammer's count can't jump the lens's places;
-  - within a group, the lens tier comes first, then public, newest first.
+  1. **the plain one-word topic first,** "/tesla (just the word)", because it's the page's own place;
+  2. **then places the lens has used,** by the lens's count;
+  3. **then the rest by global count,** largest first.
+
+  So a spammer's count can't jump the lens's places (§7.6), and both counts are shown. Within a group, the lens tier comes first, then public, newest first.
 - **There's no "all in one list" option.** A bare word mixes the company, the inventor and the unit, and the place is what tells them apart.
 
 **Synonyms, translations and "moved to"** (§3.5):
@@ -251,6 +260,13 @@ Also: "テスラ" is the same as "tesla" (said by carol.eth) · [ Include ]
 ## Addresses are places
 
 An address opens the ordinary place view (the folder listing in `file-operations.md`), with the address inserted after "you".
+
+**A topic and an address must look different.**
+- `vitalik.eth` can be an ordinary topic word, and only a first segment of `0x` plus 40 hex digits is ever an address. The contracts refuse address-shaped and `~`-leading words at every level of a path, so `/people/0x…` can't exist (tag PM session).
+- **Address views** show an address mark, the word "Address" and the full checksummed address, with the ENS name, when shown, only as a secondary label.
+- **Topic views** show the tag mark and the word "Tag".
+- **A topic whose word looks like an ENS name** (ends in `.eth`) adds one line: "This is the tag vitalik.eth, not an address." The client does no lookup; ENS is held behind the PM's privacy question.
+- The two marks are new icons for `APP_ICONS` when this is built.
 
 ```text
 0x12…ab  vitalik.eth                       View: [ Everyone ▾ ]  Type: [ All ▾ ]
@@ -353,7 +369,7 @@ Matching the spec's SDK work order (§9):
    - word pages grouped by place;
    - the synonym merge, within its bounds;
    - the display-name order of §3.7.
-4. **Children of a topic** with the lens's listing statements, so the curated, counted and hidden split can be drawn.
+4. **Children of a topic,** with the three tiers (listed by the lens, used by the lens, the rest). Eligibility for the default rows is the SDK's default of tags from at least 2 different authors. The scan is bounded and reports PARTIAL, so "top of the first N" is honest.
 5. **A place view with the owner inserted** (the pure lens helper), and the owner's rows marked so "whose" labels need no extra read.
 
 ## Testing, when this is built
@@ -364,7 +380,10 @@ Recorded transcripts from the SDK's fixture chain, never edited by hand. Each ru
 - PARTIAL, filtered and UNKNOWN never read as empty;
 - "Not this" is never shown as "Remove my tag", and its review states its reach;
 - a stranger's "not this" hides nothing in Everyone;
-- junk children stay behind "Show all", and a lens "not this" hides a child;
+- junk children stay behind "Show all". A child tagged twice by one author isn't eligible, and a lens "not this" hides a child;
+- a PARTIAL children read says "top of the first N", never implying everything was ranked;
+- a word-page group is never a place below another group;
+- a topic named `vitalik.eth` and the address view look different;
 - media reached only through public isn't loaded until asked;
 - James's `pet.jpg` example: yours, then the address's, then public's;
 - suggestions show both counts, lens places first;
@@ -389,8 +408,10 @@ Plus 320 px, keyboard, and axe in light and dark.
 7. "Tag" in copy.
 8. Type-ahead from this tab only.
 
-## Open with the tag PM session
+**By the tag PM session** (planning `aef00e6`, spec §3.4 and §3.6):
+1. Children come in three tiers; the default rows need tags from at least 2 different authors, an SDK default; big directories report PARTIAL ("top of the first N").
+2. A word-page group is a place whose own word is the word, showing its roll-up. A place below another group isn't a second group.
+3. Word-page order is plain `/tesla` first, then lens-used places, then by global count.
+4. A topic and an address look different.
 
-- **The junk-children numbers:** up to 8 rows by default, and a minimum of 2 tags to fill a slot. Or should the SDK's children read own the threshold?
-- **Grouping a mid-path word** at the place where it sits.
-- **The word page's group order:** lens-used places first.
+The default view (Everyone) is the integration owner's call for now, with public-tier media not loaded until asked. James confirms it before launch, because it decides what a newcomer sees first.
