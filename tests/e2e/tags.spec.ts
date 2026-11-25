@@ -341,6 +341,12 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await path.fill('Notes');
     await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
     await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
+    await page.waitForFunction(() => document.getAnimations().length === 0);
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-folder-save.efs-preview-tag-dialog')
+      .withTags(AXE_TAGS)
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step('Tag note.txt: suggestions for tesla; notes/todo is new; Notes is refused');
 
     // "Not this" is a different act: its review says what it hides, and where it doesn't reach.
