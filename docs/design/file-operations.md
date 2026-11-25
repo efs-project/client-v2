@@ -3,7 +3,7 @@
 **Status:** partly built (on main since 2026-11-25; folder links through `openObject` since sdk-v2 c8ed37a; "Show removed" on a6bf367).
 - **Built:**
   - listing from the realm root, with whose-labels, the kind filter and honest coverage;
-  - in-tab navigation and the breadcrumb;
+  - in-tab navigation, the breadcrumb, and the folder tree in the navigation pane (`apps/files/tree.ts`: folders read as they're opened, in the place Lens; it follows the trail both ways; a node is a leaf only when read completely, and otherwise says "More folders…", "There may be more…" or Try again; it reads nothing until the person browses, like the listing);
   - per-(folder, name) holds;
   - New folder, Rename, and Remove (a release), with Restore offered right after;
   - "Show removed": the person's own removed entries in the folder on screen, each with Restore (`apps/files/removed-list.ts`);
