@@ -432,15 +432,18 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
   page,
   browserName,
 }) => {
-  // QUARANTINED in WebKit replay (2026-11-26; docs/design/writes.md "Quarantined"). On CI twice
-  // (main 9d701db, f522ce1) WebKit issued the tag plan's 4-entry reads-contract call (0xd62efcd9)
-  // again at the block after the tag landed, a call the recording has only before it: a replay
-  // miss at finish, with every assertion passing and data-plans 1 per opening (so not a re-plan of
-  // the dialog; a re-read elsewhere). Never reproduced locally (30/30). Chromium and Firefox still
-  // run it, and so does the live job. Lift it once the re-reading reader is found.
+  // QUARANTINED in WebKit replay (2026-11-26; docs/design/writes.md "Quarantined"). Decoded from
+  // the replay's own order: in about 1 run in 40 under load, WebKit reads the latest block once
+  // more around Review than the recording did. Replay answers a repeated call in recorded order,
+  // so that extra read takes Send's "latest" answer, Send's own read gets the block the tag lands
+  // in (recorded after it), the page re-pins there, and the tag is planned at a block whose plan
+  // the transcript doesn't have: a miss at finish, every assertion passing. Not a second save:
+  // the one-press guard is in, and the miss is the tag's first and only plan. Chromium and
+  // Firefox replay it, and the live job runs it. Lift it once replay stops letting an extra
+  // "latest" read move the chain ahead.
   test.skip(
     browserName === 'webkit' && CHAIN_MODE === 'replay',
-    'quarantined in WebKit replay: a late re-read after the tag lands (see the comment above)',
+    'quarantined: an extra latest-block read moves the replayed chain ahead (writes.md)',
   );
   const chain = await testChain(
     'client-tags-tagging',

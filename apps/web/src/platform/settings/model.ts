@@ -274,6 +274,11 @@ function readDevAccounts(
  * The dev accounts a network offers right now: its own, while every RPC in effect (the person's
  * edits included) is on this computer; else none. Where they are sent from: the first RPC on.
  */
+/** Every enabled RPC is on this computer: a local test chain (dev accounts, timing hints). */
+export function onLocalChain(network: EffectiveNetwork): boolean {
+  return allLocal(network.rpcs.filter((e) => e.enabled));
+}
+
 export function devAccountsOf(
   network: EffectiveNetwork,
 ): { readonly accounts: readonly DevAccount[]; readonly rpcUrl: string } | undefined {

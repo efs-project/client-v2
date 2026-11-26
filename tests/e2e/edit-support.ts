@@ -20,6 +20,51 @@ export const objectLink = (subject: string) =>
 export const sendRequests = (chain: TestChain) =>
   chain.walletCalls.filter((m) => m === 'eth_sendTransaction');
 
+/**
+ * The ways a person presses a button twice before the page catches up: both presses in one task
+ * (before any re-render; WebKit delivered such a pair on CI), a double click, and Enter then a
+ * click. Each test that uses them expects one send.
+ */
+export const DOUBLE_PRESSES = {
+  twice: (button: Locator) =>
+    button.evaluate((b: HTMLElement) => {
+      b.click();
+      b.click();
+    }),
+  dblclick: (button: Locator) => button.dblclick(),
+  'enter-click': async (button: Locator) => {
+    const box = await button.boundingBox();
+    if (!box) throw new Error('the button is not on screen');
+    await button.focus();
+    const page = button.page();
+    await page.keyboard.press('Enter');
+    // Straight at the point, with no wait for the button to be enabled: a person's second press.
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  },
+} satisfies Record<string, (button: Locator) => Promise<void>>;
+
+/** Sends the page's controls started (an `efs:send` mark each), whatever the wallet said. */
+export const sendsStarted = (page: Page) =>
+  page.evaluate(() => performance.getEntriesByName('efs:send', 'mark').length);
+
+/**
+ * Pauses the page's clock a few milliseconds ahead of its own time. pauseAt can't go backwards,
+ * and the page's clock runs on its own, so the target comes from the page, with a larger lead if
+ * the page has moved past it meanwhile. The lead stays far below the SDK's 1 s ledger poll, so
+ * the jump never fires it.
+ */
+export async function pauseClock(page: Page): Promise<void> {
+  for (let lead = 25; ; lead *= 2) {
+    const now = await page.evaluate(() => Date.now());
+    try {
+      await page.clock.pauseAt(now + lead);
+      return;
+    } catch (error) {
+      if (lead >= 400 || !/past/i.test(String(error))) throw error;
+    }
+  }
+}
+
 export const preview = (page: Page) => page.locator('efs-files-preview');
 export const save = (page: Page, outcome: string) =>
   page.locator(`efs-saves-banner .efs-save[data-outcome="${outcome}"]`);

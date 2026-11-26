@@ -9,14 +9,17 @@
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import {
+  DOUBLE_PRESSES,
   editAndReview,
   expect,
   objectLink,
   openFile,
+  pauseClock,
   preview,
   SEEDED,
   save,
   sendRequests,
+  sendsStarted,
   start,
 } from './edit-support.ts';
 import {
@@ -36,24 +39,6 @@ test.skip(
 );
 
 const sends = (chain: TestChain) => sendRequests(chain);
-
-/**
- * Pauses the page's clock a few milliseconds ahead of its own time. pauseAt can't go backwards,
- * and the page's clock runs on its own, so the target comes from the page, with a larger lead if
- * the page has moved past it meanwhile. The lead stays far below the SDK's 1 s ledger poll, so
- * the jump never fires it.
- */
-async function pauseClock(page: Page): Promise<void> {
-  for (let lead = 25; ; lead *= 2) {
-    const now = await page.evaluate(() => Date.now());
-    try {
-      await page.clock.pauseAt(now + lead);
-      return;
-    } catch (error) {
-      if (lead >= 400 || !/past/i.test(String(error))) throw error;
-    }
-  }
-}
 
 test('edit, review, one approval: Saved · confirming, and Show my version reads it back', async ({
   page,
@@ -155,3 +140,28 @@ test('a guest reading a file creates no storage and touches no wallet', async ({
   expect(await walletTouches(page)).toEqual([]);
   expect(replay.misses).toEqual([]);
 });
+
+for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
+  test(`Send pressed twice (${how}) before the page catches up: one save, one send`, async ({
+    page,
+  }) => {
+    const chain = await testChain(
+      `client-edit-send-once-${how}`,
+      `Edit docs/readme.txt as anvil #6, then press Send twice (${how}) before the page re-renders: the second press finds the review gone, or the button disabled. One save.`,
+    );
+    try {
+      await start(page, chain, undefined, true);
+      const review = await editAndReview(page, chain, `Twice is once (${how}).\n`, true);
+      await press(review.locator('wa-button.efs-review-send'));
+      chain.step(`Send, twice (${how}): one runSequence, one eth_sendTransaction`);
+      await expect(save(page, 'confirming').or(save(page, 'saved'))).toHaveCount(1);
+      await expect(review).toHaveCount(0);
+      await chain.idle(500);
+      expect(sends(chain)).toHaveLength(1);
+      // The page's own count: the second press started nothing.
+      expect(await sendsStarted(page)).toBe(1);
+    } finally {
+      await chain.finish();
+    }
+  });
+}

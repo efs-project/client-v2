@@ -12,6 +12,7 @@
 // only make the new save be refused as changed. That release is never "proven not saved".
 
 import type { SequenceProgress } from '@efs/sdk/actions';
+import type { MessageId } from '../ui/i18n.ts';
 import { unsettled } from './saves-state.ts';
 
 export type SaveHold =
@@ -37,7 +38,7 @@ export interface SaveHoldInput {
   readonly except?: string | undefined;
 }
 
-type Touches =
+export type Touches =
   | { readonly kind: 'file'; readonly file: string }
   | { readonly kind: 'places'; readonly keys: ReadonlySet<string> }
   /** Tag statements (and labels and links between tags): one key per (subject, what). */
@@ -142,19 +143,24 @@ function disjoint(a: Touches, b: Touches): boolean {
   return true;
 }
 
+/** What a save about to be sent touches, from its review (unknown when it names nothing). */
+export function touchesOfInput({ file, places, statements }: SaveHoldInput): Touches {
+  return file !== undefined
+    ? { kind: 'file', file: file.toLowerCase() }
+    : statements !== undefined
+      ? { kind: 'statements', keys: new Set(statements.map((k) => k.toLowerCase())) }
+      : places !== undefined
+        ? keysOf(places.map((x) => [x.folder, x.name] as const))
+        : { kind: 'unknown' };
+}
+
 export function saveHold(
   saves: readonly SequenceProgress[],
-  { account, file, places, statements, except }: SaveHoldInput,
+  input: SaveHoldInput,
 ): { readonly hold?: SaveHold; readonly lapsed: boolean } {
+  const { account, except } = input;
   const me = account.toLowerCase();
-  const mine: Touches =
-    file !== undefined
-      ? { kind: 'file', file: file.toLowerCase() }
-      : statements !== undefined
-        ? { kind: 'statements', keys: new Set(statements.map((k) => k.toLowerCase())) }
-        : places !== undefined
-          ? keysOf(places.map((x) => [x.folder, x.name] as const))
-          : { kind: 'unknown' };
+  const mine = touchesOfInput(input);
   let waiting: { minutes: number; block: bigint } | undefined;
   let waitingUnknown = false;
   let lapsed = false;
@@ -180,4 +186,43 @@ export function saveHold(
   if (waitingUnknown) return { hold: { kind: 'waiting' }, lapsed: false };
   if (waiting) return { hold: { kind: 'waiting', ...waiting }, lapsed: false };
   return { lapsed };
+}
+
+/**
+ * Where a held-back save stands against its twin (the earlier attempt of the same publication),
+ * from the saves listed (`saves`; undefined while they can't be read):
+ * - 'same': the same save again (it touches what the twin's save touches, or the SDK named no
+ *   save for the twin): "already being saved", and never a second Send;
+ * - 'waiting': another save of the same bytes, still open or not yet final: Send waits for it;
+ * - 'settled': that other save is final, stopped or no longer listed (a listed save that turns
+ *   final elsewhere drops off): this one may be sent again.
+ * Unknown effects count as the same (fail-closed: no Send).
+ */
+export type TwinStanding = 'same' | 'waiting' | 'settled';
+
+export function twinStanding(
+  twin: { readonly sequenceId?: string } | undefined,
+  saves: readonly SequenceProgress[] | undefined,
+  mine: Touches,
+): TwinStanding {
+  const id = twin?.sequenceId?.toLowerCase();
+  if (id === undefined) return 'same';
+  if (saves === undefined) return 'waiting';
+  const earlier = saves.find((p) => p.sequenceId.toLowerCase() === id);
+  if (!earlier) return 'settled';
+  if (!disjoint(touchesOf(earlier.effect), mine)) return 'same';
+  if (earlier.state === 'COMPLETE') return earlier.final ? 'settled' : 'waiting';
+  return earlier.state === 'ABANDONED' || earlier.state === 'NOT_STARTED' ? 'settled' : 'waiting';
+}
+
+/** What a held-back save says, by its standing (`localChain`: this computer's test chain). */
+export function heldMessage(standing: TwinStanding, localChain: boolean): MessageId {
+  switch (standing) {
+    case 'same':
+      return 'save.held';
+    case 'waiting':
+      return localChain ? 'save.heldSameBytesLocal' : 'save.heldSameBytes';
+    case 'settled':
+      return 'save.heldSettled';
+  }
 }

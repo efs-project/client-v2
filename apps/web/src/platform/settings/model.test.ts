@@ -8,6 +8,7 @@ import {
   findNetwork,
   type NetworkDefinition,
   type OperatorConfig,
+  onLocalChain,
   readConfig,
   readSettings,
 } from './model.ts';
@@ -322,5 +323,25 @@ describe('dev accounts: a local test chain only', () => {
         ],
       }),
     ).toBeUndefined();
+  });
+
+  it('a local test chain is one whose RPCs in use are all on this computer', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [net(['http://127.0.0.1:8588/'], [SATOSHI])],
+    });
+    if (read.status !== 'OK') throw new Error('config');
+    const base = {
+      definition: read.config.networks[0] as NetworkDefinition,
+      ipfsGateways: [],
+      arweaveGateways: [],
+      customized: { rpcs: false, gateways: false },
+    };
+    const local = { url: 'http://127.0.0.1:8588/', enabled: true };
+    const remote = { url: 'https://rpc.example.net/', enabled: true };
+    expect(onLocalChain({ ...base, rpcs: [local] })).toBe(true);
+    expect(onLocalChain({ ...base, rpcs: [local, remote] })).toBe(false);
+    expect(onLocalChain({ ...base, rpcs: [local, { ...remote, enabled: false }] })).toBe(true);
+    expect(onLocalChain({ ...base, rpcs: [] })).toBe(false);
   });
 });

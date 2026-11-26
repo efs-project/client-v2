@@ -30,25 +30,37 @@ import type {
   RevisionRef,
 } from '@efs/sdk/files';
 import type { RealmRef } from '../../boot/route.ts';
+import { markEach } from '../../platform/marks.ts';
+import { onLocalChain } from '../../platform/settings/model.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import type { KeptDraft } from '../../shell/drafts.ts';
-import { type SaveHold, saveHold } from '../../shell/save-hold.ts';
+import {
+  heldMessage,
+  type SaveHold,
+  saveHold,
+  type TwinStanding,
+  touchesOfInput,
+  twinStanding,
+} from '../../shell/save-hold.ts';
 import {
   type SaveOutcome,
   saveMessage,
   saveOutcome,
   saveValues,
+  type Twin,
   thrownOutcome,
 } from '../../shell/save-outcome.ts';
 import { shortAccount } from '../../shell/wallet-state.ts';
 import { state } from '../../state/signals.ts';
-import { EfsElement, html, nothing } from '../../ui/element.ts';
+import { EfsElement, html, live, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { pressedOnce } from '../../ui/press-once.ts';
 import { approvalsLine } from './approvals.ts';
 import { attachNotice } from './attach-notice.ts';
 import { newFileKey } from './compose.ts';
 import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
+import { settleTwin } from './held.ts';
 import { authorLabel } from './who.ts';
 
 type EditPlanned = Extract<EditPlanResult, { status: 'PLANNED' }>;
@@ -354,6 +366,22 @@ export class EfsFileEditor extends EfsElement {
     });
   }
 
+  /** A save the SDK held back: the same save again, or another save of the same bytes. */
+  #twinStanding(twin: Twin | undefined): TwinStanding {
+    const place = this.#place();
+    const mine = touchesOfInput({
+      account: '',
+      ...(place ? { places: [place] } : this.file ? { file: this.file.file } : {}),
+    });
+    return twinStanding(twin, this.host.saving.saves.get(), mine);
+  }
+
+  /** This computer's test chain (every enabled RPC local): waits there are said in minutes. */
+  #onLocalChain(): boolean {
+    const n = this.host.network.get();
+    return 'network' in n && onLocalChain(n.network);
+  }
+
   /** Create mode: the (folder, name) the new file takes. */
   #place(): { readonly folder: string; readonly name: string } | undefined {
     return this.create
@@ -534,9 +562,22 @@ export class EfsFileEditor extends EfsElement {
     this.#holding.set(result === 'read' ? 'no' : result === 'no-journal' ? 'no-journal' : 'failed');
   }
 
-  /** Sends the reviewed plan; a save that wasn't sent before is continued, not started again. */
-  async #send(plan: Planned, writer: EfsWriter, again?: Hex): Promise<void> {
+  /**
+   * Claims the review of `plan` for its one send, and starts it; false when that review is no
+   * longer the current one. A second activation before the page re-renders finds the review gone
+   * (or another plan's) and is ignored, never a second save of the same edit.
+   */
+  #send(plan: Planned, writer: EfsWriter, again?: Hex): boolean {
+    const now = this.#phase.get();
+    if (now.phase !== 'review' || now.plan !== plan) return false;
     this.#phase.set({ phase: 'sending', plan, writer });
+    void this.#sendClaimed(plan, writer, again);
+    return true;
+  }
+
+  /** Sends the reviewed plan; a save that wasn't sent before is continued, not started again. */
+  async #sendClaimed(plan: Planned, writer: EfsWriter, again?: Hex): Promise<void> {
+    markEach('efs:send');
     // Checked again at Send, from the journal: a save may have opened (here or in another tab)
     // since the plan was made.
     if (!(await this.#relist()) || this.#hold(again).hold) {
@@ -584,6 +625,15 @@ export class EfsFileEditor extends EfsElement {
         else {
           await this.#plan(this.#base ?? { kind: 'revision', recordId: plan.review.base }, true);
         }
+        return;
+      }
+      if (outcome.kind === 'held') {
+        // This call sent nothing, and its new record would linger as "not sent": stop it. Then
+        // read the twin again, so the review can say which case this is (Send again, once it
+        // may, starts a new save).
+        await this.#drop(writer, progress.sequenceId);
+        await settleTwin(this.host.saving, writer, outcome.twin);
+        this.#phase.set({ phase: 'review', plan, writer, sent: { outcome } });
         return;
       }
       this.#phase.set({
@@ -700,8 +750,11 @@ export class EfsFileEditor extends EfsElement {
       ? saveValues(sent.outcome, shortAccount, (id) => this.#chainName(id, t))
       : {};
     // Sent again (continued) only when the SDK says this same save can go as planned.
+    // Held back: which case it is, from the saves listed (and Send again once it may).
+    const held = sent?.outcome.kind === 'held' ? this.#twinStanding(sent.outcome.twin) : undefined;
     const canSendAgain =
       !sent ||
+      held === 'settled' ||
       sent.outcome.kind === 'refused' ||
       sent.outcome.kind === 'busy' ||
       sent.outcome.kind === 'wallet-mismatch' ||
@@ -773,7 +826,11 @@ export class EfsFileEditor extends EfsElement {
           sent
             ? html`<wa-callout variant="warning" size="small" class="efs-review-not-sent"
                 ><span slot="icon">${appIcon('circle-exclamation')}</span>
-                <p role="alert">${t(saveMessage(sent.outcome), values)}</p></wa-callout
+                <p role="alert">${
+                  held
+                    ? t(heldMessage(held, this.#onLocalChain()))
+                    : t(saveMessage(sent.outcome), values)
+                }</p></wa-callout
               >`
             : nothing
         }
@@ -791,9 +848,13 @@ export class EfsFileEditor extends EfsElement {
               variant="brand"
               class="efs-review-send"
               ?loading=${sending}
-              ?disabled=${sending || !canSendAgain || this.#hold(sent?.sequenceId).hold !== undefined}
-              @click=${() => {
-                if (s.phase === 'review') void this.#send(s.plan, s.writer, sent?.sequenceId);
+              .disabled=${live(
+                sending || !canSendAgain || this.#hold(sent?.sequenceId).hold !== undefined,
+              )}
+              @click=${(e: Event) => {
+                if (s.phase === 'review' && this.#send(s.plan, s.writer, sent?.sequenceId)) {
+                  pressedOnce(e);
+                }
               }}
               >${t(sent ? 'saves.sendAgain' : 'review.send')}</wa-button
             >`
