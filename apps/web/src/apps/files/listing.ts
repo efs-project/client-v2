@@ -486,7 +486,9 @@ export class EfsFilesListing extends EfsElement {
       >${
         mine
           ? t('files.whose.yours')
-          : t('files.whose.author', { author: authorLabel(this.#efs, row.author) })
+          : t('files.whose.author', {
+              author: authorLabel(this.#efs, row.author, undefined, this.host.names.get()),
+            })
       }</span
     >`;
   }

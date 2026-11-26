@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   checkEndpoint,
   DEFAULT_SETTINGS,
+  devAccountsOf,
   effectiveNetwork,
   endpointLabel,
   findNetwork,
@@ -243,6 +244,83 @@ describe('effectiveNetwork', () => {
   it('reports no network when the operator configured none', () => {
     expect(
       effectiveNetwork({ schema: 'efs-config/1', networks: [] }, DEFAULT_SETTINGS),
+    ).toBeUndefined();
+  });
+});
+
+describe('dev accounts: a local test chain only', () => {
+  const net = (rpcs: string[], devAccounts?: unknown) => ({
+    id: 'dev',
+    label: 'Local dev chain',
+    chainId: 3133779,
+    core: `0x${'aa'.repeat(20)}`,
+    deployment: 'deployments/dev.json',
+    release: 'deployments/dev-release.json',
+    rpcs: rpcs.map((url) => ({ url })),
+    ...(devAccounts === undefined ? {} : { devAccounts }),
+  });
+  const SATOSHI = {
+    name: 'Satoshi Nakamoto',
+    address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+  };
+
+  it('keeps them (lowercase addresses) for a network whose RPCs are all on this computer', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [net(['http://127.0.0.1:8588/'], [SATOSHI])],
+    });
+    expect(read.status === 'OK' && read.config.networks[0]?.devAccounts).toEqual([
+      { name: 'Satoshi Nakamoto', address: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' },
+    ]);
+  });
+
+  it('drops them, with an issue, for any network that reaches another computer', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [net(['http://127.0.0.1:8588/', 'https://rpc.example.net/'], [SATOSHI])],
+    });
+    expect(read.status === 'OK' && read.config.networks[0]?.devAccounts).toBeUndefined();
+    expect(read.status === 'OK' && read.issues.some((i) => i.includes('devAccounts'))).toBe(true);
+  });
+
+  it('drops malformed accounts and keeps the rest', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [
+        net(['http://localhost:8588/'], [SATOSHI, { name: '', address: '0x1' }, { name: 'X' }]),
+      ],
+    });
+    expect(read.status === 'OK' && read.config.networks[0]?.devAccounts).toHaveLength(1);
+  });
+
+  it('offers them only while every RPC in effect is local, sent through the first one on', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [net(['http://127.0.0.1:8588/'], [SATOSHI])],
+    });
+    if (read.status !== 'OK') throw new Error('config');
+    const definition = read.config.networks[0] as NetworkDefinition;
+    const base = {
+      definition,
+      ipfsGateways: [],
+      arweaveGateways: [],
+      customized: { rpcs: false, gateways: false },
+    };
+    expect(
+      devAccountsOf({ ...base, rpcs: [{ url: 'http://127.0.0.1:8588/', enabled: true }] }),
+    ).toEqual({
+      accounts: definition.devAccounts,
+      rpcUrl: 'http://127.0.0.1:8588/',
+    });
+    // The person added a remote RPC: no dev accounts while it's in use.
+    expect(
+      devAccountsOf({
+        ...base,
+        rpcs: [
+          { url: 'http://127.0.0.1:8588/', enabled: true },
+          { url: 'https://rpc.example.net/', enabled: true },
+        ],
+      }),
     ).toBeUndefined();
   });
 });

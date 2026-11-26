@@ -624,7 +624,12 @@ export class EfsFilesPreview extends EfsElement {
         <span slot="icon">${appIcon('circle-info')}</span>
         <div class="wa-split wa-gap-s">
           <p>${t('files.edit.notInView', {
-            author: authorLabel(verifiedEfs(this.host.reader.get()), other),
+            author: authorLabel(
+              verifiedEfs(this.host.reader.get()),
+              other,
+              undefined,
+              this.host.names.get(),
+            ),
           })}</p>
           <wa-button
             size="s"
@@ -949,7 +954,12 @@ export class EfsFilesPreview extends EfsElement {
         reordered?.canonical === link.canonical
           ? html`<p class="efs-quiet efs-preview-reordered" role="status">
               ${t('files.preview.reordered', {
-                author: authorLabel(verifiedEfs(this.host.reader.get()), reordered.author),
+                author: authorLabel(
+                  verifiedEfs(this.host.reader.get()),
+                  reordered.author,
+                  undefined,
+                  this.host.names.get(),
+                ),
               })}
             </p>`
           : nothing

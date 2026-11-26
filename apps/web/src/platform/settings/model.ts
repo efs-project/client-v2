@@ -21,6 +21,16 @@ export interface Endpoint {
   readonly enabled: boolean;
 }
 
+/**
+ * A local test account the dev chain unlocks, by a persona name (`pnpm dev` / `pnpm demo` only).
+ * Names and addresses, never keys: the chain signs for them.
+ */
+export interface DevAccount {
+  readonly name: string;
+  /** Lowercase. */
+  readonly address: string;
+}
+
 export interface NetworkDefinition {
   readonly id: string;
   readonly label: string;
@@ -36,6 +46,12 @@ export interface NetworkDefinition {
   readonly rpcs: readonly Endpoint[];
   readonly ipfsGateways: readonly Endpoint[];
   readonly arweaveGateways: readonly Endpoint[];
+  /**
+   * The local dev chain's accounts (the generated config of `pnpm dev` / `pnpm demo`). Kept only
+   * for a network whose RPCs are all on this computer (devAccountsOf), so a hosted config can
+   * never offer them.
+   */
+  readonly devAccounts?: readonly DevAccount[];
 }
 
 /** The user's replacements for one network's endpoint lists. Absent list = use the defaults. */
@@ -213,6 +229,61 @@ function readEndpoints(
   return out;
 }
 
+const MAX_DEV_ACCOUNTS = 32;
+
+/** Whether every endpoint in `list` is on this computer (and there is at least one). */
+const allLocal = (list: readonly Endpoint[]): boolean =>
+  list.length > 0 && list.every((e) => isLoopbackHost(new URL(e.url).hostname));
+
+/**
+ * A network's dev accounts, kept only when its RPCs are all on this computer: anywhere else they
+ * are dropped with an issue, never offered.
+ */
+function readDevAccounts(
+  value: unknown,
+  rpcs: readonly Endpoint[],
+  issues: string[],
+  where: string,
+): DevAccount[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !allLocal(rpcs)) {
+    issues.push(`${where}.devAccounts: ignored (only for a local test chain)`);
+    return undefined;
+  }
+  const out: DevAccount[] = [];
+  for (const item of value.slice(0, MAX_DEV_ACCOUNTS)) {
+    if (
+      !isRecord(item) ||
+      typeof item.name !== 'string' ||
+      item.name.trim() === '' ||
+      typeof item.address !== 'string' ||
+      !/^0x[0-9a-fA-F]{40}$/.test(item.address)
+    ) {
+      issues.push(`${where}.devAccounts: a malformed account was dropped`);
+      continue;
+    }
+    out.push({
+      name: item.name.trim().slice(0, MAX_LABEL_LENGTH),
+      address: item.address.toLowerCase(),
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * The dev accounts a network offers right now: its own, while every RPC in effect (the person's
+ * edits included) is on this computer; else none. Where they are sent from: the first RPC on.
+ */
+export function devAccountsOf(
+  network: EffectiveNetwork,
+): { readonly accounts: readonly DevAccount[]; readonly rpcUrl: string } | undefined {
+  const accounts = network.definition.devAccounts;
+  const on = network.rpcs.filter((e) => e.enabled);
+  const first = on[0];
+  if (!accounts || !first || !allLocal(on)) return undefined;
+  return { accounts, rpcUrl: first.url };
+}
+
 function readOverrides(value: unknown, issues: string[]): Record<string, NetworkOverrides> {
   if (!isRecord(value)) return {};
   const out: Record<string, NetworkOverrides> = {};
@@ -317,6 +388,13 @@ export function readConfig(raw: unknown): ConfigRead {
       ipfsGateways: readEndpoints(item.ipfsGateways, 'gateway', issues, `${item.id}.ipfs`),
       arweaveGateways: readEndpoints(item.arweaveGateways, 'gateway', issues, `${item.id}.ar`),
     });
+    const rpcs = networks.at(-1)?.rpcs ?? [];
+    const dev = readDevAccounts(item.devAccounts, rpcs, issues, item.id);
+    if (dev)
+      networks[networks.length - 1] = {
+        ...(networks.at(-1) as NetworkDefinition),
+        devAccounts: dev,
+      };
   }
   const defaultNetwork =
     typeof raw.defaultNetwork === 'string' && seen.has(raw.defaultNetwork)

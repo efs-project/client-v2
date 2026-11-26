@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { type DemoLinks, seedDemo } from './demo.ts';
 import { devIdentity } from './identity.ts';
 import { isSameProcess, processFacts } from './ownership.ts';
+import { type Persona, readyPersonas } from './personas.ts';
 
 const ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
 const STATE_DIR = join(ROOT, '.efs-dev');
@@ -126,6 +127,7 @@ function devConfig(
   chainId: number,
   ledger: string,
   rpcUrl: string,
+  devAccounts: readonly Persona[],
 ): { readonly config: unknown; readonly label: string } {
   const label = `Local dev chain ${chainId}`;
   return {
@@ -144,6 +146,8 @@ function devConfig(
           rpcs: [{ url: rpcUrl, label: 'This worktree’s anvil' }],
           ipfsGateways: [],
           arweaveGateways: [],
+          // "EFS dev accounts" in the wallet picker: names and addresses; the chain signs.
+          devAccounts,
         },
       ],
     },
@@ -192,7 +196,9 @@ async function start(demo = false): Promise<void> {
   }
 
   const ledger = String((chain.deployment as { ledger?: unknown }).ledger ?? '');
-  const { config, label } = devConfig(chain.chainId, ledger, chain.rpcUrl);
+  // Every persona can send: anvil's unlocked ten, and the rest impersonated and funded.
+  const personas = await readyPersonas(chain.rpcUrl, chain.accounts.unlocked);
+  const { config, label } = devConfig(chain.chainId, ledger, chain.rpcUrl, personas);
   const files = new Map<string, string>([
     ['/efs.config.json', JSON.stringify(config, null, 2)],
     [`/deployments/${NETWORK_ID}.json`, JSON.stringify(chain.deployment, null, 2)],
@@ -282,7 +288,10 @@ EFS dev is running for this worktree.
   App:      ${uiUrl}
   Edit me:  ${fileLink ?? '(the fixture seeded no readme.txt)'}
 
-Add this network to your wallet:
+Easiest: Connect, choose "EFS dev accounts" and pick any persona (Satoshi Nakamoto, Hal Finney…).
+No keys or wallet needed; the local chain signs for them.
+
+Or add this network to your wallet:
   Network:  ${label}
   RPC URL:  ${chain.rpcUrl}
   Chain ID: ${chain.chainId}
@@ -302,18 +311,18 @@ pnpm dev:status | pnpm dev:stop | pnpm dev:reset    Ctrl-C stops both.`);
 /** What the demo seeded, and where to click. */
 function demoText(uiUrl: string, links: DemoLinks): string {
   return `
-Demo data is in. Connect as the account above: that's Alice (the default view's author).
-Bob is ${links.bob}.
+Demo data is in. Connect with EFS dev accounts and pick any persona: Satoshi Nakamoto wrote
+most of it, Hal Finney (${links.hal}) has his own address, Wei Dai left a stray tag.
 
 Try it:
   1. The root, with Guides/, Photos/ and Notes/:   ${uiUrl}
   2. A folder (its README in the Overview):        ${links.folder}
   3. A tag, photos/sunsets ("Sunset photos"):      ${links.tag}
-     Alice's and Bob's photos; switch to Unfiltered to see Carol's stray tag on
-     getting-started.txt, which Alice said "not this" to ("1 of 2 say it applies")
+     Satoshi's and Hal's photos; switch to Unfiltered to see Wei Dai's stray tag on
+     getting-started.txt, which Satoshi said "not this" to ("1 of 2 say it applies")
   4. A word's page, sunsets (two places use it):  ${links.word}
-  5. Bob's address (Alice's welcome.txt is there): ${links.address}
-     Alice's entry says "yours"; open it without a wallet and it says whose it is.
+  5. Hal's address (Satoshi's welcome.txt is there): ${links.address}
+     As Satoshi it says "yours"; as anyone else, "Satoshi Nakamoto · 0xf39F…2266's".
   An image, checked against the chain:            ${links.image}`;
 }
 

@@ -34,7 +34,8 @@ export const CHAIN_MODE: ChainMode = (() => {
 
 const TRANSCRIPTS = 'tests/e2e/transcripts/';
 /** The fake RPC origin TEST_CONFIG names; the page's requests to it are answered here. */
-const RPC_ORIGIN = /^https:\/\/rpc\.example\.net\//;
+/** The page's RPC: the test config's, or a local test chain's (the dev accounts' network). */
+const RPC_ORIGIN = /^(https:\/\/rpc\.example\.net|http:\/\/127\.0\.0\.1:8545)\//;
 
 /** anvil account #6: not the fixture principal, so the default Lens leaves it out. */
 const EDITOR_INDEX = 6;

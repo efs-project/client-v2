@@ -5,6 +5,6 @@ import { SignalWatcher } from '@lit-labs/signals';
 import { LitElement } from 'lit';
 
 export const EfsElement = SignalWatcher(LitElement);
-export { css, html, nothing } from 'lit';
+export { css, html, nothing, render } from 'lit';
 /** Renders a fresh element when the key changes (a different new file gets a new editor). */
 export { keyed } from 'lit/directives/keyed.js';

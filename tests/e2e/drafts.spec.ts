@@ -150,10 +150,16 @@ test('leaving the page asks first only while an edit is unsaved', async ({ page 
 });
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
-const axe = async (page: Page) =>
-  (await new AxeBuilder({ page }).withTags(TAGS).analyze()).violations.map(
+/**
+ * axe once the page is still: a dialog mid-animation (WebKit fades it in) measures as low contrast,
+ * so it waits for every animation to finish first.
+ */
+const axe = async (page: Page) => {
+  await page.waitForFunction(() => document.getAnimations().length === 0);
+  return (await new AxeBuilder({ page }).withTags(TAGS).analyze()).violations.map(
     (v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).join(', ')})`,
   );
+};
 
 for (const scheme of ['light', 'dark'] as const) {
   test(`"Discard your edit?" by keyboard alone; focus kept; axe clean (${scheme})`, async ({

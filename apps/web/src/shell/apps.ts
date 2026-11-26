@@ -93,6 +93,11 @@ export interface AppHost {
   /** Goes to a link (from the SDK's link()) in the current realm, or the default realm. */
   openLink(link: string, options?: { readonly replace?: boolean }): void;
   readonly saving: SavingHost;
+  /**
+   * Names by lowercase address, shown beside addresses: the local test chain's dev accounts
+   * (personas), when the network offers them; otherwise empty.
+   */
+  readonly names: ReadonlySignal<ReadonlyMap<string, string>>;
 }
 
 export interface AppMount {

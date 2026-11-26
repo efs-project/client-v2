@@ -220,7 +220,12 @@ export class EfsFilesOverview extends EfsElement {
               ? t('files.overview.byYou')
               : owner
                 ? t('files.overview.by', {
-                    author: authorLabel(verifiedEfs(this.host.reader.get()), owner),
+                    author: authorLabel(
+                      verifiedEfs(this.host.reader.get()),
+                      owner,
+                      undefined,
+                      this.host.names.get(),
+                    ),
                   })
                 : nothing
         }

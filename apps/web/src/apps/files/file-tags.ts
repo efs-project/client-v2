@@ -167,7 +167,7 @@ export class EfsFileTags extends EfsElement {
               ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="ltr">${label}</span>
             </span>`
       }
-      <span class="efs-entry-meta efs-quiet">${whoLine(t, this.efs, row, me, undefined)}</span>
+      <span class="efs-entry-meta efs-quiet">${whoLine(t, this.efs, row, me, undefined, undefined, this.host.names.get())}</span>
     </li>`;
   }
 

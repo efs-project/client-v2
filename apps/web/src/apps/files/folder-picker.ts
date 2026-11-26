@@ -47,6 +47,7 @@ export class EfsFolderPicker extends EfsElement {
     efs: { attribute: false },
     reader: { attribute: false },
     translator: { attribute: false },
+    names: { attribute: false },
     start: { attribute: false },
     source: { attribute: false },
     moving: { attribute: false },
@@ -55,6 +56,8 @@ export class EfsFolderPicker extends EfsElement {
   /** The connected account (the place Lens puts it first). */
   declare reader: string | undefined;
   declare translator: Translator;
+  /** Names beside addresses (the local test chain's dev accounts). */
+  declare names: ReadonlyMap<string, string> | undefined;
   /** Where to open: the trail to the folder the person is in (used only if every name is known). */
   declare start: readonly NavStep[];
   /** The folder (or address) the entry is in now. */
@@ -186,7 +189,7 @@ export class EfsFolderPicker extends EfsElement {
       owner && author === owner.toLowerCase()
         ? nothing
         : html`<span class="efs-entry-whose"
-            >${mine ? t('files.whose.yours') : t('files.whose.author', { author: authorLabel(this.efs, row.author) })}</span
+            >${mine ? t('files.whose.yours') : t('files.whose.author', { author: authorLabel(this.efs, row.author, undefined, this.names) })}</span
           >`;
     return html`<li class="efs-entry" data-kind="folder">
       <button
