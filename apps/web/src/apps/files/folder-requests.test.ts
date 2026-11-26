@@ -453,6 +453,27 @@ describe('copy', () => {
     expect(nameRuleMessage('trailing-whitespace')).toBe('files.name.rule.space');
     expect(nameRuleMessage('too-long')).toBe('files.name.rule.tooLong');
     expect(nameRuleMessage('reserved-prefix')).toBe('files.name.rule.reserved');
+    // files-name/3 (sdk-v2 59bb9fb): the twelve reserved characters, and a name ending in a dot.
+    expect(nameRuleMessage('reserved-character')).toBe('files.name.rule.reservedCharacter');
+    expect(nameRuleMessage('trailing-dot')).toBe('files.name.rule.trailingDot');
+  });
+  it('the files-name/3 refusals say which characters, as the SDK checks them', async () => {
+    const { checkName } = await import('@efs/sdk');
+    const { loadTranslator } = await import('../../ui/i18n.ts');
+    const { t } = await loadTranslator('en');
+    const refusal = (name: string) => {
+      const check = checkName(name);
+      return check.status === 'INVALID' ? t(nameRuleMessage(check.rule)) : check.status;
+    };
+    const reserved = 'A name can\'t use # ? % / \\ < > " | : * or ;.';
+    for (const name of ['Q&A #3.pdf', '50%.txt', 'what?.md', 'a:b', 'a\\b', 'a;b', 'a/b']) {
+      expect(refusal(name)).toBe(reserved);
+    }
+    for (const name of ['inc.', '.', '..'])
+      expect(refusal(name)).toBe("A name can't end with a dot.");
+    for (const name of ['a b', "it's (1) [x] {y} ^~ @$!=+, &", '.env', '-x', 'con', 'nul.txt']) {
+      expect(refusal(name)).toBe('VALID');
+    }
   });
 });
 

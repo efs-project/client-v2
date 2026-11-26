@@ -13,7 +13,7 @@ const FORBIDDEN_PACKAGES = [/^viem$/, /^ethers$/, /^ox$/, /^abitype$/];
  * code). Its core (client, chain and byte I/O, viem/ox internals) loads lazily with the reader.
  * Each file is named exactly, never a directory or a glob, so an SDK change that pulls hashing or
  * chain code into the grammar still fails here. Since sdk-v2 c8ed37a the grammar checks home names
- * (files-name/2) and path segments itself: names/name, names/segment and their one helper,
+ * (files-name/3) and path segments itself: names/name, names/segment and their one helper,
  * core/platform (globalThis wrappers, nothing at import time). PM-checked, 2026-11-25. Since
  * sdk-v2 e229ea3 parseLink folds each word by default (the interim fold, PM D15): names/fold, pure
  * string code with no imports (its constants, its functions and three Unicode-property regexes;

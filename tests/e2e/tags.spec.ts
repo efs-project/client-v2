@@ -230,7 +230,7 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     const invalid = preview(page).locator('.efs-preview-invalid');
     await expect(invalid).toHaveAttribute('data-rule', 'bad-word');
     await expect(invalid.locator('p')).toHaveText(
-      /^\s*This link names a tag with a word the network doesn't accept:\s+Straße\s+\(a capital letter, in a word that isn't all plain letters\)\s*$/,
+      /^\s*This link names a tag with a word the network doesn't accept:\s+Straße\s+\(a capital letter or a space, in a word that isn't all plain letters\)\s*$/,
     );
     await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('Straße');
     chain.step('Straße: refused by the link grammar, the word and the reason named; nothing read');
@@ -255,6 +255,25 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     // Never a word page for a word the chain can't hold.
     await expect(page.locator('efs-files-word:not([hidden])')).toHaveCount(0);
     chain.step('a, U+202E, b, U+200D, c: refused for the characters, shown as U+ codes, in order');
+
+    // The list release's word rules (sdk-v2 59bb9fb): a word's ASCII is only a–z, 0–9, - _ and .
+    // (so c++ is refused), and a word can't end with a dot or start with a hyphen.
+    for (const [path, shown, reason] of [
+      ['c%2B%2B', 'c++', 'a symbol other than - _ or .'],
+      ['inc.', 'inc.', 'it ends with a dot'],
+      ['-x', '-x', 'it starts with a hyphen'],
+    ] as const) {
+      await go(page, `#/r/testnet/${path}`);
+      await expect(invalid.locator('bdi.efs-bad-word')).toHaveText(shown);
+      const reasonSaid = (await invalid.locator('p').textContent()) ?? '';
+      expect(reasonSaid.replace(/\s+/g, ' ').trim()).toBe(
+        `This link names a tag with a word the network doesn't accept: ${shown} (${reason})`,
+      );
+    }
+    await expect(page.locator('efs-files-word:not([hidden])')).toHaveCount(0);
+    chain.step(
+      'c++, inc. and -x: refused by the list release word rules, each reason named; nothing read',
+    );
 
     await go(page, '#/r/testnet/vitalik.eth');
     const word = page.locator('efs-files-word');

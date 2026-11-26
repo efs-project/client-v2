@@ -20,7 +20,7 @@ import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, keyed, nothing } from '../../ui/element.ts';
-import type { MessageId, Translator } from '../../ui/i18n.ts';
+import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { tRich } from '../../ui/rich.ts';
 import { visible, wordParts } from '../../ui/visible-text.ts';
@@ -34,7 +34,7 @@ import { readerNotice } from './notice.ts';
 import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
-import { pathParts, wordShown } from './topic-model.ts';
+import { badWordReason, pathParts, wordShown } from './topic-model.ts';
 import { authorLabel, shortId } from './who.ts';
 
 /**
@@ -1061,7 +1061,7 @@ export class EfsFilesPreview extends EfsElement {
             ? html`<p>
                 ${t('files.preview.badWordNamed')}
                 <bdi translate="no" class="efs-bad-word">${visible(wordParts(link.word), t)}</bdi>
-                ${badWordReason(link.detail, t)}
+                ${badWordNote(link.detail, t)}
               </p>`
             : link.rule === 'bad-word'
               ? html`<p>${t('files.preview.badWordLink')}</p>`
@@ -1132,24 +1132,10 @@ export class EfsFilesPreview extends EfsElement {
 }
 
 /** Why the grammar refused a tag word, from parseLink's `detail` (unknown ones shown as given). */
-function badWordReason(detail: string | undefined, t: Translator['t']) {
-  const id = detail ? BAD_WORD_REASONS[detail] : undefined;
+function badWordNote(detail: string | undefined, t: Translator['t']) {
+  const id = badWordReason(detail);
   if (id) return html`<span>(${t(id)})</span>`;
   return detail
     ? html`<span>(<code translate="no" dir="ltr">${visible(wordParts(detail), t)}</code>)</span>`
     : nothing;
 }
-
-// parseLink's `detail` names (sdk-v2 754f6d2): its word grammar's, then the fold's.
-const BAD_WORD_REASONS: Readonly<Record<string, MessageId>> = {
-  unfolded: 'files.badWord.unfolded',
-  slash: 'files.badWord.slash',
-  dot: 'files.badWord.dot',
-  control: 'files.badWord.control',
-  'refused-character': 'files.badWord.refusedCharacter',
-  'forbidden-ascii': 'files.badWord.forbiddenAscii',
-  'malformed-utf8': 'files.badWord.malformed',
-  length: 'files.badWord.length',
-  'reserved-tilde': 'files.badWord.reservedTilde',
-  'address-shaped': 'files.badWord.addressShaped',
-};

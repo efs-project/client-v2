@@ -51,8 +51,16 @@ test('New folder: bad names are refused as typed; then name, review, one send, a
       'disabled',
       '',
     );
+    // files-name/3 (sdk-v2 59bb9fb): no name ends with a dot, so '..' is refused as one; and the
+    // characters links keep for themselves are named.
     await name.locator('input').fill('..');
-    await expect(dialog(page)).toContainText('A name can\'t be "." or "..".');
+    await expect(dialog(page)).toContainText("A name can't end with a dot.");
+    await name.locator('input').fill('Q&A #3');
+    await expect(dialog(page)).toContainText('A name can\'t use # ? % / \\ < > " | : * or ;.');
+    await expect(dialog(page).locator('wa-button.efs-folder-review')).toHaveAttribute(
+      'disabled',
+      '',
+    );
     await name.locator('input').fill('projects');
     await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(/Creates the folder\W+projects\W+in\W+Root/);

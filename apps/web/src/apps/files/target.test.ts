@@ -75,7 +75,7 @@ describe('linkState', () => {
       link: { kind: 'path', folder: RECORD, names: ['docs', 'read me.md'] },
       canonical: `~efs/o/${RECORD}/docs/read%20me.md`,
     });
-    // One trailing "/" is ignored; its names keep their case; a name breaking files-name/2 refuses.
+    // One trailing "/" is ignored; its names keep their case; a name breaking files-name/3 refuses.
     expect(at(`~efs/o/${RECORD}/Docs/`)).toMatchObject({
       status: 'path',
       link: { names: ['Docs'] },

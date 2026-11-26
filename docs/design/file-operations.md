@@ -58,7 +58,7 @@ Draft flows and copy for the integration owner's (PM's) review. Revised for the 
    - A stop shown in the banner (partial, "undone by the network") also shows on the row.
    - A pending entry is never shown as a settled one.
 5. **Names are checked by the SDK, as the person types.**
-   - `checkName` (files-name/2) is already exported, and its rule picks the inline message. The client has no name rules of its own.
+   - `checkName` (files-name/3) is already exported, and its rule picks the inline message. The client has no name rules of its own.
    - Review is offered only for a VALID name. The planners treat an invalid name as MISUSE before any read, so a MISUSE here is a client bug: it's reported as one, never shown as a refusal.
    - A name that isn't in NFC form is allowed, as the profile allows it. The dialog says so: "This name isn't in the usual Unicode form, so a name that looks the same could be a different name. It will be saved exactly as typed."
 6. **A listing never reads as empty when it isn't known.**
@@ -270,7 +270,8 @@ These are proposed `en.json` messages, with MF2 arguments. The wording follows `
 | `files.name.taken.lens` | Your file will be saved, but this view shows {$author}'s {$name} first. |
 | `files.name.rule.empty` | Enter a name. |
 | `files.name.rule.tooLong` | That name is too long ({$bytes} of 255 bytes). |
-| `files.name.rule.dots` | A name can't be "." or "..". |
+| `files.name.rule.reservedCharacter` | A name can't use # ? % / \\ < > " \| : * or ;. (files-name/3) |
+| `files.name.rule.trailingDot` | A name can't end with a dot. (files-name/3: so "." and ".." too) |
 | `files.name.rule.reserved` | Names can't start with "~efs". |
 | `files.name.rule.character` | This name has a character that isn't allowed (position {$at}). |
 | `files.name.rule.space` | A name can't start or end with a space. |
