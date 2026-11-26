@@ -415,7 +415,8 @@ export type SynonymsState =
       readonly words: readonly SynonymWord[];
       readonly more: boolean;
     }
-  | { readonly phase: 'unknown' };
+  /** `reason`: the SDK's, when the read answered (BEHIND has its own copy); none when it threw. */
+  | { readonly phase: 'unknown'; readonly reason?: Reason };
 
 /** Words by topic id (lowercase), as read; null when a topic's words couldn't be read. */
 export type WordsById = ReadonlyMap<string, readonly string[] | null>;
@@ -439,7 +440,9 @@ function saidAs(
 export function fromSynonyms(result: SynonymsResult, read: WordsById): SynonymsState | undefined {
   // A tag nobody has registered has no synonyms to show (its own page says it's unused).
   if (result.status === 'ABSENT_PROVEN') return undefined;
-  if (result.status !== 'PRESENT') return { phase: 'unknown' };
+  if (result.status !== 'PRESENT') {
+    return { phase: 'unknown', ...(result.reason ? { reason: result.reason } : {}) };
+  }
   const words = new Map(read);
   words.set(result.topic.id.toLowerCase(), result.topic.words);
   for (const w of result.words) {
@@ -468,12 +471,15 @@ export type BroaderState =
       readonly narrower: readonly JoinRow[];
       readonly more: boolean;
     }
-  | { readonly phase: 'unknown' };
+  /** `reason`: the SDK's, when the read answered (BEHIND has its own copy); none when it threw. */
+  | { readonly phase: 'unknown'; readonly reason?: Reason };
 
 /** The broader read (topicBroader), with each related topic's words (topicPath) by id. */
 export function fromBroader(result: BroaderResult, read: WordsById): BroaderState | undefined {
   if (result.status === 'ABSENT_PROVEN') return undefined;
-  if (result.status !== 'PRESENT') return { phase: 'unknown' };
+  if (result.status !== 'PRESENT') {
+    return { phase: 'unknown', ...(result.reason ? { reason: result.reason } : {}) };
+  }
   const words = new Map(read);
   words.set(result.topic.id.toLowerCase(), result.topic.words);
   const row = (r: Related): JoinRow => {

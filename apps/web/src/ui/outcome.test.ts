@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import en from './messages/en.json' with { type: 'json' };
-import { describeOutcome, outcomeActions, outcomeMessageIds } from './outcome.ts';
+import { describeOutcome, outcomeActions, outcomeMessageIds, shownMessage } from './outcome.ts';
 
 describe('describeOutcome', () => {
   it('maps known statuses', () => {
@@ -67,5 +67,16 @@ describe('UNKNOWN BEHIND (the read floor)', () => {
 
   it('its message is in the catalog check', () => {
     expect(outcomeMessageIds()).toContain('outcome.behind');
+  });
+});
+
+describe("shownMessage (a surface's own words for a plain UNKNOWN)", () => {
+  it("uses the surface's copy for UNKNOWN, never over BEHIND or another status", () => {
+    const own = 'files.synonyms.unknown' as const;
+    expect(shownMessage(describeOutcome('read', 'UNKNOWN', 'RPC_FAILED'), own)).toBe(own);
+    expect(shownMessage(describeOutcome('read', 'UNKNOWN'), own)).toBe(own);
+    expect(shownMessage(describeOutcome('read', 'UNKNOWN', 'BEHIND'), own)).toBe('outcome.behind');
+    expect(shownMessage(describeOutcome('read', 'INVALID'), own)).toBe('outcome.read.invalid');
+    expect(shownMessage(describeOutcome('read', 'UNKNOWN'))).toBe('outcome.read.unknown');
   });
 });

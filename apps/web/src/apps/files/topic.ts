@@ -812,7 +812,17 @@ export class EfsFilesTopic extends EfsElement {
     if (!s) return nothing;
     if (s.phase === 'unknown') {
       return html`<section class="wa-stack wa-gap-2xs efs-topic-broader" data-section="broader">
-        <p class="efs-quiet">${t('files.broader.unknown')}</p>
+        <efs-outcome
+          compact
+          .kind=${'read'}
+          .code=${'UNKNOWN'}
+          .reason=${s.reason?.code}
+          .unknownMessage=${'files.broader.unknown'}
+          .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
+          .translator=${this.host.translator}
+          retryable
+          @efs-retry=${() => this.#reload()}
+        ></efs-outcome>
       </section>`;
     }
     if (s.broader.length === 0 && s.narrower.length === 0) {
@@ -847,7 +857,17 @@ export class EfsFilesTopic extends EfsElement {
     if (!s) return nothing;
     if (s.phase === 'unknown') {
       return html`<section class="wa-stack wa-gap-2xs efs-topic-synonyms" data-section="synonyms">
-        <p class="efs-quiet">${t('files.synonyms.unknown')}</p>
+        <efs-outcome
+          compact
+          .kind=${'read'}
+          .code=${'UNKNOWN'}
+          .reason=${s.reason?.code}
+          .unknownMessage=${'files.synonyms.unknown'}
+          .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
+          .translator=${this.host.translator}
+          retryable
+          @efs-retry=${() => this.#reload()}
+        ></efs-outcome>
       </section>`;
     }
     if (s.places.length === 0 && s.words.length === 0) {

@@ -128,6 +128,14 @@ export interface TestChain {
     | {
         automine(on: boolean): Promise<void>;
         mine(blocks: number): Promise<void>;
+        /**
+         * Live only: the page's endpoint lags behind the block that included `tx`. `latest` (and
+         * `eth_blockNumber`) answer with the block before it, and `safe`/`finalized` never above
+         * it, until `catchUp()`. Every other call is served as usual (anvil keeps old state), so
+         * this is an endpoint that is behind, never one that lies about state.
+         */
+        lagBefore(tx: string): Promise<void>;
+        catchUp(): void;
       }
     | undefined;
   /** The next eth_sendTransaction is broadcast, but the page gets "connection lost" instead. */
@@ -267,6 +275,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   const drop: WalletBehaviour = { drop: false, refuse: new Set(), sends: 0 };
   /** The send to hold, and how to let it go. */
   let hold: { reached: () => void; released: Promise<void> } | undefined;
+  /** Live: the block the page's endpoint is stuck at (control.lagBefore), if it lags. */
+  let lagAt: bigint | undefined;
   /** Where the last holdNextSend() got to: a stuck test says which side stopped. */
   let holdState: 'none' | 'armed' | 'reached' | 'released' = 'none';
   /** Pages whose journal breaks once the next send is answered. */
@@ -303,6 +313,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     control = {
       automine: async (on) => replay.mark(`automine ${on}`),
       mine: async (blocks) => replay.mark(`mine ${blocks}`),
+      lagBefore: async () => {
+        throw new Error('a lagging endpoint is live only: replay serves recorded heads');
+      },
+      catchUp: () => undefined,
     };
     const gates = gatesOf(transcript);
     finish = async () => {
@@ -429,13 +443,23 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       mine: async (blocks) => {
         await rpc('anvil_mine', [`0x${blocks.toString(16)}`]);
       },
+      lagBefore: async (tx) => {
+        const receipt = (await rpc('eth_getTransactionReceipt', [tx])) as {
+          blockNumber?: string;
+        } | null;
+        if (!receipt?.blockNumber) throw new Error(`no receipt for ${tx}: not mined yet`);
+        lagAt = BigInt(receipt.blockNumber) - 1n;
+      },
+      catchUp: () => {
+        lagAt = undefined;
+      },
     };
     const toAnvil: FetchLike = (url, init) => fetch(url, init as RequestInit);
     const base = anvilWallet(rpc, account, drop);
     const record = CHAIN_MODE === 'record';
     const recorder = record ? createRecorder(toAnvil, base as never) : undefined;
     const send = recorder?.fetch ?? toAnvil;
-    answerRpc = async (body) => {
+    const forward = async (body: unknown): Promise<unknown> => {
       // The SDK's FetchLike: its recorder answers with text(), not json().
       const response = await send(chain.rpcUrl, {
         method: 'POST',
@@ -443,6 +467,35 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         body: JSON.stringify(body),
       });
       return JSON.parse(await response.text());
+    };
+    /** One request to an endpoint that is behind at `at` (control.lagBefore). */
+    const behind = async (
+      req: { id?: unknown; method?: string; params?: unknown[] },
+      at: bigint,
+    ) => {
+      const hex = `0x${at.toString(16)}`;
+      if (req.method === 'eth_blockNumber') return { jsonrpc: '2.0', id: req.id, result: hex };
+      const tag = req.params?.[0];
+      if (
+        req.method === 'eth_getBlockByNumber' &&
+        typeof tag === 'string' &&
+        !tag.startsWith('0x')
+      ) {
+        const asked = (await forward(req)) as { result?: { number?: string } | null };
+        const n = asked.result?.number ? BigInt(asked.result.number) : undefined;
+        // Never above the lag: `latest` and `pending` are the lagging head, safe and finalized
+        // are as they are unless they would be newer than it.
+        if (tag !== 'latest' && tag !== 'pending' && n !== undefined && n <= at) return asked;
+        return forward({ ...req, params: [hex, ...(req.params?.slice(1) ?? [])] });
+      }
+      return forward(req);
+    };
+    answerRpc = async (body) => {
+      const at = lagAt;
+      if (at === undefined) return forward(body);
+      const items = (Array.isArray(body) ? body : [body]) as { id?: unknown; method?: string }[];
+      const answers = await Promise.all(items.map((it) => behind(it, at)));
+      return Array.isArray(body) ? answers : answers[0];
     };
     askWallet = (r) => (recorder?.provider ?? base).request(r as never);
     // Head moves the page didn't make, marked where they happen (replay serves them in place).
@@ -474,6 +527,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         await controlOn?.mine(blocks);
         mark(`mine ${blocks}`);
       },
+      lagBefore: async (tx) => controlOn?.lagBefore(tx),
+      catchUp: () => controlOn?.catchUp(),
     };
     finish = async () => {
       try {
