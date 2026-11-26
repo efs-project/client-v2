@@ -524,3 +524,74 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await chain.finish();
   }
 });
+
+test('Name this tag: your name in your language, said public in the review; the title shows it; then remove it', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-name',
+    'c.txt tagged /photos/sunsets by anvil #0; anvil #6 (the wallet) names the tag, then removes its name.',
+  );
+  const naming = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
+  const title = topic(page).locator('.efs-topic-title');
+  try {
+    await taggedFile(chain, 0, 'c.txt', [['photos', 'sunsets']]);
+    await openRoot(page, chain);
+    await go(page, '#/r/testnet/photos/sunsets');
+    await expect(section(page, 'lens')).toHaveCount(1);
+    await settled(page);
+    await expect(title).toContainText('/photos/sunsets');
+    // Connected, with no name of yours yet: the button alone.
+    await expect(topic(page).locator('.efs-topic-mine')).toHaveCount(0);
+    await topic(page).locator('wa-button.efs-topic-name').click();
+    await expect(naming).toHaveAttribute('open', '');
+    await expect(naming.locator('wa-input.efs-label-text')).toHaveAttribute(
+      'label',
+      /Your name for\W+\/photos\/sunsets\W+in\W+English/,
+    );
+    await expect(naming.locator('wa-button.efs-label-remove')).toHaveCount(0);
+    await naming.locator('wa-input.efs-label-text input').fill('Sunset photos');
+    await naming.locator('wa-button.efs-label-review').click();
+    await expect(naming.locator('.efs-label-says')).toContainText(
+      /Name\W+\/photos\/sunsets\W+“\W*Sunset photos\W*”\W+in\W+English/,
+    );
+    await expect(naming.locator('.efs-label-public')).toContainText(
+      'Names are public and permanent',
+    );
+    await expect(naming.locator('wa-button.efs-folder-send')).toHaveText('Save the name');
+    chain.step('Name this tag: "Sunset photos" in English; the review says names are public');
+
+    await naming.locator('wa-button.efs-folder-send').click();
+    await expect(naming).not.toHaveAttribute('open');
+    await expect(title).toContainText('/photos/Sunset photos', { timeout: 20_000 });
+    await expect(topic(page).locator('.efs-topic-words')).toContainText('/photos/sunsets');
+    await expect(topic(page).locator('.efs-topic-mine')).toContainText(
+      /You call it\W+Sunset photos\W+in\W+English/,
+    );
+    await settled(page);
+    await expect(plansOf(page, 'efs-topic-tag-dialog')).toHaveAttribute('data-plans', '1');
+    chain.step('Send: the title shows your name; the words stay below it');
+
+    // Again: your name is offered to change, unchanged it can't be reviewed; Remove my name.
+    await topic(page).locator('wa-button.efs-topic-name').click();
+    await expect(naming.locator('wa-input.efs-label-text')).toHaveJSProperty(
+      'value',
+      'Sunset photos',
+    );
+    await expect(naming.locator('wa-button.efs-label-review')).toHaveAttribute('disabled', '');
+    await naming.locator('wa-button.efs-label-remove').click();
+    await expect(naming.locator('.efs-label-says')).toContainText(
+      /Your name for\W+\/photos\/sunsets\W+in\W+English\W+goes/,
+    );
+    await expect(naming.locator('wa-button.efs-folder-send')).toHaveText('Remove my name');
+    await naming.locator('wa-button.efs-folder-send').click();
+    await expect(naming).not.toHaveAttribute('open');
+    await expect(topic(page).locator('.efs-topic-mine')).toHaveCount(0, { timeout: 20_000 });
+    await expect(title).toContainText('/photos/sunsets');
+    await settled(page);
+    await chain.idle(500);
+    chain.step('Remove my name: one send; the title is the words again');
+  } finally {
+    await chain.finish();
+  }
+});

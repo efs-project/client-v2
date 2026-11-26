@@ -4,7 +4,7 @@
 import type { Efs, Lens } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
 import type { EntryRef, FolderPlanResult, FolderRef, ParentRef } from '@efs/sdk/files';
-import type { TagPlace, TagPlanResult, TagTarget } from '@efs/sdk/tags';
+import type { TagPlace, TagPlanResult, TagTarget, TopicStatementPlanResult } from '@efs/sdk/tags';
 import type { Place } from '../../shell/save-hold.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 
@@ -19,7 +19,7 @@ export type FolderPlanners = Pick<
   | 'planUnhideEntries'
   | 'planHideEntries'
 > &
-  Pick<typeof import('@efs/sdk/tags'), 'planTag' | 'planDeny' | 'planUntag'>;
+  Pick<typeof import('@efs/sdk/tags'), 'planTag' | 'planDeny' | 'planUntag' | 'planLabel'>;
 
 export type FolderRequest =
   | { readonly kind: 'createFolder'; readonly folder: ParentRef; readonly name: string }
@@ -71,6 +71,17 @@ export type FolderRequest =
       readonly targets: readonly TagTarget[];
       readonly stance: 'tag' | 'deny' | 'untag';
       readonly number?: number;
+    }
+  /**
+   * "Name this tag": the person's own name for a tag in one language (a label), or, with `remove`,
+   * taking theirs back. A statement about the tag, so it holds no folder name.
+   */
+  | {
+      readonly kind: 'label';
+      readonly place: readonly string[];
+      readonly lang: string;
+      readonly text?: string;
+      readonly remove?: boolean;
     };
 
 /**
@@ -134,13 +145,16 @@ export function placesOf(
     case 'hide':
       return known(r.entries.map((e) => at(e.folder, e.name)));
     case 'tag':
-      // A tag is a statement at a tag (or an address), never a folder entry: it holds no name.
+    case 'label':
+      // A tag (or a tag's name) is a statement about a tag or an address, never a folder entry:
+      // it holds no name.
       return [];
   }
 }
 
 export type AnyFolderPlan =
   | TagPlanResult
+  | TopicStatementPlanResult
   | FolderPlanResult<
       | import('@efs/sdk/files').CreateFileReview
       | import('@efs/sdk/files').CreateFolderReview
@@ -213,6 +227,16 @@ export function planRequest(
         ? planners.planDeny(efs, writer, at, o)
         : planners.planTag(efs, writer, at, o);
     }
+    case 'label':
+      // The writer's own name for the tag: no Lens decides it either.
+      return planners.planLabel(
+        efs,
+        writer,
+        r.remove
+          ? { topic: r.place, lang: r.lang, remove: true }
+          : { topic: r.place, lang: r.lang, text: r.text ?? '' },
+        o,
+      );
   }
 }
 
@@ -267,6 +291,9 @@ const REFUSAL: Readonly<Record<string, MessageId>> = {
   TARGET_ABSENT: 'files.refused.targetAbsent',
   UNCHANGED: 'files.refused.tagUnchanged',
   NOT_STATED: 'files.refused.notStated',
+  // A tag's name (planLabel answers with these codes, named apart from a tag's own).
+  LABEL_UNCHANGED: 'files.label.unchanged',
+  LABEL_NOT_STATED: 'files.label.notStated',
 };
 
 /** The words for a refusal code; an unknown code is shown raw, never as success. */

@@ -50,6 +50,12 @@
 - **"Block this name here"** on someone else's entry, offered only to the place's owner (the address, or a folder's creator), by the account that is connected: `planHideEntries`. The review names the entry and its author ("Block spam.txt by 0x12…ab here: it stops showing for you, and for anyone whose view puts you before 0x12…ab"), what shows afterwards, and that it's a block, not a deletion ("anyone who puts the author before you still sees the entry"). Once Saved the listing says "You blocked spam.txt here" with **Unblock** (`planUnhideEntries`); later, Show removed lists the block with Unblock. ALREADY_HIDDEN has its own words. It's offered on any row, "other" and invalid included: a block masks the name's place without reading what the entry points at (the SDK plans it from the Lens's heads there), and junk is what an owner most wants gone. The word "hide" is never used (A7).
 - **A file opened from a tag (or any file link) whose versions are all by people outside the view's Lens** is read in its own place, as a folder is: you, then its creator, then that Lens. It never reads "Confirmed not present" for that alone. A link carrying its own Lens is read in that Lens only.
 
+**Built ("Name this tag"):**
+- **On a tag's page, a connected person can name the tag in their language** (planLabel), or take their name back. The button shows once their own name there has been read (labelOf in a Lens of just them, in the reader's first language), with "You call it … in English." when they have one.
+- **The dialog** asks for "Your name for /photos/sunsets in English", checked as typed with the chain's text grammar (checkText: 1–255 bytes, no control or invisible characters), and says the name shows in place of the tag's last word for people whose view includes you, while the words and the link stay. Review is off while the name is unchanged; "Remove my name" is offered when there is one.
+- **The review says names are public and permanent** ("anyone can see that you named this tag, and every change is kept"), then one approval. Refusals have their own words: UNCHANGED ("You already call this tag that in this language") and NOT_STATED.
+- **After the save completes,** the page reads again and the title shows the name (topicName), with the words below it. A save is held by its (tag, language), the `tags.label` effect's key.
+
 **Build order:**
 - The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.
 - The file operations come first (`file-operations.md`).
