@@ -25,13 +25,14 @@ import { visibleText } from '../../ui/visible-text.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import type { EditDoneDetail } from './editor.ts';
 import { placeLens } from './folder-model.ts';
-import type { EfsFolderSave } from './folder-save.ts';
+import type { EfsFolderSave, FolderSavedDetail } from './folder-save.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
+import { pathText, wordText } from './topic-model.ts';
 import { authorLabel, shortId } from './who.ts';
 
 /**
@@ -94,8 +95,14 @@ export class EfsFilesPreview extends EfsElement {
     nav: { attribute: false },
     object: { attribute: false },
     composer: { attribute: false },
+    tagEdits: { attribute: false },
+    openTag: { attribute: false },
   };
   declare host: AppHost;
+  /** Moves each time a tag save from this tab settles: the file's Tags read again. */
+  declare tagEdits: ReadonlySignal<number> | undefined;
+  /** Opens a tag's own list (the plain tag for one word). */
+  declare openTag: ((words: readonly string[]) => void) | undefined;
   /** The new text file being written, if any: shown here instead of the route's link. */
   declare composer: Composer | undefined;
   /** What the route's object link names: a file is read here only once openObject says so. */
@@ -106,6 +113,10 @@ export class EfsFilesPreview extends EfsElement {
   declare target: ReadonlySignal<LinkState>;
 
   #state = state<PaneState | undefined>(undefined);
+  /** The tag just saved from this file's Tag dialog: "Tagged /my_notes", with where to go. */
+  #tagged = state<
+    { readonly link: string; readonly words: readonly string[]; readonly deny: boolean } | undefined
+  >(undefined);
   #run: OwnerScope | undefined;
   #scope: OwnerScope | undefined;
   #loaded: { efs: Efs; key: string } | undefined;
@@ -507,6 +518,54 @@ export class EfsFilesPreview extends EfsElement {
 
   /** The account of the last save from this pane (for "Show my version"). */
   #lastAccount: string | undefined;
+
+  /** A tag saved from this file's Tag dialog: say so, with the tag's page and its word page. */
+  #onTagged(event: Event, at: string): void {
+    const request = (event as CustomEvent<FolderSavedDetail>).detail.request;
+    if (request.kind !== 'tag' || request.stance === 'untag' || !Array.isArray(request.place)) {
+      return;
+    }
+    const words = request.place as readonly string[];
+    this.#tagged.set({ link: at, words, deny: request.stance === 'deny' });
+  }
+
+  #taggedNotice(at: string, t: Translator['t']) {
+    const tagged = this.#tagged.get();
+    if (!tagged || tagged.link !== at) return nothing;
+    const word = tagged.words.at(-1) ?? '';
+    return html`<wa-callout variant="success" size="small" class="efs-preview-tagged">
+      <span slot="icon">${appIcon('tag')}</span>
+      <div class="wa-stack wa-gap-xs">
+        <p role="status">
+          ${t(tagged.deny ? 'files.preview.deniedTag' : 'files.preview.tagged', {
+            path: pathText(tagged.words),
+          })}
+        </p>
+        <div class="wa-cluster wa-gap-xs">
+          <wa-button
+            size="s"
+            appearance="outlined"
+            class="efs-tagged-open"
+            @click=${() => this.openTag?.(tagged.words)}
+            >${t('files.preview.openTag')}</wa-button
+          >
+          <wa-button
+            size="s"
+            appearance="outlined"
+            class="efs-tagged-word"
+            @click=${() => {
+              try {
+                this.host.openLink(link({ kind: 'topic', segments: [word], words: [word] }));
+              } catch (error) {
+                console.error(error);
+              }
+            }}
+            >${t('files.preview.wordPage', { word: wordText(word) })}</wa-button
+          >
+        </div>
+      </div>
+    </wa-callout>`;
+  }
 
   #reload(force = false, allowOrigins?: readonly string[]): void {
     this.#load(verifiedEfs(this.host.reader.get()), this.target.get(), force, allowOrigins);
@@ -1029,7 +1088,9 @@ export class EfsFilesPreview extends EfsElement {
         .host=${this.host}
         .efs=${efs}
         .lens=${efs?.lens.default}
+        @efs-folder-saved=${(event: Event) => this.#onTagged(event, link.canonical)}
       ></efs-files-folder-save>
+      ${this.#taggedNotice(link.canonical, t)}
       ${
         reordered?.canonical === link.canonical
           ? html`<p class="efs-quiet efs-preview-reordered" role="status">
@@ -1054,6 +1115,7 @@ export class EfsFilesPreview extends EfsElement {
               .efs=${efs}
               .subject=${link.target.subject}
               .lens=${this.#viewLens(efs, link)}
+              .edits=${this.tagEdits}
             ></efs-files-file-tags>`
           : nothing
       }

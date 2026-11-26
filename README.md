@@ -22,9 +22,10 @@ To point a deployment at a network, replace `efs.config.json` beside `index.html
    - Rename it to `plan-v2.txt`.
    - Remove it: the listing says you removed it, with Restore.
    - Restore it: it's back.
-3. **A tag from the Preview** (as Satoshi): open `todo.txt` and choose Tag.
-   - Type `My Notes`; the picker says "Saved as /my_notes". Review, then Send.
-   - Open the word page `my_notes` (type it after `#/r/dev/` in the address bar), then its plain tag: todo.txt is "tagged by you". Remove my tag takes it back.
+3. **A tag from the Preview** (as Satoshi): open `todo.txt`, open its Tags (it lists `/notes/todo`), then choose Tag.
+   - Type `My Notes`; the picker says "Saved as /my_notes". Review, then Send. The Preview says "Tagged /my_notes", and the open Tags list shows it with no reload.
+   - From that notice, **Open the tag**: todo.txt is "tagged by you". (The notice's other link is the word page for `my_notes`.)
+   - Open todo.txt beside the list, then **Remove my tag**: its Tags no longer list `/my_notes`.
 4. **A file at an address** (as Satoshi): open Hal's address (the link printed above). New text file `hello-hal.txt` and save it: it's listed there as yours. As Hal, it reads as Satoshi's.
 5. **Kind filters** (any persona): with what they leave out counted.
    - In Notes/, Kind → Folders shows `drafts`, and the files are counted as hidden by the filter.

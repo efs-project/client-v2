@@ -84,6 +84,8 @@ export interface ComposeDetail {
 export interface FolderSavedDetail {
   readonly sequenceId: string;
   readonly ask: FolderAsk | undefined;
+  /** What was sent: a tag save's words and stance, for whoever shows or re-reads tags. */
+  readonly request: FolderRequest;
 }
 
 /** checkName, loaded with the SDK when a name is first asked for (the app entry stays SDK-free). */
@@ -765,7 +767,11 @@ export class EfsFolderSave extends EfsElement {
     this.host.saving.track(progress);
     this.dispatchEvent(
       new CustomEvent(FOLDER_SAVED_EVENT, {
-        detail: { sequenceId: progress.sequenceId, ask: this.#ask.get() },
+        detail: {
+          sequenceId: progress.sequenceId,
+          ask: this.#ask.get(),
+          request,
+        } satisfies FolderSavedDetail,
         bubbles: true,
         composed: true,
       }),

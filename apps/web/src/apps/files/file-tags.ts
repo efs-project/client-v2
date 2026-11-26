@@ -12,7 +12,7 @@ import type { Efs, Lens } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
 import type { ThingTagRow, ThingTagsPage, TopicCursor } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
-import { state } from '../../state/signals.ts';
+import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
@@ -59,6 +59,7 @@ export class EfsFileTags extends EfsElement {
     efs: { attribute: false },
     subject: { attribute: false },
     lens: { attribute: false },
+    edits: { attribute: false },
   };
   declare host: AppHost;
   declare efs: Efs | undefined;
@@ -66,6 +67,12 @@ export class EfsFileTags extends EfsElement {
   declare subject: string | undefined;
   /** The Lens the Preview reads in (the link's, or "you first"): tags are decided in the same. */
   declare lens: Lens | undefined;
+  /**
+   * Moves each time a tag save from this tab settles: what this section read may be stale, so it
+   * reads again now if open, or on its next opening (tag-edits.ts).
+   */
+  declare edits: ReadonlySignal<number> | undefined;
+  #editsSeen: number | undefined;
 
   #state = state<TagsState>({ phase: 'closed' });
   #paths = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
@@ -82,6 +89,13 @@ export class EfsFileTags extends EfsElement {
   }
 
   override updated(): void {
+    // A tag save settled: read again if open, else forget what was read (the next opening reads).
+    const edits = this.edits?.get();
+    if (edits !== this.#editsSeen) {
+      const first = this.#editsSeen === undefined;
+      this.#editsSeen = edits;
+      if (!first) this.#readAgain();
+    }
     // Another file: what was read is someone else's; the section closes again.
     const key = this.subject?.toLowerCase();
     if (key === this.#shown) return;
@@ -92,6 +106,16 @@ export class EfsFileTags extends EfsElement {
       this.#paths.set(new Map());
       const details = this.querySelector('details');
       if (details) details.open = false;
+    });
+  }
+
+  /** What was read may be stale: open, it reads again; closed, it reads when next opened. */
+  #readAgain(): void {
+    if (this.#state.get().phase === 'closed') return;
+    const open = this.querySelector('details')?.open === true;
+    queueMicrotask(() => {
+      if (open) void this.#load();
+      else this.#state.set({ phase: 'closed' });
     });
   }
 
@@ -239,6 +263,8 @@ export class EfsFileTags extends EfsElement {
 
   override render() {
     const t = this.host.translator.t.bind(this.host.translator);
+    // Read here so a settled tag save re-renders this section (updated() then reads again).
+    this.edits?.get();
     if (!this.subject) return nothing;
     return html`<details
       class="efs-file-tags"

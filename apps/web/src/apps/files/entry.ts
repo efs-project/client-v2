@@ -2,6 +2,7 @@
 // (overview / entries / preview) as plain data, so a configurable layout later is a settings
 // change. Loaded lazily by the shell; everything it starts belongs to the scope it is given.
 
+import { link as linkOf } from '@efs/sdk/links';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppEntry, AppHost, AppMount, PaneLayout, ViewDescriptor } from '../../shell/apps.ts';
 import { effect } from '../../state/effect.ts';
@@ -14,6 +15,7 @@ import { createFolderNav, type FolderNav } from './navigation.ts';
 import { type ObjectKindState, objectKindState } from './object-kind.ts';
 import type { EfsFilesOverview } from './overview.ts';
 import type { EfsFilesPreview } from './preview.ts';
+import { watchTagSaves } from './tag-edits.ts';
 import { type LinkState, linkState } from './target.ts';
 import type { EfsFilesTopic, PlaceLink, PlaceOpened } from './topic.ts';
 import type { EfsFilesTree } from './tree.ts';
@@ -46,6 +48,10 @@ interface Shared {
    * word page's "Open" on the plain tag, for as long as that tag is shown.
    */
   readonly plain: Signal.State<string | undefined>;
+  /** Moves each time a tag save from this tab settles: tag lists read again (tag-edits.ts). */
+  readonly tagEdits: ReadonlySignal<number>;
+  /** Opens a tag's own list: for one word, the plain tag rather than its word's page. */
+  readonly openTag: (words: readonly string[]) => void;
 }
 
 /** The Overview pane: the folder's README, or its summary. */
@@ -146,6 +152,8 @@ function preview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   element.nav = shared.nav;
   element.object = shared.object;
   element.composer = shared.composer;
+  element.tagEdits = shared.tagEdits;
+  element.openTag = shared.openTag;
   const link = shared.link;
   element.target = link;
   // Shared links are normalized (e.g. uppercase hex) to the SDK's canonical form, in place; so are
@@ -181,6 +189,26 @@ export const entry: AppEntry = {
       return l.status === 'target' && o && o.link === l.canonical ? o.place : undefined;
     });
     const composer = createComposer();
+    const plain = state<string | undefined>(undefined);
+    // A one-word tag opened for its own list: plain is set once the route shows it (setting it
+    // before would be cleared, since leaving the plain tag ends it).
+    let wantPlain: string | undefined;
+    const openTag = (words: readonly string[]) => {
+      wantPlain = words.length === 1 ? words[0] : undefined;
+      try {
+        host.openLink(linkOf({ kind: 'topic', segments: words, words }));
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    effect(scope, () => {
+      const p = place.get();
+      if (wantPlain === undefined || p?.status !== 'topic') return;
+      if (p.segments.length !== 1 || p.segments[0] !== wantPlain) return;
+      wantPlain = undefined;
+      const canonical = p.canonical;
+      queueMicrotask(() => plain.set(canonical));
+    });
     const shared: Shared = {
       nav,
       link,
@@ -189,7 +217,9 @@ export const entry: AppEntry = {
       shown: state<ListingState | undefined>(undefined),
       place,
       opened,
-      plain: state<string | undefined>(undefined),
+      plain,
+      tagEdits: watchTagSaves(host, scope),
+      openTag,
     };
     // A new file is written where it was started: leaving that place ends the composer (its text
     // stays kept, and the folder's listing offers it back).
