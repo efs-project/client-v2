@@ -4,10 +4,11 @@
 import { link } from '@efs/sdk/links';
 import type { AppHost } from '../../shell/apps.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
+import { visible } from '../../ui/visible-text.ts';
 import { shortId } from './editor.ts';
 import type { FolderNav } from './navigation.ts';
 import type { PlaceLink } from './topic.ts';
-import { wordText } from './topic-model.ts';
+import { wordShown } from './topic-model.ts';
 
 export type FilesViewKind = 'location';
 
@@ -50,7 +51,7 @@ export class EfsFilesView extends EfsElement {
     return [
       { name: t('files.topic.mark'), depth: 0, data: false, go: undefined },
       ...place.segments.map((word, i) => ({
-        name: wordText(word),
+        name: visible(wordShown(word), t),
         depth: i + 1,
         data: true,
         go: () => {
@@ -72,7 +73,8 @@ export class EfsFilesView extends EfsElement {
     const path = this.nav.path.get();
     const base = this.nav.base.get();
     const crumbs: {
-      readonly name: string;
+      /** Text, or a tag word with its hidden code points as pills (ui/visible-text.ts). */
+      readonly name: unknown;
       readonly depth: number;
       readonly data: boolean;
       readonly go: (() => void) | undefined;

@@ -434,7 +434,7 @@ describe('"Include tags that mean the same": a merged page, where each row came 
       viaLine({ place: BELOW as `0x${string}`, how: 'same', hops: 1 }, asked, ['autos', 'tesla']),
     ).toEqual({
       kind: 'same',
-      path: '/autos/tesla',
+      path: ['/autos/tesla'],
     });
     expect(
       viaLine({ place: BELOW as `0x${string}`, how: 'swap', hops: 1 }, asked, ['cars', 'tsla']),

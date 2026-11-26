@@ -239,11 +239,17 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     // parseLink runs the chain's word grammar): they are shown, never applied, and the sentence
     // reads in order.
     await go(page, '#/r/testnet/a%E2%80%AEb%E2%80%8Dc');
-    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('a[U+202E]b[U+200D]c');
+    // Each hidden code point is its own pill element (read as "hidden character U+202E").
+    const pills = invalid.locator('bdi.efs-bad-word .efs-hidden-char');
+    await expect(pills).toHaveCount(2);
+    await expect(pills.first()).toHaveText('U+202E');
+    // MF2 isolates the argument, so the name is matched by pattern.
+    await expect(pills.first()).toHaveAttribute('aria-label', /^hidden character\W+U\+202E\W*$/);
+    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('aU+202EbU+200Dc');
     const said = (await invalid.locator('p').textContent()) ?? '';
     expect(said).not.toMatch(/[\u202E\u200D]/);
     expect(said.replace(/\s+/g, ' ').trim()).toBe(
-      "This link names a tag with a word the network doesn't accept: a[U+202E]b[U+200D]c (a character a tag word can't hold)",
+      "This link names a tag with a word the network doesn't accept: aU+202EbU+200Dc (a character a tag word can't hold)",
     );
     // Never a word page for a word the chain can't hold.
     await expect(page.locator('efs-files-word:not([hidden])')).toHaveCount(0);
@@ -498,6 +504,10 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
     await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
     // A word a ruling on the tag text rule could change waits for that ruling.
+    // A word with a bidi override is refused, and the override is one pill, never applied.
+    await path.fill('a\u202Eb');
+    await expect(d.locator('.efs-tag-refused .efs-hidden-char')).toHaveCount(1);
+    await expect(d.locator('.efs-tag-refused .efs-hidden-char')).toHaveText('U+202E');
     await path.fill('École');
     await expect(d.locator('.efs-tag-unstable')).toContainText(
       /This word can't be used until the tag text rule is chosen:\W+École/,
@@ -634,10 +644,11 @@ test('Name this tag: your name in your language, said public in the review; the 
       /Your name for\W+\/photos\/sunsets\W+in\W+English/,
     );
     await expect(naming.locator('wa-button.efs-label-remove')).toHaveCount(0);
-    await naming.locator('wa-input.efs-label-text input').fill('Sunset photos');
+    // A literal "[U+202E]" in a label is text, never a hidden character: no pill.
+    await naming.locator('wa-input.efs-label-text input').fill('Sunset photos [U+202E]');
     await naming.locator('wa-button.efs-label-review').click();
     await expect(naming.locator('.efs-label-says')).toContainText(
-      /Name\W+\/photos\/sunsets\W+“\W*Sunset photos\W*”\W+in\W+English/,
+      /Name\W+\/photos\/sunsets\W+“\W*Sunset photos \[U\+202E\]\W*”\W+in\W+English/,
     );
     await expect(naming.locator('.efs-label-public')).toContainText(
       'Names are public and permanent',
@@ -647,10 +658,11 @@ test('Name this tag: your name in your language, said public in the review; the 
 
     await naming.locator('wa-button.efs-folder-send').click();
     await expect(naming).not.toHaveAttribute('open');
-    await expect(title).toContainText('/photos/Sunset photos', { timeout: 20_000 });
+    await expect(title).toContainText('/photos/Sunset photos [U+202E]', { timeout: 20_000 });
+    await expect(title.locator('.efs-hidden-char')).toHaveCount(0);
     await expect(topic(page).locator('.efs-topic-words')).toContainText('/photos/sunsets');
     await expect(topic(page).locator('.efs-topic-mine')).toContainText(
-      /You call it\W+Sunset photos\W+in\W+English/,
+      /You call it\W+Sunset photos \[U\+202E\]\W+in\W+English/,
     );
     await settled(page);
     await expect(plansOf(page, 'efs-topic-tag-dialog')).toHaveAttribute('data-plans', '1');
@@ -660,7 +672,7 @@ test('Name this tag: your name in your language, said public in the review; the 
     await topic(page).locator('wa-button.efs-topic-name').click();
     await expect(naming.locator('wa-input.efs-label-text')).toHaveJSProperty(
       'value',
-      'Sunset photos',
+      'Sunset photos [U+202E]',
     );
     await expect(naming.locator('wa-button.efs-label-review')).toHaveAttribute('disabled', '');
     await naming.locator('wa-button.efs-label-remove').click();

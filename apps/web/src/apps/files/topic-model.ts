@@ -27,7 +27,13 @@ import type {
   TopicRow,
   TopicView,
 } from '@efs/sdk/tags';
-import { visibleText } from '../../ui/visible-text.ts';
+import {
+  plainVisible,
+  type VisiblePart,
+  type VisibleParts,
+  visibleText,
+  wordParts,
+} from '../../ui/visible-text.ts';
 
 /** The views, in the order the control offers them. Everyone is the default for tags (D11). */
 export const TOPIC_VIEWS: readonly TopicView[] = ['mine', 'everyone', 'raw'];
@@ -157,7 +163,7 @@ export function viaLine(
   asked: readonly string[],
   words: readonly string[] | null | undefined,
 ):
-  | { readonly kind: 'same'; readonly path: string }
+  | { readonly kind: 'same'; readonly path: VisibleParts }
   | { readonly kind: 'word'; readonly word: string }
   | undefined {
   if (via.how === 'self') return undefined;
@@ -166,7 +172,7 @@ export function viaLine(
     const swapped = words.find((w, i) => w !== asked[i]);
     if (swapped !== undefined) return { kind: 'word', word: swapped };
   }
-  return { kind: 'same', path: pathText(words) };
+  return { kind: 'same', path: pathParts(words) };
 }
 
 /** The list after a page: the first page, or `before` with the next page's rows appended. */
@@ -270,18 +276,41 @@ export function rowWho(
   return { kind: 'raw', yes: row.yes, statements: row.statements };
 }
 
-/** A topic's path as shown: `/cars/tesla`. Each word is shown as stored (no fold here). */
+/** A topic's path as plain text, `/cars/tesla` (hidden code points as "[U+XXXX]"): attributes and the title. */
 export function pathText(words: readonly string[]): string {
-  return `/${words.map(wordText).join('/')}`;
+  return plainVisible(pathParts(words));
 }
 
 /**
- * One tag word as shown: a word from a link or a typed path may hold what a word must not (a bidi
- * override, an invisible character): those show as "[U+202E]" and the word is capped
- * (ui/visible-text.ts). Every tag word displayed goes through this or pathText.
+ * A tag's path as shown: each word as wordParts shows it (ui/visible-text.ts), so a hidden code
+ * point in a word from a link or a typed path is a pill, never applied. pathText is its plain form,
+ * for attributes and the title.
  */
+export function pathParts(words: readonly string[]): VisibleParts {
+  const parts: VisiblePart[] = [];
+  for (const word of words) parts.push('/', ...wordParts(word));
+  return parts.length > 0 ? joinText(parts) : ['/'];
+}
+
+/** One tag word as shown (parts); wordText is its plain form. */
+export function wordShown(word: string): VisibleParts {
+  return wordParts(word);
+}
+
+/** One tag word's plain form: hidden code points as "[U+XXXX]" (attributes, the title). */
 export function wordText(word: string): string {
   return visibleText(word);
+}
+
+/** Adjacent text runs joined. */
+function joinText(parts: readonly VisiblePart[]): VisibleParts {
+  const out: VisiblePart[] = [];
+  for (const p of parts) {
+    const last = out.at(-1);
+    if (typeof p === 'string' && typeof last === 'string') out[out.length - 1] = last + p;
+    else out.push(p);
+  }
+  return out;
 }
 
 /**

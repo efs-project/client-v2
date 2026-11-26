@@ -470,3 +470,21 @@ span.efs-entry-open {
 .efs-topic-not-address {
   margin: 0;
 }
+
+/* A hidden code point shown, never applied (ui/visible-text.ts): its own element, so no text can
+   pass for one. Text keeps the surrounding colour (its contrast is the text's). The outline is what
+   tells a pill apart, a non-text indicator needing 3:1 (WCAG 1.4.11) on every surface a pill sits
+   on: quiet text's colour gives 5.4:1 or more in both themes and schemes, and more contrast makes it
+   the text colour. (The loud neutral border measured 2.3–3.0:1.) a11y-writes.spec.ts asserts it. */
+.efs-hidden-char {
+  display: inline-block;
+  margin-inline: 0.1em;
+  padding-inline: 0.25em;
+  border: var(--wa-border-width-s) solid var(--wa-color-text-quiet);
+  border-radius: var(--wa-border-radius-s);
+  font-family: var(--wa-font-family-code);
+  font-size: 0.8em;
+  line-height: 1.3;
+  white-space: nowrap;
+  unicode-bidi: isolate;
+}

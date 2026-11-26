@@ -16,9 +16,10 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { visible } from '../../ui/visible-text.ts';
 import { readerOf } from './object-kind.ts';
 import { whoLine } from './topic.ts';
-import { pathText } from './topic-model.ts';
+import { pathParts } from './topic-model.ts';
 import { shortId } from './who.ts';
 
 const loadTags = async () => import('@efs/sdk/tags');
@@ -172,7 +173,7 @@ export class EfsFileTags extends EfsElement {
       this.efs && readerOf(this.host)
         ? this.efs.lens.principalOf(readerOf(this.host) as never)
         : undefined;
-    const label = words ? pathText(words) : shortId(row.topic);
+    const label = words ? visible(pathParts(words), t) : shortId(row.topic);
     const open = () => {
       if (!words) return;
       try {
