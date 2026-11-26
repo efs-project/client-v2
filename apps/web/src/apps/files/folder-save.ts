@@ -36,6 +36,7 @@ import { EfsElement, html, live, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { pressedOnce } from '../../ui/press-once.ts';
+import { labelText } from '../../ui/visible-text.ts';
 import { approvalsLine } from './approvals.ts';
 import { attachNotice } from './attach-notice.ts';
 import type { PickerSelection } from './folder-picker.ts';
@@ -1604,7 +1605,7 @@ export class EfsFolderSave extends EfsElement {
             ${
               r.text === undefined
                 ? t('files.label.reviewRemove', args)
-                : t('files.label.review', { ...args, name: r.text })
+                : t('files.label.review', { ...args, name: labelText(r.text) })
             }
           </p>
           <p class="efs-quiet efs-label-public">${t('files.label.public')}</p>`;

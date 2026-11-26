@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { visibleText } from './visible-text.ts';
+import { LABEL_MAX_BYTES, labelText, visibleText } from './visible-text.ts';
 
 describe('visibleText', () => {
   it('shows a bidi override and a zero-width joiner instead of applying them', () => {
@@ -31,5 +31,29 @@ describe('visibleText', () => {
     expect(visibleText('e\u0301\u0301\u0301\u0301f')).toBe('e\u0301\u0301[U+0301][U+0301]f');
     // A single accent (a decomposed é) stays as it is.
     expect(visibleText('e\u0301')).toBe('e\u0301');
+  });
+});
+
+describe('labelText (a tag label: its display name)', () => {
+  it('leaves a label exactly as written: Persian with a ZWNJ, French with a no-break space', () => {
+    const persian = 'عکس\u200Cهای غروب';
+    const french = 'Photos\u00A0: coucher de soleil';
+    expect(labelText(persian)).toBe(persian);
+    expect(labelText(french)).toBe(french);
+    expect(labelText('Sunset photos 🌅 [1]')).toBe('Sunset photos 🌅 [1]');
+    expect(labelText('e\u0301\u0301\u0301')).toBe('e\u0301\u0301\u0301');
+  });
+
+  it('shows a bidi override, a C1 control and a noncharacter, never applies them', () => {
+    expect(labelText('a\u202Eb')).toBe('a[U+202E]b');
+    expect(labelText('a\u0085b')).toBe('a[U+0085]b');
+    expect(labelText('a\uFFFEb\u2067c\u061Cd')).toBe('a[U+FFFE]b[U+2067]c[U+061C]d');
+  });
+
+  it("is capped at the chain's 255 bytes, never splitting a character", () => {
+    expect(labelText('a'.repeat(300))).toBe(`${'a'.repeat(LABEL_MAX_BYTES)}…`);
+    // 85 three-byte characters are 255 bytes; an 86th doesn't fit.
+    expect(labelText('日'.repeat(86))).toBe(`${'日'.repeat(85)}…`);
+    expect(labelText('日'.repeat(85))).toBe('日'.repeat(85));
   });
 });

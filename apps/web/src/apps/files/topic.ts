@@ -34,6 +34,7 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { labelText } from '../../ui/visible-text.ts';
 import type { EfsFolderSave } from './folder-save.ts';
 import {
   languageName,
@@ -1146,10 +1147,10 @@ export class EfsFilesTopic extends EfsElement {
   #shownPath(words: readonly string[]): string {
     const named = this.#segments.get();
     if (!named || named.length !== words.length) return pathText(words);
-    // A word is escaped as words are (wordText); a label (its display name, "Sunset photos") is
-    // not: the chain's text grammar already refuses controls and invisibles in labels, and
-    // spaces there are its own. It stays inside the message's own bidi isolate.
-    return `/${named.map((x) => (x.source === 'none' ? wordText(x.name) : x.name)).join('/')}`;
+    // A word is escaped as words are (wordText); a label (its display name, "Sunset photos") gets
+    // the lighter labelText: only controls, bidi controls and noncharacters are shown, since a
+    // label's spaces, joiners and marks are its own. It stays inside the message's bidi isolate.
+    return `/${named.map((x) => (x.source === 'none' ? wordText(x.name) : labelText(x.name))).join('/')}`;
   }
 
   #header(place: PlaceLink, t: Translator['t']) {
@@ -1236,7 +1237,7 @@ export class EfsFilesTopic extends EfsElement {
         mine
           ? html`<span class="efs-quiet efs-topic-mine"
               >${t('files.label.mine', {
-                name: mine,
+                name: labelText(mine),
                 lang: languageName(this.#lang(), this.host.translator.locale),
               })}</span
             >`
