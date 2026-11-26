@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { press } from './press.ts';
 import {
   booted,
   distFiles,
@@ -48,7 +49,7 @@ test('the route names the app; unknown apps get an honest message', async ({ pag
   const main = page.getByRole('main');
   await expect(main).toContainText("This link names an app this client doesn't have");
   await expect(main.locator('code')).toHaveText('no-such-app');
-  await main.getByRole('link', { name: 'Open the File Browser' }).click();
+  await press(main.getByRole('link', { name: 'Open the File Browser' }));
   await expect(page.locator('efs-pane-host')).toBeVisible();
   // Home: the default realm's root, or (as here, with no networks) the bare root.
   expect(new URL(page.url()).hash).toBe('#/');

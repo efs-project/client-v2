@@ -16,6 +16,7 @@ import {
   sendRequests,
   start,
 } from './edit-support.ts';
+import { press } from './press.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -55,14 +56,14 @@ test('an edit kept while away keeps its base: the file changed meanwhile, so Rev
     await expect(editor(page).locator('.efs-edit-kept')).toContainText(
       'This file has changed since you started it',
     );
-    await page.locator('wa-button.efs-edit-review-button').click();
+    await press(page.locator('wa-button.efs-edit-review-button'));
     chain.step('Review: BASE_CHANGED (planned from the version the edit started on)');
     const changed = editor(page).locator('.efs-edit-base-changed');
     await expect(changed).toContainText('This file changed since you opened it');
     expect(sendRequests(chain)).toHaveLength(0);
-    await changed.locator('wa-button.efs-edit-save-over').click();
+    await press(changed.locator('wa-button.efs-edit-save-over'));
     chain.step('Save my edit over the new version: planned from the new head');
-    await reviewDialog(page).locator('wa-button.efs-review-send').click();
+    await press(reviewDialog(page).locator('wa-button.efs-review-send'));
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
     // Saved, so not unsaved: leaving and coming back opens the file, not the editor.
@@ -93,30 +94,30 @@ test('"Review changes" asks before replacing a newer unsaved edit of the same fi
     await expect(review).toContainText('2 approvals in your wallet');
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_CAS)');
     const changed = save(page, 'changed');
     await expect(changed).toContainText('This file changed while your edit was saving');
 
     // A newer edit of the same file, left unsaved while another app is open.
-    await preview(page).locator('wa-button.efs-edit-start').click();
+    await press(preview(page).locator('wa-button.efs-edit-start'));
     await textarea(page).fill('A newer edit.\n');
     await leave(page);
     chain.step('Start a newer edit of the file; leave it unsaved');
 
-    await changed.locator('wa-button.efs-save-reopen').click();
+    await press(changed.locator('wa-button.efs-save-reopen'));
     await expect(changed.locator('.efs-save-confirm')).toContainText(
       'You have a newer unsaved edit of this file',
     );
-    await changed.locator('wa-button.efs-save-keep-unsaved').click();
+    await press(changed.locator('wa-button.efs-save-keep-unsaved'));
     await expect(changed.locator('.efs-save-confirm')).toHaveCount(0);
     chain.step('Review changes → Keep my newer edit: nothing stopped, nothing replaced');
     await page.goBack();
     await expect(textarea(page)).toHaveValue('A newer edit.\n');
     await expect(save(page, 'changed')).toHaveCount(1);
 
-    await changed.locator('wa-button.efs-save-reopen').click();
-    await changed.locator('wa-button.efs-save-replace').click();
+    await press(changed.locator('wa-button.efs-save-reopen'));
+    await press(changed.locator('wa-button.efs-save-replace'));
     chain.step('Review changes → Replace my newer edit: abandon the old save, reopen its edit');
     await expect(editor(page).locator('.efs-edit-reopened')).toBeVisible();
     await expect(textarea(page)).toHaveValue(LARGE);
@@ -149,13 +150,13 @@ test('"you first": a guest\'s edit keeps the version it started from when connec
     );
     chain.step('Connect as #6: the view puts its own version first; the edit is unchanged');
 
-    await page.locator('wa-button.efs-edit-review-button').click();
+    await press(page.locator('wa-button.efs-edit-review-button'));
     const reordered = editor(page).locator('.efs-edit-reordered');
     await expect(reordered).toContainText(
       'You connected, and this view now shows your own version first.',
     );
     await expect(editor(page)).not.toContainText('This file changed since you opened it');
-    await reordered.locator('wa-button.efs-edit-keep-started').click();
+    await press(reordered.locator('wa-button.efs-edit-keep-started'));
     await expect(reordered).toHaveCount(0);
     await expect(textarea(page)).toHaveValue('Edited as a guest.\n');
     expect(sendRequests(chain)).toHaveLength(0);
@@ -163,12 +164,12 @@ test('"you first": a guest\'s edit keeps the version it started from when connec
       'Review: a reorder, not a change; keep editing the version started from: nothing sent',
     );
 
-    await page.locator('wa-button.efs-edit-review-button').click();
-    await editor(page).locator('.efs-edit-reordered wa-button.efs-edit-save-over-mine').click();
+    await press(page.locator('wa-button.efs-edit-review-button'));
+    await press(editor(page).locator('.efs-edit-reordered wa-button.efs-edit-save-over-mine'));
     const review = reviewDialog(page);
     await expect(review).toHaveAttribute('open', '');
     await expect(review).not.toContainText("You're editing another author's version.");
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     await expect(preview(page).locator('.efs-preview-text')).toHaveText('Edited as a guest.\n');
     expect(sendRequests(chain)).toHaveLength(1);

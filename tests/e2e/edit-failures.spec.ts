@@ -19,6 +19,7 @@ import {
   sendsStarted,
   start,
 } from './edit-support.ts';
+import { press } from './press.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -39,7 +40,7 @@ test('a lost wallet answer in the same tab is settled from the ledger: one send'
     await start(page, chain);
     const review = await editAndReview(page, chain, 'Lost answer, same tab.\n');
     chain.dropNextSendResponse();
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: broadcast, answer lost (AMBIGUOUS); the SDK checks the ledger: committed');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
@@ -59,12 +60,12 @@ test('storage lost right after a send: "couldn\'t confirm", saving paused, never
     await start(page, chain);
     const review = await editAndReview(page, chain, 'Storage lost after send.\n');
     await chain.breakJournalAfterSend(page);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: broadcast; the journal write after it fails (thrown, may have sent)');
     await expect(review.locator('.efs-review-unconfirmed')).toContainText(
       "We couldn't confirm this save yet.",
     );
-    await review.locator('wa-button[slot="footer"]').click();
+    await press(review.locator('wa-button[slot="footer"]'));
     // No new send while it's unconfirmed: the editor holds, whatever the hold says.
     await expect(editor(page).locator('.efs-edit-blocked')).toBeVisible();
     await expect(page.locator('wa-button.efs-edit-review-button')).toHaveAttribute('disabled', '');
@@ -87,7 +88,7 @@ test('my own version changed before Send (E_CAS): told first, then one send', as
     const review = await editAndReview(page, chain, 'Mine, from this tab.\n');
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step(
       'Send: refused before the wallet (E_CAS); dropped; planned again: own version changed',
     );
@@ -96,8 +97,8 @@ test('my own version changed before Send (E_CAS): told first, then one send', as
       'Your own version of this file changed since you opened it',
     );
     expect(sendRequests(chain), 'nothing was sent').toHaveLength(0);
-    await changed.locator('wa-button.efs-edit-save-over').click();
-    await reviewDialog(page).locator('wa-button.efs-review-send').click();
+    await press(changed.locator('wa-button.efs-edit-save-over'));
+    await press(reviewDialog(page).locator('wa-button.efs-review-send'));
     chain.step('Save my edit over the new version, Send');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
@@ -118,13 +119,13 @@ test("my own version changed before Send, in a sharer's Lens: told first, then s
     const review = await editAndReview(page, chain, 'Mine, from this tab.\n', true);
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     await expect(editor(page).locator('.efs-edit-own-changed')).toContainText(
       'Your own version of this file changed since you opened it',
     );
     expect(sendRequests(chain), 'nothing was sent').toHaveLength(0);
-    await editor(page).locator('.efs-edit-own-changed wa-button[variant="brand"]').click();
-    await reviewDialog(page).locator('wa-button.efs-review-send').click();
+    await press(editor(page).locator('.efs-edit-own-changed wa-button[variant="brand"]'));
+    await press(reviewDialog(page).locator('wa-button.efs-review-send'));
     chain.step('Review and save anyway, Send');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
@@ -146,11 +147,11 @@ test('a part declined mid-save: "You declined part 2", Continue finishes it, eac
     const review = await openReview(page, chain);
     await expect(review).toContainText('2 approvals in your wallet');
     chain.refuseSend(2);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: part 1 approved and sent; part 2 declined (4001)');
     const declined = save(page, 'declined');
     await expect(declined).toContainText(/You declined part .*2.* in your wallet/);
-    await declined.locator('wa-button.efs-save-continue').click();
+    await press(declined.locator('wa-button.efs-save-continue'));
     chain.step('Continue: resume sends part 2');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(3);
@@ -172,7 +173,7 @@ test('"Continue to finish" pressed twice before the banner catches up resumes on
     await editAndConnect(page, chain, LARGE);
     const review = await openReview(page, chain);
     chain.refuseSend(2);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: part 1 approved and sent; part 2 declined (4001)');
     const declined = save(page, 'declined');
     await expect(declined).toContainText(/You declined part .*2.* in your wallet/);
@@ -205,11 +206,11 @@ test('the finishing part loses a race (PARTIAL + E_CAS): "changed", Review chang
     // it needed), so the first part (content only) still lands and the bind loses the race.
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_CAS)');
     const changed = save(page, 'changed');
     await expect(changed).toContainText('This file changed while your edit was saving');
-    await changed.locator('wa-button.efs-save-reopen').click();
+    await press(changed.locator('wa-button.efs-save-reopen'));
     chain.step('Review changes: abandon the old save, reopen the editor with the draft');
     await expect(editor(page).locator('.efs-edit-reopened')).toBeVisible();
     await expect(page.locator('textarea.efs-edit-text')).toHaveValue(LARGE);
@@ -225,7 +226,7 @@ test("a second tab waits for the first tab's save, and never sends meanwhile", a
 }) => {
   const chain = await testChain(
     'client-two-tabs',
-    "Two tabs edit as anvil #6. Tab 1 sends and its wallet request stays open; tab 2's Review re-lists the journal, finds tab 1's save in flight and holds. Tab 1 completes: Saved · confirming. Tab 2 made no send.",
+    "Two tabs edit as anvil #6. Tab 1 sends and its wallet request stays open. Tab 2 opens: its own journal check lists tab 1's save in flight, so once connected its Review already waits, disabled. Tab 1 completes: Saved · confirming. Tab 2 made no send.",
   );
   try {
     const one = await context.newPage();
@@ -233,19 +234,72 @@ test("a second tab waits for the first tab's save, and never sends meanwhile", a
     await start(one, chain);
     const review = await editAndReview(one, chain, 'From tab one.\n');
     const held = chain.holdNextSend();
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     await held.reached;
     chain.step('Tab 1: Send; its wallet request stays open');
     await start(two, chain);
     await editAndConnect(two, chain, 'From tab two.\n');
-    await two.locator('wa-button.efs-edit-review-button').click();
-    chain.step("Tab 2: Review re-lists the journal: tab 1's save is in flight");
+    // Never pressed: tab 2's journal check, as the tab loaded, already found tab 1's save (the
+    // re-list at Review is the next case's).
     await expect(editor(two).locator('.efs-edit-blocked')).toHaveAttribute('data-hold', 'waiting');
+    await expect(two.locator('wa-button.efs-edit-review-button')).toHaveJSProperty(
+      'disabled',
+      true,
+    );
+    chain.step("Tab 2: its journal check lists tab 1's save in flight; Review waits, disabled");
     await expect(reviewDialog(two)).toHaveCount(0);
     const sendsBefore = sendRequests(chain).length;
     held.release();
     chain.step('Tab 1: the wallet answers; the save lands');
     await expect(save(one, 'confirming')).toContainText('Saved · confirming');
+    // Both tabs' last reads (the file again, after the save) answered before the case ends.
+    await chain.idle(500);
+    expect(sendRequests(chain).length, 'tab 2 sent nothing').toBe(sendsBefore);
+    expect(sendRequests(chain)).toHaveLength(1);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("a tab open before another tab's send finds it at Review, and never sends meanwhile", async ({
+  context,
+}) => {
+  const chain = await testChain(
+    'client-two-tabs-relist',
+    "Two tabs edit as anvil #6. Tab 2 opens, edits and connects first: its journal check finds nothing, and Review is enabled. Tab 1 sends and its wallet request stays open. Tab 2's Review re-lists the journal, finds tab 1's save in flight and holds. Tab 1 completes: Saved · confirming. Tab 2 made no send.",
+  );
+  try {
+    const one = await context.newPage();
+    const two = await context.newPage();
+    await start(two, chain);
+    await editAndConnect(two, chain, 'From tab two.\n');
+    await expect(editor(two).locator('.efs-edit-blocked')).toHaveCount(0);
+    await expect(two.locator('wa-button.efs-edit-review-button')).toHaveJSProperty(
+      'disabled',
+      false,
+    );
+    chain.step('Tab 2: edits and connects first; nothing is in flight, Review is enabled');
+    await start(one, chain);
+    const review = await editAndReview(one, chain, 'From tab one.\n');
+    const held = chain.holdNextSend();
+    await press(review.locator('wa-button.efs-review-send'));
+    await held.reached;
+    chain.step('Tab 1: Send; its wallet request stays open');
+    // Tab 2 learned nothing meanwhile: only its Review's re-list can find tab 1's save.
+    await press(two.locator('wa-button.efs-edit-review-button'));
+    chain.step("Tab 2: Review re-lists the journal: tab 1's save is in flight");
+    await expect(editor(two).locator('.efs-edit-blocked')).toHaveAttribute('data-hold', 'waiting');
+    await expect(two.locator('wa-button.efs-edit-review-button')).toHaveJSProperty(
+      'disabled',
+      true,
+    );
+    await expect(reviewDialog(two)).toHaveCount(0);
+    const sendsBefore = sendRequests(chain).length;
+    held.release();
+    chain.step('Tab 1: the wallet answers; the save lands');
+    await expect(save(one, 'confirming')).toContainText('Saved · confirming');
+    // Both tabs' last reads (the file again, after the save) answered before the case ends.
+    await chain.idle(500);
     expect(sendRequests(chain).length, 'tab 2 sent nothing').toBe(sendsBefore);
     expect(sendRequests(chain)).toHaveLength(1);
   } finally {
@@ -264,13 +318,13 @@ test('the wallet switched networks before Send: "switch back", then Send again, 
     await start(page, chain);
     const review = await editAndReview(page, chain, 'Wallet switched away and back.\n');
     chain.walletChainId('0x1');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: the wallet is on chain 1: NOT_SENT (WALLET_MISMATCH)');
     await expect(review.locator('.efs-review-not-sent')).toContainText(
       /Switch your wallet to .* on .*Testnet.* to continue/,
     );
     chain.walletChainId(undefined);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('The wallet is back; Send again (resume)');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'broadcast once').toHaveLength(1);
@@ -291,13 +345,13 @@ test('the file changed under another author: told, then "save over the new versi
     await editAndConnect(page, chain, 'My edit over theirs.\n');
     await chain.editAs?.(0, 'The author changed it.\n');
     chain.step("Elsewhere: the file's author (#0) saves a new version");
-    await page.locator('wa-button.efs-edit-review-button').click();
+    await press(page.locator('wa-button.efs-edit-review-button'));
     chain.step('Review: BASE_CHANGED (the head in this view moved)');
     const changed = editor(page).locator('.efs-edit-base-changed');
     await expect(changed).toContainText('This file changed since you opened it');
-    await changed.locator('wa-button.efs-edit-save-over').click();
+    await press(changed.locator('wa-button.efs-edit-save-over'));
     chain.step('Save my edit over the new version: planned from the new head');
-    await reviewDialog(page).locator('wa-button.efs-review-send').click();
+    await press(reviewDialog(page).locator('wa-button.efs-review-send'));
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
     await expect(preview(page)).toBeVisible();

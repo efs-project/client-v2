@@ -8,6 +8,7 @@ import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import { expect, preview, save } from './edit-support.ts';
 import { fileAtRoot, openRoot, row } from './folder-support.ts';
+import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -121,48 +122,48 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     chain.step('cars/tesla: Everyone, the Lens row named, the public row labelled and filed below');
 
     await settled(page);
-    await radio(page, 'scope', 'here').click();
+    await press(radio(page, 'scope', 'here'));
     await expect(section(page, 'public')).toHaveCount(0);
     await expect(section(page, 'lens')).toHaveCount(1);
     chain.step('Only here: the row filed below leaves');
 
     await settled(page);
-    await radio(page, 'scope', 'below').click();
+    await press(radio(page, 'scope', 'below'));
     await settled(page);
-    await radio(page, 'view', 'mine').click();
+    await press(radio(page, 'view', 'mine'));
     await expect(section(page, 'lens')).toHaveCount(1);
     await expect(section(page, 'public')).toHaveCount(0);
     chain.step('People I trust: the Lens row only');
 
     await settled(page);
-    await radio(page, 'view', 'raw').click();
+    await press(radio(page, 'view', 'raw'));
     await expect(section(page, 'raw')).toHaveCount(2);
     await expect(section(page, 'raw').first()).toContainText(/1 of 1 say it applies/);
     chain.step('Unfiltered: every row, with its counts');
 
     // A public-tier row opens behind the media gate; the list stays beside it.
     await settled(page);
-    await radio(page, 'view', 'everyone').click();
+    await press(radio(page, 'view', 'everyone'));
     await expect(section(page, 'public')).toHaveCount(1);
     await settled(page);
-    await section(page, 'public').locator('button.efs-entry-open').click();
+    await press(section(page, 'public').locator('button.efs-entry-open'));
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(topic(page)).toBeVisible();
     await expect(preview(page).locator('.efs-preview-gated')).toContainText(
       "Nobody you trust has checked this. Its contents aren't loaded until you ask.",
     );
     await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
-    await preview(page).locator('wa-button.efs-preview-show').click();
+    await press(preview(page).locator('wa-button.efs-preview-show'));
     await expect(preview(page).locator('.efs-preview-text')).toContainText('b.txt');
     chain.step("Open the public row: gated; Show preview reads it; the tag's list stays");
 
     // A row from the Lens opens straight away.
     await settled(page);
-    await section(page, 'lens').locator('button.efs-entry-open').click();
+    await press(section(page, 'lens').locator('button.efs-entry-open'));
     await expect(preview(page).locator('.efs-preview-text')).toContainText('a.txt');
     await expect(preview(page).locator('.efs-preview-gated')).toHaveCount(0);
     // Its tags (lensTagsOf), read when the section opens: /cars/tesla, from the Lens.
-    await preview(page).locator('details.efs-file-tags summary').click();
+    await press(preview(page).locator('details.efs-file-tags summary'));
     const fileTag = preview(page).locator('[data-section="lens"] .efs-file-tag');
     await expect(fileTag).toHaveCount(1);
     await expect(fileTag).toContainText('/cars/tesla');
@@ -174,7 +175,7 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await go(page, '#/r/testnet/cars/tesla');
     await expect(child).toHaveCount(1);
     await settled(page);
-    await child.locator('button.efs-entry-open').click();
+    await press(child.locator('button.efs-entry-open'));
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars/tesla/model_y');
     // Its own list (the parent's also had one public row): the title says which tag is shown.
     await expect(topic(page).locator('.efs-topic-title')).toHaveText(
@@ -185,7 +186,7 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
 
     // The bar's first word opens its word's page; the plain tag opens from there, and back.
     await settled(page);
-    await crumbs(page).nth(1).click();
+    await press(crumbs(page).nth(1));
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars');
     const word = page.locator('efs-files-word');
     await expect(word.locator('.efs-topic-title')).toHaveText(
@@ -196,11 +197,11 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await expect(plainGroup).toContainText(/about\W+2\W+tagged things/);
     await expect(plainGroup.locator('.efs-topic-row')).toHaveCount(2);
     await settled(page);
-    await plainGroup.locator('wa-button.efs-word-open').click();
+    await press(plainGroup.locator('wa-button.efs-word-open'));
     await expect(topic(page).locator('.efs-topic-title')).toHaveText(/Everything tagged\W+\/cars/);
     await expect(section(page, 'public')).toHaveCount(1);
     await settled(page);
-    await topic(page).locator('wa-button.efs-word-back').click();
+    await press(topic(page).locator('wa-button.efs-word-back'));
     await expect(plainGroup).toBeVisible();
     await chain.idle(500);
     chain.step('The bar: "cars" opens the word page; the plain /cars lists both; back to the page');
@@ -314,7 +315,7 @@ test('a word page groups every place that uses the word, the plain tag first, ne
     chain.step('tesla: three groups, the plain tag first, no mixed list');
 
     await settled(page);
-    await groups.filter({ hasText: '/companies/tesla' }).locator('wa-button.efs-word-open').click();
+    await press(groups.filter({ hasText: '/companies/tesla' }).locator('wa-button.efs-word-open'));
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/companies/tesla');
     await expect(section(page, 'lens')).toHaveCount(1);
     await chain.idle(500);
@@ -439,7 +440,7 @@ test("an address lists its own entries like a folder: yours first, the owner's u
     chain.step("The address: its entries, yours first, the owner's unlabelled; yours to change");
 
     await settled(page);
-    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await press(row(page, 'docs').locator('button.efs-entry-open'));
     await expect(row(page, 'note.txt')).toBeVisible();
     const crumbs = page.locator('wa-breadcrumb wa-breadcrumb-item');
     await expect(crumbs).toHaveCount(2);
@@ -475,9 +476,9 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await fileAtRoot(chain, 6, 'note.txt', 'note\n');
     await taggedFile(chain, 0, 'c.txt', [['cars', 'tesla']]);
     await openRoot(page, chain);
-    await row(page, 'note.txt').locator('.efs-entry-open').click();
+    await press(row(page, 'note.txt').locator('.efs-entry-open'));
     await expect(preview(page).locator('.efs-preview-text')).toContainText('note');
-    await preview(page).locator('wa-button.efs-preview-tag').click();
+    await press(preview(page).locator('wa-button.efs-preview-tag'));
     const d = tagDialog(page);
     await expect(d).toHaveAttribute('open', '');
     const path = d.locator('wa-input.efs-tag-path input');
@@ -528,25 +529,25 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     // The picker's lookup of the typed word is done before Review (it is debounced): every run
     // reads the same, whatever its speed.
     await settled(page);
-    await d.locator('wa-radio-group.efs-tag-stance wa-radio[value="deny"]').click();
-    await d.locator('wa-button.efs-tag-review').click();
+    await press(d.locator('wa-radio-group.efs-tag-stance wa-radio[value="deny"]'));
+    await press(d.locator('wa-button.efs-tag-review'));
     await expect(d.locator('.efs-tag-says')).toContainText(/Say\W+0x.+is not\W+\/notes\/todo/);
     await expect(d.locator('.efs-tag-reach')).toContainText(/It says nothing about\W+\/notes\b/);
     await expect(d.locator('wa-button.efs-folder-send')).toHaveText('Not this');
-    await d.locator('wa-button', { hasText: 'Cancel' }).click();
+    await press(d.locator('wa-button', { hasText: 'Cancel' }));
     await expect(d).not.toHaveAttribute('open');
     chain.step('Not this: its review states its reach; Cancel sends nothing');
 
-    await preview(page).locator('wa-button.efs-preview-tag').click();
+    await press(preview(page).locator('wa-button.efs-preview-tag'));
     await path.fill('notes/todo');
     await settled(page);
-    await d.locator('wa-button.efs-tag-review').click();
+    await press(d.locator('wa-button.efs-tag-review'));
     await expect(d.locator('.efs-tag-says')).toContainText(/Tag\W+0x.+\/notes\/todo/);
     await expect(d.locator('.efs-tag-creates')).toContainText(
       /Creates\W+2\W+new tags:\W+\/notes, \/notes\/todo/,
     );
     await expect(d.locator('.efs-tag-public')).toContainText('Tags are public and permanent');
-    await d.locator('wa-button.efs-folder-send').click();
+    await press(d.locator('wa-button.efs-folder-send'));
     await expect(d).not.toHaveAttribute('open');
     await expect(save(page, 'confirming').or(save(page, 'saved'))).toHaveCount(1, {
       timeout: 20_000,
@@ -562,11 +563,11 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await expect(mine).toContainText('tagged by you');
     await expect(mine.locator('.efs-entry-name')).toHaveText('note.txt');
     await settled(page);
-    await mine.locator('wa-button.efs-topic-untag').click();
+    await press(mine.locator('wa-button.efs-topic-untag'));
     const untag = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
     await expect(untag.locator('.efs-tag-untag')).toContainText('Your tag goes');
     await expect(untag.locator('wa-button.efs-folder-send')).toHaveText('Remove my tag');
-    await untag.locator('wa-button.efs-folder-send').click();
+    await press(untag.locator('wa-button.efs-folder-send'));
     await expect(untag).not.toHaveAttribute('open');
     await expect(topic(page).locator('.efs-topic-empty')).toBeVisible({ timeout: 20_000 });
     await chain.idle(500);
@@ -591,10 +592,10 @@ test("a tag saved in another tab shows in the file's open Tags once this tab is 
   try {
     await fileAtRoot(chain, 6, 'note.txt', 'note\n');
     await openRoot(page, chain);
-    await row(page, 'note.txt').locator('.efs-entry-open').click();
+    await press(row(page, 'note.txt').locator('.efs-entry-open'));
     await expect(preview(page).locator('.efs-preview-text')).toContainText('note');
     const fileTags = preview(page).locator('efs-files-file-tags');
-    await fileTags.locator('summary').click();
+    await press(fileTags.locator('summary'));
     await expect(fileTags.locator('.efs-file-tags-empty')).toBeVisible();
     await settled(page);
     chain.step("note.txt's Tags, open: none yet");
@@ -637,7 +638,7 @@ test('Name this tag: your name in your language, said public in the review; the 
     await expect(title).toContainText('/photos/sunsets');
     // Connected, with no name of yours yet: the button alone.
     await expect(topic(page).locator('.efs-topic-mine')).toHaveCount(0);
-    await topic(page).locator('wa-button.efs-topic-name').click();
+    await press(topic(page).locator('wa-button.efs-topic-name'));
     await expect(naming).toHaveAttribute('open', '');
     await expect(naming.locator('wa-input.efs-label-text')).toHaveAttribute(
       'label',
@@ -646,7 +647,7 @@ test('Name this tag: your name in your language, said public in the review; the 
     await expect(naming.locator('wa-button.efs-label-remove')).toHaveCount(0);
     // A literal "[U+202E]" in a label is text, never a hidden character: no pill.
     await naming.locator('wa-input.efs-label-text input').fill('Sunset photos [U+202E]');
-    await naming.locator('wa-button.efs-label-review').click();
+    await press(naming.locator('wa-button.efs-label-review'));
     await expect(naming.locator('.efs-label-says')).toContainText(
       /Name\W+\/photos\/sunsets\W+“\W*Sunset photos \[U\+202E\]\W*”\W+in\W+English/,
     );
@@ -656,7 +657,7 @@ test('Name this tag: your name in your language, said public in the review; the 
     await expect(naming.locator('wa-button.efs-folder-send')).toHaveText('Save the name');
     chain.step('Name this tag: "Sunset photos" in English; the review says names are public');
 
-    await naming.locator('wa-button.efs-folder-send').click();
+    await press(naming.locator('wa-button.efs-folder-send'));
     await expect(naming).not.toHaveAttribute('open');
     await expect(title).toContainText('/photos/Sunset photos [U+202E]', { timeout: 20_000 });
     await expect(title.locator('.efs-hidden-char')).toHaveCount(0);
@@ -669,18 +670,18 @@ test('Name this tag: your name in your language, said public in the review; the 
     chain.step('Send: the title shows your name; the words stay below it');
 
     // Again: your name is offered to change, unchanged it can't be reviewed; Remove my name.
-    await topic(page).locator('wa-button.efs-topic-name').click();
+    await press(topic(page).locator('wa-button.efs-topic-name'));
     await expect(naming.locator('wa-input.efs-label-text')).toHaveJSProperty(
       'value',
       'Sunset photos [U+202E]',
     );
     await expect(naming.locator('wa-button.efs-label-review')).toHaveAttribute('disabled', '');
-    await naming.locator('wa-button.efs-label-remove').click();
+    await press(naming.locator('wa-button.efs-label-remove'));
     await expect(naming.locator('.efs-label-says')).toContainText(
       /Your name for\W+\/photos\/sunsets\W+in\W+English\W+goes/,
     );
     await expect(naming.locator('wa-button.efs-folder-send')).toHaveText('Remove my name');
-    await naming.locator('wa-button.efs-folder-send').click();
+    await press(naming.locator('wa-button.efs-folder-send'));
     await expect(naming).not.toHaveAttribute('open');
     await expect(topic(page).locator('.efs-topic-mine')).toHaveCount(0, { timeout: 20_000 });
     await expect(title).toContainText('/photos/sunsets');
@@ -735,7 +736,7 @@ test('320 px: a tag, a word page and an address view fit with no sideways scroll
     await page.setViewportSize({ width: 320, height: 640 });
 
     await open(page, chain, './#/r/testnet/photos/sunsets');
-    await page.getByRole('tab', { name: 'Entries' }).click();
+    await press(page.getByRole('tab', { name: 'Entries' }));
     await expect(section(page, 'public').or(section(page, 'lens'))).toHaveCount(1);
     await settled(page);
     expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
@@ -786,7 +787,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await expect(synonyms.locator('.efs-synonyms-more')).toHaveCount(0);
     chain.step('/cars/tesla: the word tesla is the same as tsla (said by #0); nothing else');
 
-    await topic(page).locator('wa-button.efs-topic-same').click();
+    await press(topic(page).locator('wa-button.efs-topic-same'));
     await expect(d).toHaveAttribute('open', '');
     await expect(d.locator('wa-input.efs-tag-path')).toHaveAttribute(
       'label',
@@ -798,7 +799,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await expect(d.locator('wa-button.efs-join-review')).toHaveAttribute('disabled', '');
     await d.locator('wa-input.efs-tag-path input').fill('auto/tesla');
     await settled(page);
-    await d.locator('wa-button.efs-join-review').click();
+    await press(d.locator('wa-button.efs-join-review'));
     await expect(d.locator('.efs-label-says')).toContainText(
       /\/cars\/tesla\W+is the same as\W+\/auto\/tesla/,
     );
@@ -806,7 +807,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
       'others decide whether to follow you',
     );
     await expect(d.locator('wa-button.efs-folder-send')).toHaveText("Say they're the same");
-    await d.locator('wa-button.efs-folder-send').click();
+    await press(d.locator('wa-button.efs-folder-send'));
     await expect(d).not.toHaveAttribute('open');
     const also = synonyms.locator('.efs-synonym', { hasText: '/auto/tesla' });
     await expect(also).toContainText('said by you', { timeout: 20_000 });
@@ -815,15 +816,15 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await expect(plansOf(page, 'efs-topic-tag-dialog')).toHaveAttribute('data-plans', '1');
     chain.step('Same as /auto/tesla: the review says others decide; it lists as yours');
 
-    await topic(page).locator('wa-button.efs-topic-under').click();
+    await press(topic(page).locator('wa-button.efs-topic-under'));
     await d.locator('wa-input.efs-tag-path input').fill('vehicles');
     await settled(page);
-    await d.locator('wa-button.efs-join-review').click();
+    await press(d.locator('wa-button.efs-join-review'));
     await expect(d.locator('.efs-label-says')).toContainText(
       /\/cars\/tesla\W+is under\W+\/vehicles/,
     );
     await expect(d.locator('wa-button.efs-folder-send')).toHaveText("Say it's under");
-    await d.locator('wa-button.efs-folder-send').click();
+    await press(d.locator('wa-button.efs-folder-send'));
     await expect(d).not.toHaveAttribute('open');
     const under = topic(page).locator(
       '[data-section="broader"] [data-group="under"] .efs-synonym',
@@ -835,22 +836,22 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await settled(page);
     chain.step('Under /vehicles: one send; "This tag is under" lists it as yours');
 
-    await also.locator('wa-button.efs-synonym-remove').click();
+    await press(also.locator('wa-button.efs-synonym-remove'));
     await expect(d.locator('.efs-label-says')).toContainText(
       /Your\W+\/cars\/tesla\W+is the same as\W+\/auto\/tesla\W+goes/,
     );
     await expect(d.locator('wa-button.efs-folder-send')).toHaveText('Remove mine');
-    await d.locator('wa-button.efs-folder-send').click();
+    await press(d.locator('wa-button.efs-folder-send'));
     await expect(d).not.toHaveAttribute('open');
     await expect(also).toHaveCount(0, { timeout: 20_000 });
     await settled(page);
     chain.step('Remove yours: one send; /auto/tesla is no longer listed');
 
-    await under.locator('wa-button.efs-synonym-remove').click();
+    await press(under.locator('wa-button.efs-synonym-remove'));
     await expect(d.locator('.efs-label-says')).toContainText(
       /Your\W+\/cars\/tesla\W+is under\W+\/vehicles\W+goes/,
     );
-    await d.locator('wa-button.efs-folder-send').click();
+    await press(d.locator('wa-button.efs-folder-send'));
     await expect(d).not.toHaveAttribute('open');
     await expect(under).toHaveCount(0, { timeout: 20_000 });
     await settled(page);
@@ -906,8 +907,8 @@ test('Kind filter on a tag and its word page: Files, Folders, Addresses and Othe
     await settled(page);
     chain.step('/cars/models: a file, a folder and an address, all shown');
 
-    await topic(page).locator('wa-select.efs-topic-kind').click();
-    await kind('file').click();
+    await press(topic(page).locator('wa-select.efs-topic-kind'));
+    await press(kind('file'));
     await expect(topic(page).locator('.efs-topic-row')).toHaveCount(1);
     await expect(topic(page).locator('.efs-topic-filtered')).toContainText(
       /2\W+other entries hidden by the filter/,
@@ -915,15 +916,15 @@ test('Kind filter on a tag and its word page: Files, Folders, Addresses and Othe
     await settled(page);
     chain.step('Files: only the file; the other two are said as hidden by the filter');
 
-    await topic(page).locator('wa-select.efs-topic-kind').click();
-    await kind('address').click();
+    await press(topic(page).locator('wa-select.efs-topic-kind'));
+    await press(kind('address'));
     await expect(topic(page).locator('.efs-topic-row')).toHaveCount(1);
     expect(await names()).toEqual([expect.stringMatching(/^0x/)]);
     await settled(page);
     chain.step('Addresses: only the address, its own choice');
 
-    await topic(page).locator('wa-select.efs-topic-kind').click();
-    await kind('other').click();
+    await press(topic(page).locator('wa-select.efs-topic-kind'));
+    await press(kind('other'));
     await expect(topic(page).locator('.efs-topic-filtered')).toContainText(
       /3\W+other entries hidden by the filter/,
     );
@@ -938,8 +939,8 @@ test('Kind filter on a tag and its word page: Files, Folders, Addresses and Othe
     const group = page.locator('efs-files-word .efs-word-group', { hasText: '/cars/models' });
     await expect(group.locator('.efs-entry')).toHaveCount(3);
     await settled(page);
-    await page.locator('efs-files-word wa-select.efs-topic-kind').click();
-    await kind('folder').click();
+    await press(page.locator('efs-files-word wa-select.efs-topic-kind'));
+    await press(kind('folder'));
     await expect(group.locator('.efs-entry')).toHaveCount(1);
     await expect(group.locator('.efs-entry')).toContainText('pics');
     await settled(page);
@@ -1001,7 +1002,7 @@ test('Include tags that mean the same: off by default; on, rows from related tag
     await settled(page);
     chain.step("/cars/tesla, off by default: the tag's own list (a.txt)");
 
-    await topic(page).locator('wa-switch.efs-topic-merged').click();
+    await press(topic(page).locator('wa-switch.efs-topic-merged'));
     await expect(rowFor('b.txt')).toHaveCount(1, { timeout: 20_000 });
     await expect(rowFor('c.txt')).toHaveCount(1);
     await expect(rowFor('a.txt').locator('.efs-topic-via')).toHaveCount(0);
@@ -1017,7 +1018,7 @@ test('Include tags that mean the same: off by default; on, rows from related tag
       'On: b.txt (same as /autos/tesla) and c.txt (same word: tsla) join; stray.txt stays out',
     );
 
-    await radio(page, 'view', 'raw').click();
+    await press(radio(page, 'view', 'raw'));
     await expect(topic(page).locator('wa-switch.efs-topic-merged')).toHaveAttribute('disabled');
     await expect(topic(page).locator('.efs-topic-merged-raw')).toContainText(
       "Unfiltered shows this tag's own list only.",

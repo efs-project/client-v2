@@ -18,6 +18,7 @@ import {
   send,
   withInbox,
 } from './folder-support.ts';
+import { press } from './press.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -351,7 +352,7 @@ test('a removal opens on Keep it unless the person moves: focus put elsewhere wi
     const keep = dialog(page).locator('wa-button.efs-folder-keep');
     const remove = row(page, 'mine.txt').locator('wa-button.efs-entry-remove');
 
-    await remove.click();
+    await press(remove);
     await expect(keep).toBeFocused();
     // Focus placed on Remove by something other than the person (as an autofocus would be): not
     // a choice. Once the dialog has shown, Keep it has focus again, and Enter keeps the entry.
@@ -365,7 +366,7 @@ test('a removal opens on Keep it unless the person moves: focus put elsewhere wi
     chain.step('Remove, focus put on Remove without input: back on Keep it; Enter keeps');
 
     // The person's own move is theirs: Tab to Remove while the dialog is still showing stays.
-    await remove.click();
+    await press(remove);
     await expect(keep).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(send(page)).toBeFocused();

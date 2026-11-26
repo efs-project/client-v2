@@ -5,6 +5,7 @@
 import type { Page } from '@playwright/test';
 import type { TestChain } from './chain.ts';
 import { expect } from './edit-support.ts';
+import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 
 export const entries = (page: Page) => page.locator('efs-files-listing');
@@ -49,7 +50,7 @@ export async function openRoot(page: Page, chain: TestChain): Promise<void> {
   await page.goto('./#/r/testnet/');
   await booted(page);
   await expect(row(page, 'docs')).toBeVisible();
-  await page.locator('efs-wallet wa-button.efs-wallet-button').click();
+  await press(page.locator('efs-wallet wa-button.efs-wallet-button'));
   await expect(page.locator('wa-dialog.efs-wallet-dialog')).toContainText(
     /Your wallet is on .*Testnet/,
   );

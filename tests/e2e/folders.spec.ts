@@ -8,6 +8,7 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import { expect, objectLink, preview } from './edit-support.ts';
+import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
@@ -69,7 +70,7 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
     await expect(row(page, 'notes')).toContainText('Folder');
     await expect(row(page, 'notes').locator('.efs-entry-whose')).toHaveCount(0);
     await expect(row(page, 'mine')).toHaveCount(0);
-    await page.locator('efs-wallet wa-button.efs-wallet-button').click();
+    await press(page.locator('efs-wallet wa-button.efs-wallet-button'));
     const wallet = page.locator('wa-dialog.efs-wallet-dialog');
     await expect(wallet).toContainText(/Your wallet is on .*Testnet/);
     await page.keyboard.press('Escape');
@@ -78,7 +79,7 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
     chain.step('Connect as #6: the place Lens is #6, then the root owner, then the default');
 
     // Into the folder: the URL is the folder's own object link (routed through openObject).
-    await row(page, 'notes').locator('button.efs-entry-open').click();
+    await press(row(page, 'notes').locator('button.efs-entry-open'));
     await expect(row(page, 'todo.txt')).toContainText('File');
     await expect(crumbs(page)).toHaveCount(2);
     await expect(crumbs(page).last()).toContainText('notes');
@@ -87,22 +88,22 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
       .toBe(`#/r/testnet/${objectLink(chain.ids.notes as string)}`);
 
     // A file opens by its permanent link, in the Preview; the listing stays where it was.
-    await row(page, 'todo.txt').getByRole('link').click();
+    await press(row(page, 'todo.txt').getByRole('link'));
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(preview(page).locator('.efs-preview-text')).toHaveText('buy milk\n');
     await expect(row(page, 'todo.txt')).toBeVisible();
 
     // The kind filter inside notes/: folders only. The file is counted, never silently dropped,
     // and a page with everything filtered out is never "empty".
-    await entries(page).locator('wa-select.efs-entries-filter').click();
-    await page.locator('wa-option[value="folder"]').click();
+    await press(entries(page).locator('wa-select.efs-entries-filter'));
+    await press(page.locator('wa-option[value="folder"]'));
     await expect(row(page, 'todo.txt')).toHaveCount(0);
     await expect(entries(page)).toContainText(/1\W+other entries hidden by the filter/);
     await expect(entries(page)).toContainText('Nothing to show here.');
     await expect(entries(page)).not.toContainText('This folder is empty');
 
     // The breadcrumb goes back to the root.
-    await crumbs(page).first().click();
+    await press(crumbs(page).first());
     await expect(row(page, 'notes')).toBeVisible();
     await expect(crumbs(page)).toHaveCount(1);
   } finally {
@@ -125,9 +126,9 @@ test('a file link opened fresh lists nothing until asked; a folder link survives
     await expect(entries(page).locator('.efs-entry')).toHaveCount(0);
     chain.step('A file link: its Preview only, with no folder read');
 
-    await entries(page).getByRole('button', { name: 'Browse the shared folder' }).click();
+    await press(entries(page).getByRole('button', { name: 'Browse the shared folder' }));
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
-    await row(page, 'notes').locator('button.efs-entry-open').click();
+    await press(row(page, 'notes').locator('button.efs-entry-open'));
     await expect(row(page, 'todo.txt')).toBeVisible();
 
     // A folder's link is in the URL now, and survives a reload: openObject says it's a folder,
@@ -140,7 +141,7 @@ test('a file link opened fresh lists nothing until asked; a folder link survives
     await expect(preview(page)).toContainText('This link is a folder');
     // With no trail after a reload, the breadcrumb names it by its short id; Root goes home.
     await expect(crumbs(page)).toHaveCount(2);
-    await crumbs(page).first().click();
+    await press(crumbs(page).first());
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
     await expect(row(page, 'notes')).toBeVisible();
     chain.step('Browse, open notes/, reload: still notes/; Root goes back to the root');
@@ -235,7 +236,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await page.setViewportSize({ width: 320, height: 640 });
       await open(page, chain, './#/r/testnet/');
-      await page.getByRole('tab', { name: 'Entries' }).click();
+      await press(page.getByRole('tab', { name: 'Entries' }));
       await expect(row(page, 'notes')).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),

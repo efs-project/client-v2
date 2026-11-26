@@ -7,6 +7,7 @@
 import { link } from '@efs/sdk';
 import { expect, type Page, test } from '@playwright/test';
 import { PREFIX } from '../../playwright.config.ts';
+import { press } from './press.ts';
 import {
   booted,
   openSettings,
@@ -35,8 +36,8 @@ test('settings last for the tab on a shared gateway, and nothing is stored', asy
   await expect(page.locator('[data-section="data"]')).toContainText(
     'served from a shared IPFS gateway',
   );
-  await page.locator('wa-select[label="Theme"]').click();
-  await page.locator('wa-option[value="paper"]').click();
+  await press(page.locator('wa-select[label="Theme"]'));
+  await press(page.locator('wa-option[value="paper"]'));
   await expect(html(page)).toHaveClass(/\befs-theme-paper\b/);
   // Applied for this tab, written nowhere: no settings database, no appearance mirror.
   expect(await stored(page)).toEqual({ databases: [], localStorage: 0 });
@@ -51,7 +52,7 @@ test('Connect on a shared gateway explains why saving is off and touches no wall
   await trapWallet(page);
   await page.goto(`${AT}#/files`);
   await booted(page);
-  await page.locator('efs-wallet wa-button.efs-wallet-button').click();
+  await press(page.locator('efs-wallet wa-button.efs-wallet-button'));
   const dialog = page.locator('wa-dialog.efs-wallet-dialog');
   await expect(dialog).toContainText("Saving is off on this copy: it's served from a shared");
   // An IP-address host can't carry a subdomain copy, and no copy is configured: no link.
