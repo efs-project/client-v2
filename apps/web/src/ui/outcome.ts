@@ -11,6 +11,8 @@ export interface OutcomeView {
   readonly message: MessageId;
   /** Shown beside the message for an Inspector; the raw code is never translated. */
   readonly code: string;
+  /** The result's reason code (BEHIND, RPC_FAILED…), shown with the code when the result has one. */
+  readonly reason?: string;
   /** Whether a retry button makes sense, and of which kind. */
   readonly retry?: 'transient' | 'after-reconcile' | 'after-replan';
 }
@@ -75,14 +77,46 @@ const PIN: Table = {
 const TABLES = { read: READ, coverage: COVERAGE, bytes: BYTES, write: WRITE, pin: PIN } as const;
 export type OutcomeKind = keyof typeof TABLES;
 
-export function describeOutcome(kind: OutcomeKind, code: string): OutcomeView {
+/**
+ * UNKNOWN with reason BEHIND (sdk-v2 7db4417, the read floor): every endpoint is behind a block
+ * this client already read, so the SDK refused to answer from older state rather than show what
+ * was there before the person's own save. It is transient: the endpoint catches up.
+ */
+const BEHIND: Omit<OutcomeView, 'code'> = {
+  tone: 'warning',
+  message: 'outcome.behind',
+  retry: 'transient',
+};
+
+export function describeOutcome(kind: OutcomeKind, code: string, reason?: string): OutcomeView {
   const known = Object.hasOwn(TABLES[kind], code) ? TABLES[kind][code] : undefined;
-  return { ...(known ?? UNRECOGNIZED), code };
+  const view = code === 'UNKNOWN' && reason === 'BEHIND' ? BEHIND : (known ?? UNRECOGNIZED);
+  return { ...view, code, ...(reason ? { reason } : {}) };
+}
+
+export type OutcomeAction = 'retry' | 'startOver';
+
+/**
+ * The buttons an outcome offers. Try again for a transient status the host can retry. "Start over"
+ * only for BEHIND on a local test chain (`canReset`): a reset or restarted chain is shorter than
+ * the floor and stays BEHIND, so the floor is forgotten there. Never on a live chain, where a
+ * stuck endpoint would then serve old reads again (the SDK's rule).
+ */
+export function outcomeActions(
+  view: OutcomeView,
+  options: { readonly retryable: boolean; readonly canReset: boolean },
+): OutcomeAction[] {
+  const actions: OutcomeAction[] = [];
+  if (options.retryable && view.retry === 'transient') actions.push('retry');
+  if (options.retryable && options.canReset && view.message === 'outcome.behind') {
+    actions.push('startOver');
+  }
+  return actions;
 }
 
 /** Every message id the tables can produce, so the catalog check can prove none is missing. */
 export function outcomeMessageIds(): MessageId[] {
-  const ids = new Set<MessageId>([UNRECOGNIZED.message]);
+  const ids = new Set<MessageId>([UNRECOGNIZED.message, BEHIND.message]);
   for (const table of Object.values(TABLES))
     for (const view of Object.values(table)) ids.add(view.message);
   return [...ids];

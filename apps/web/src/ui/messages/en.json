@@ -409,6 +409,8 @@
   "network.indicator.deploymentProblem": "{$network} · setup problem",
   "network.indicator.loadFailed": "{$network} · didn't load",
   "outcome.retry": "Try again",
+  "outcome.behind": "This network connection hasn't caught up with what you've already seen. Checking again…",
+  "outcome.startOver": "The test chain was reset? Start over",
   "settings.network.status.checking": "Checking the EFS deployment on this network…",
   "settings.network.status.reason": "Reason:",
   "settings.network.status.expected": "expected",

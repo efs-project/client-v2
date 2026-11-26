@@ -17,6 +17,7 @@ import type { PlaceCountRow, TopicRow, TopicView } from '@efs/sdk/tags';
 import { markOnce } from '../../platform/marks.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { readFloorReset } from '../../shell/read-floor.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
@@ -449,6 +450,8 @@ export class EfsFilesWord extends EfsElement {
       body = html`<efs-outcome
         .kind=${'read'}
         .code=${'UNKNOWN'}
+        .reason=${s.reason?.code}
+        .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
         .translator=${this.host.translator}
         retryable
         @efs-retry=${() => this.#reload()}

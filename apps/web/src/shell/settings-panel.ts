@@ -22,6 +22,7 @@ import { EfsElement, html, nothing } from '../ui/element.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
 import type { OsState } from './os-state.ts';
+import { readFloorReset } from './read-floor.ts';
 import type { ReaderSession } from './reader-state.ts';
 
 type Section = 'appearance' | 'network' | 'data' | 'about';
@@ -346,6 +347,8 @@ export class EfsSettingsPanel extends EfsElement {
         const outcome = html`<efs-outcome
           .kind=${'pin'}
           .code=${pin.status}
+          .reason=${'reason' in pin ? pin.reason?.code : undefined}
+          .reset=${readFloorReset(this.os.network.get(), this.reader.state.get())}
           .translator=${this.translator}
           retryable
           @efs-retry=${retry}
