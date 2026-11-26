@@ -13,7 +13,7 @@
   - A word the chain's grammar refuses (words go as typed until a fold is ruled) is named with its rule before any read. A one-word tag ending `.eth` says it is a tag, not an address.
 - The media gate: a row opened from the public tier opens in Preview on its Type, size and author, with nothing fetched until "Show preview" (tab memory, per file).
 - Names under an address (`0x…/photos/cat.jpg`) say they can't be read yet, with "Open the address"; they wait for homes as folders' parents in the SDK.
-- **No display names yet** (SDK tags-0.1 §5.5 isn't built): a row shows the thing's short id. The client never invents one.
+- **Names** (sdk-v2 983d70b, `apps/files/names.ts`): a file in a tag's list or on a word page shows its name from the SDK's `fileNames` (its tagger's own entry, else its creator's, else the first Lens author's; the row's Lens decider is passed as the tagger). A row with no name keeps its short id and never says "no name", since a null name from an incomplete read isn't proven absent. A tag's title shows each segment's label from `topicName` in the reader's languages, with the words beside it when a label replaced one (the link holds the words). The location bar, children and word-page groups still show words.
 - **Authors** show through the SDK's `displayOf` (`apps/files/who.ts`, everywhere in the Files app): an address as its EIP-55 short form ("0xf39F…2266"); an address view's own address also counts as a contract principal (a Safe's home); anything else as its principal's short id.
 
 **Built (stage 2, `apps/files/word.ts`, children in `topic.ts`):**

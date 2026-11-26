@@ -16,7 +16,14 @@
 
 import type { Address, Efs, Lens, Reason } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
-import type { TagPlace, TagTarget, TopicPlace, TopicRow, TopicView } from '@efs/sdk/tags';
+import type {
+  SegmentName,
+  TagPlace,
+  TagTarget,
+  TopicPlace,
+  TopicRow,
+  TopicView,
+} from '@efs/sdk/tags';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
@@ -26,6 +33,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import type { EfsFolderSave } from './folder-save.ts';
+import { type NameRead, nameOf, readerLangs, readFileNames, readTopicName } from './names.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
@@ -173,6 +181,10 @@ export class EfsFilesTopic extends EfsElement {
   #checksummed = state<string | undefined>(undefined);
   /** Saves sent from this list ("Remove my tag"): once complete, the list is read again. */
   #untagging = new Set<string>();
+  /** Names for listed files, by thing (fileNames): read once each. */
+  #names = state<ReadonlyMap<string, NameRead>>(new Map());
+  /** The tag's segments as named in the reader's languages (topicName), when read. */
+  #segments = state<readonly SegmentName[] | undefined>(undefined);
   /** "Tags under this one": newest first (the junk rule and the Lens tiers wait on the SDK). */
   #children = state<PlacesState | undefined>(undefined);
   #showAll = state(false);
@@ -265,6 +277,8 @@ export class EfsFilesTopic extends EfsElement {
   ): Promise<void> {
     this.#run?.dispose();
     this.#run = undefined;
+    // A run replaced or stopped is no longer reading (the new one, if any, says so itself).
+    delete this.dataset.reading;
     if (!efs || !place || !this.#scope || this.#scope.signal.aborted) {
       this.#state.set(undefined);
       return;
@@ -272,10 +286,31 @@ export class EfsFilesTopic extends EfsElement {
     const run = this.#scope.child();
     this.#run = run;
     const { signal } = run;
+    // While this list's reads run (rows, paths, children, names): `data-reading` on the element,
+    // so anything waiting for the view to settle (a test) waits for exactly this.
+    this.dataset.reading = '';
+    try {
+      await this.#loadRun(efs, place, view, below, reader, run);
+    } finally {
+      if (this.#run === run) delete this.dataset.reading;
+    }
+  }
+
+  async #loadRun(
+    efs: Efs,
+    place: PlaceLink,
+    view: TopicView,
+    below: boolean,
+    reader: string | undefined,
+    run: OwnerScope,
+  ): Promise<void> {
+    const { signal } = run;
     this.#state.set({ phase: 'loading' });
     this.#count.set(undefined);
     this.#children.set(undefined);
     this.#showAll.set(false);
+    this.#segments.set(undefined);
+    this.#names.set(new Map());
     if (place.status === 'home') {
       void loadChecksum()
         .then((checksum) => {
@@ -329,6 +364,12 @@ export class EfsFilesTopic extends EfsElement {
       await this.#readPaths(efs, next, signal);
       if (place.status === 'topic' && !signal.aborted)
         await this.#readChildren(efs, target, signal);
+      if (!signal.aborted) await this.#readNames(efs, next, lens, signal);
+      if (place.status === 'topic' && !signal.aborted) {
+        const langs = readerLangs(this.host.translator.locale);
+        const segments = await readTopicName(efs, place.segments, lens, langs, signal);
+        if (!signal.aborted) this.#segments.set(segments);
+      }
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
@@ -351,6 +392,7 @@ export class EfsFilesTopic extends EfsElement {
     const below = place.status === 'topic' && this.#below.get();
     const lens = view === 'raw' ? undefined : this.#lens(efs, place, readerOf(this.host));
     this.#state.set({ ...s, more: 'loading' });
+    this.dataset.reading = '';
     try {
       const { topicItems } = await loadTags();
       const page = await topicItems(efs, this.#target(place), {
@@ -363,11 +405,14 @@ export class EfsFilesTopic extends EfsElement {
       if (run.signal.aborted) return;
       const next = fromTopicPage(page, s);
       this.#state.set(next);
-      void this.#readPaths(efs, next, run.signal);
+      await this.#readPaths(efs, next, run.signal);
+      if (!run.signal.aborted) await this.#readNames(efs, next, lens, run.signal);
     } catch (error) {
       if (run.signal.aborted) return;
       console.error(error);
       this.#state.set({ ...s, more: 'failed' });
+    } finally {
+      if (this.#run === run) delete this.dataset.reading;
     }
   }
 
@@ -499,6 +544,19 @@ export class EfsFilesTopic extends EfsElement {
     void this.#readChildren(efs, this.#target(place), run.signal);
   }
 
+  /** Names for the shown rows' files (fileNames), each read once; a row without one keeps its id. */
+  async #readNames(
+    efs: Efs,
+    s: TopicListState,
+    lens: Lens | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (s.phase !== 'page') return;
+    const found = await readFileNames(efs, s.rows, this.#names.get(), lens, signal);
+    if (signal.aborted || found.size === 0) return;
+    this.#names.set(new Map([...this.#names.get(), ...found]));
+  }
+
   /** The words of each topic a shown row was filed under (below the place), each read once. */
   async #readPaths(efs: Efs, s: TopicListState, signal: AbortSignal): Promise<void> {
     if (s.phase !== 'page') return;
@@ -573,14 +631,21 @@ export class EfsFilesTopic extends EfsElement {
             }</span
           >`;
     const id = shortId(row.thing);
+    // Its name when the SDK found one (tagger, creator or Lens), else its short id: never "no name".
+    const name = nameOf(this.#names.get(), row.thing);
     return html`<li class="efs-entry efs-topic-row" data-decider=${row.decider.kind}>
       <button
         type="button"
         class="efs-entry-open"
-        aria-label=${t('files.topic.open', { id })}
+        aria-label=${t('files.topic.open', { id: name ?? id })}
         @click=${() => openThing(this.host, this.nav, this.opened, place, row)}
       >
-        ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
+        ${appIcon('file')}
+        ${
+          name
+            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>`
+            : html`<span class="efs-entry-name" translate="no" dir="ltr">${id}</span>`
+        }
       </button>
       ${this.#removeMine(row, s, place, me, t, id)}
       <span class="efs-entry-meta efs-quiet">
@@ -682,6 +747,14 @@ export class EfsFilesTopic extends EfsElement {
     );
   }
 
+  /** The tag's path as shown: each segment's label (topicName) where the Lens gives one. */
+  #shownPath(words: readonly string[]): string {
+    const named = this.#segments.get();
+    return named && named.length === words.length
+      ? pathText(named.map((x) => x.name))
+      : pathText(words);
+  }
+
   #header(place: PlaceLink, t: Translator['t']) {
     const count = this.#count.get();
     const isTopic = place.status === 'topic';
@@ -694,10 +767,18 @@ export class EfsFilesTopic extends EfsElement {
       <h3 class="efs-topic-title">
         ${
           isTopic
-            ? t('files.topic.title', { path: pathText(place.segments) })
+            ? t('files.topic.title', { path: this.#shownPath(place.segments) })
             : t('files.home.title', { address: shownAddress })
         }
       </h3>
+      ${
+        // A label shown in place of a word: the words stay beside it (they're what the link holds).
+        isTopic && this.#segments.get()?.some((x) => x.source !== 'none')
+          ? html`<p class="efs-quiet efs-topic-words" translate="no" dir="ltr">
+              ${pathText(place.segments)}
+            </p>`
+          : nothing
+      }
       ${
         isTopic && place.segments.length === 1
           ? html`<div>

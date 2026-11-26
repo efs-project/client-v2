@@ -23,6 +23,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { shortId } from './editor.ts';
+import { type NameRead, nameOf, readFileNames } from './names.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
@@ -78,6 +79,8 @@ export class EfsFilesWord extends EfsElement {
   #places = state<PlacesState | undefined>(undefined);
   #groups = state<ReadonlyMap<string, Group>>(new Map());
   #refused = state<Extract<TopicListState, { phase: 'badWord' }> | undefined>(undefined);
+  /** Names for the groups' items (fileNames), by thing. */
+  #names = state<ReadonlyMap<string, NameRead>>(new Map());
   #scope: OwnerScope | undefined;
   #run: OwnerScope | undefined;
   #loaded: string | undefined;
@@ -112,15 +115,20 @@ export class EfsFilesWord extends EfsElement {
   ): Promise<void> {
     this.#run?.dispose();
     this.#run = undefined;
+    // A run replaced or stopped is no longer reading (the new one, if any, says so itself).
+    delete this.dataset.reading;
     this.#places.set(undefined);
     this.#groups.set(new Map());
     this.#refused.set(undefined);
+    this.#names.set(new Map());
     const word = place ? this.#word(place) : undefined;
     if (!efs || !place || word === undefined || !this.#scope || this.#scope.signal.aborted) return;
     const run = this.#scope.child();
     this.#run = run;
     const { signal } = run;
     this.#places.set({ phase: 'loading' });
+    // While the page's reads run: `data-reading` on the element (what a test waits on).
+    this.dataset.reading = '';
     try {
       const tags = await loadTags();
       if (signal.aborted) return;
@@ -134,12 +142,16 @@ export class EfsFilesWord extends EfsElement {
       if (signal.aborted) return;
       const places = fromPlacesPage(page);
       this.#places.set(places);
-      if (places.phase === 'page')
+      if (places.phase === 'page') {
         await this.#readGroups(efs, place, view, reader, places.rows, signal);
+        await this.#readNames(efs, place, view, reader, signal);
+      }
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
       this.#places.set({ phase: 'unknown' });
+    } finally {
+      if (this.#run === run) delete this.dataset.reading;
     }
   }
 
@@ -176,6 +188,23 @@ export class EfsFilesWord extends EfsElement {
           : { phase: 'unknown', reason: { code: 'CLIENT_ERROR' } as never },
       });
     }
+  }
+
+  /** Names for the groups' shown items (fileNames), one batch after the groups are read. */
+  async #readNames(
+    efs: Efs,
+    place: PlaceLink,
+    view: TopicView,
+    reader: string | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const rows = [...this.#groups.get().values()].flatMap((g) =>
+      g.list.phase === 'page' ? g.list.rows.slice(0, GROUP_ROWS) : [],
+    );
+    const lens = view === 'raw' ? undefined : tagLens(efs, place.lens, reader);
+    const found = await readFileNames(efs, rows, this.#names.get(), lens, signal);
+    if (signal.aborted || found.size === 0) return;
+    this.#names.set(new Map([...this.#names.get(), ...found]));
   }
 
   #setGroup(id: string, group: Group): void {
@@ -244,14 +273,20 @@ export class EfsFilesWord extends EfsElement {
     const reader = readerOf(this.host);
     const me = efs && reader ? efs.lens.principalOf(reader as never) : undefined;
     const id = shortId(row.thing);
+    const name = nameOf(this.#names.get(), row.thing);
     return html`<li class="efs-entry efs-topic-row" data-decider=${row.decider.kind}>
       <button
         type="button"
         class="efs-entry-open"
-        aria-label=${t('files.topic.open', { id })}
+        aria-label=${t('files.topic.open', { id: name ?? id })}
         @click=${() => openThing(this.host, this.nav, this.opened, place, row)}
       >
-        ${appIcon('file')} <span class="efs-entry-name" translate="no" dir="ltr">${id}</span>
+        ${appIcon('file')}
+        ${
+          name
+            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>`
+            : html`<span class="efs-entry-name" translate="no" dir="ltr">${id}</span>`
+        }
       </button>
       <span class="efs-entry-meta efs-quiet">
         <span class="efs-topic-who">${whoLine(t, efs, row, me, undefined)}</span>
