@@ -9,6 +9,7 @@ import { test } from '@playwright/test';
 import { CHAIN_MODE, testChain } from './chain.ts';
 import { expect } from './edit-support.ts';
 import { dialog, entries, row, seededRandom, send } from './folder-support.ts';
+import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment, TEST_CONFIG } from './support.ts';
 
 test.skip(
@@ -58,26 +59,26 @@ test('EFS dev accounts: pick a persona, save as it, switch persona (an identity 
     await expect(entries(page)).toContainText('This folder is empty.');
 
     // The dev accounts sit beside the installed wallet in the picker.
-    await walletButton.click();
+    await press(walletButton);
     const choose = page.locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-option', {
       hasText: 'EFS dev accounts',
     });
     await expect(choose).toBeVisible();
-    await choose.click();
+    await press(choose);
     await expect(page.locator('wa-dialog.efs-dev-accounts')).toContainText(
       'Dev account: local test chain only',
     );
-    await persona(SATOSHI.name).click();
+    await press(persona(SATOSHI.name));
     await expect(walletButton).toContainText(SATOSHI.name);
     await page.keyboard.press('Escape');
     chain.step(
       "In inbox/ (Adam Back's): Connect with EFS dev accounts, labelled local-only; pick Satoshi",
     );
 
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('satoshi-notes');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
-    await send(page).click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'satoshi-notes').locator('.efs-entry-whose')).toHaveText('yours');
     await expect(row(page, 'satoshi-notes').locator('wa-button.efs-entry-remove')).toHaveCount(1);
@@ -85,12 +86,12 @@ test('EFS dev accounts: pick a persona, save as it, switch persona (an identity 
     chain.step('As Satoshi: New folder satoshi-notes, one send; it is yours');
 
     // Switch persona from the wallet panel: the chooser again, then Adam.
-    await walletButton.click();
+    await press(walletButton);
     const panel = page.locator('wa-dialog.efs-wallet-dialog');
     await expect(panel).toContainText('Dev account: local test chain only');
     await expect(panel.locator('.efs-wallet-persona-name')).toHaveText(SATOSHI.name);
-    await panel.locator('wa-button.efs-wallet-switch-persona').click();
-    await persona(ADAM.name).click();
+    await press(panel.locator('wa-button.efs-wallet-switch-persona'));
+    await press(persona(ADAM.name));
     await expect(walletButton).toContainText(ADAM.name);
     await page.keyboard.press('Escape');
     // Satoshi's folder is now someone else's: named, not Adam's to change, and Adam (who owns
@@ -103,10 +104,10 @@ test('EFS dev accounts: pick a persona, save as it, switch persona (an identity 
       'Switch persona to Adam Back: satoshi-notes is "Satoshi Nakamoto · 0xf39F…2266\'s", blockable',
     );
 
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('adam-notes');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
-    await send(page).click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     // The folder's owner's own rows carry no label; his to change.
     await expect(row(page, 'adam-notes')).toBeVisible();
@@ -142,25 +143,25 @@ test('whose names, synonyms and hidden tags apply: the default curator for a gue
     );
     chain.step('A guest on /notes/todo: the default Lens, Satoshi Nakamoto');
 
-    await walletButton.click();
-    await page
-      .locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-option', {
+    await press(walletButton);
+    await press(
+      page.locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-option', {
         hasText: 'EFS dev accounts',
-      })
-      .click();
+      }),
+    );
     await expect(chooser.locator('li.efs-dev-account', { hasText: SATOSHI.name })).toContainText(
       "This chain's default curator: everyone sees what they name, join or hide.",
     );
     await expect(chooser.locator('.efs-dev-curator')).toHaveCount(1);
-    await persona(SATOSHI.name).click();
+    await press(persona(SATOSHI.name));
     await expect(walletButton).toContainText(SATOSHI.name);
     await page.keyboard.press('Escape');
     await expect(tagLine).toHaveText(/from:\s+you\s*$/);
     chain.step('Connect as Satoshi (the chooser marks the default curator): from you');
 
-    await walletButton.click();
-    await page.locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-switch-persona').click();
-    await persona(ADAM.name).click();
+    await press(walletButton);
+    await press(page.locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-switch-persona'));
+    await press(persona(ADAM.name));
     await expect(walletButton).toContainText(ADAM.name);
     await page.keyboard.press('Escape');
     await expect(tagLine).toHaveText(/from:\s+you, Satoshi Nakamoto\s*$/);

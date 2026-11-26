@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
+import { press } from './press.ts';
 import { booted, openSettings, rpcDown, serveConfig, serveDeployment } from './support.ts';
 
 const indicator = (page: Page) => page.locator('efs-network-indicator');
@@ -11,7 +12,7 @@ async function addEndpoint(page: Page, url: string, label = ''): Promise<void> {
   await urlInput.fill(url);
   await expect(urlInput).toHaveValue(url);
   await list.locator('wa-input[name="label"] input').fill(label);
-  await list.getByRole('button', { name: 'Add' }).click();
+  await press(list.getByRole('button', { name: 'Add' }));
 }
 
 test('appearance is saved, applied before first paint on reload, and follows the system', async ({
@@ -24,10 +25,10 @@ test('appearance is saved, applied before first paint on reload, and follows the
   await expect(page.locator('html')).toHaveClass(/\befs-theme-cypher\b/);
 
   await openSettings(page);
-  await page.getByRole('radio', { name: 'Light' }).click();
+  await press(page.getByRole('radio', { name: 'Light' }));
   await expect(page.locator('html')).toHaveClass(/\bwa-light\b/);
-  await page.locator('wa-select[label="Theme"]').click();
-  await page.locator('wa-option[value="paper"]').click();
+  await press(page.locator('wa-select[label="Theme"]'));
+  await press(page.locator('wa-option[value="paper"]'));
   await expect(page.locator('html')).toHaveClass(/\befs-theme-paper\b/);
   await expect(page.locator('html')).toHaveClass(/\bwa-brand-indigo\b/);
 
@@ -49,7 +50,7 @@ test('appearance is saved, applied before first paint on reload, and follows the
   expect(first).toMatch(/\befs-theme-paper\b/);
 
   await openSettings(page);
-  await page.getByRole('radio', { name: 'System' }).click();
+  await press(page.getByRole('radio', { name: 'System' }));
   await expect(page.locator('html')).toHaveClass(/\bwa-dark\b/);
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveClass(/\bwa-light\b/);
@@ -106,9 +107,7 @@ test('RPC endpoints: add, validate, reorder, disable; the SDK uses exactly that 
   await expect(rpcList(page).locator('li')).toHaveCount(2);
   await settled();
   let mark = rpc.length;
-  await rpcList(page)
-    .getByRole('button', { name: /Move\W+My node\W+up/ })
-    .click();
+  await press(rpcList(page).getByRole('button', { name: /Move\W+My node\W+up/ }));
   // A new SDK instance, and its first request goes to the user's first endpoint.
   expect(await firstAfter(mark)).toBe('http://127.0.0.1:8545');
 
@@ -122,7 +121,7 @@ test('RPC endpoints: add, validate, reorder, disable; the SDK uses exactly that 
   // With every endpoint off, the SDK is closed, and the File Browser says why and links to the fix.
   await openSettings(page);
   for (const name of ['My node', 'Example RPC']) {
-    await rpcList(page).locator('wa-switch', { hasText: name }).click();
+    await press(rpcList(page).locator('wa-switch', { hasText: name }));
   }
   await expect(indicator(page)).toContainText('no endpoint');
   mark = rpc.length;
@@ -131,7 +130,7 @@ test('RPC endpoints: add, validate, reorder, disable; the SDK uses exactly that 
   await expect(
     main.getByText('Every RPC endpoint for this network is turned off').first(),
   ).toBeVisible();
-  await main.getByRole('button', { name: 'Open network settings' }).first().click();
+  await press(main.getByRole('button', { name: 'Open network settings' }).first());
   await expect(page.locator('[data-section="network"] h3')).toBeFocused();
   expect(rpc.length).toBe(mark);
 });
@@ -152,13 +151,13 @@ test('a change in one tab reaches the other; a stale save is refused, not merged
   }
 
   await openSettings(first);
-  await first.getByRole('radio', { name: 'Light' }).click();
+  await press(first.getByRole('radio', { name: 'Light' }));
   await expect(first.locator('html')).toHaveClass(/\bwa-light\b/);
   // A listening tab updates by itself.
   await expect(third.locator('html')).toHaveClass(/\bwa-light\b/);
 
   await openSettings(second);
-  await second.getByRole('radio', { name: 'Dark' }).click();
+  await press(second.getByRole('radio', { name: 'Dark' }));
   await expect(second.locator('[data-section="appearance"]').locator('..')).toContainText(
     'changed in another tab',
   );
@@ -175,15 +174,15 @@ test('settings export, reset and import round-trip', async ({ page }) => {
   await expect(rpcList(page).locator('li')).toHaveCount(2);
 
   const downloading = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export' }).click();
+  await press(page.getByRole('button', { name: 'Export' }));
   const download = await downloading;
   expect(download.suggestedFilename()).toBe('efs-settings.json');
   const exported = readFileSync(await download.path(), 'utf8');
   expect(JSON.parse(exported)).toMatchObject({ schema: 'efs-settings/1' });
   expect(exported).toContain('wss://node.example.org/ws');
 
-  await page.getByRole('button', { name: 'Reset all settings' }).click();
-  await page.getByRole('button', { name: 'Reset everything' }).click();
+  await press(page.getByRole('button', { name: 'Reset all settings' }));
+  await press(page.getByRole('button', { name: 'Reset everything' }));
   await expect(rpcList(page).locator('li')).toHaveCount(1);
 
   await page.locator('efs-settings-panel input[type="file"]').setInputFiles({
@@ -191,7 +190,7 @@ test('settings export, reset and import round-trip', async ({ page }) => {
     mimeType: 'application/json',
     buffer: Buffer.from(exported),
   });
-  await page.getByRole('button', { name: 'Replace settings' }).click();
+  await press(page.getByRole('button', { name: 'Replace settings' }));
   await expect(rpcList(page).locator('li')).toHaveCount(2);
   await expect(rpcList(page)).toContainText('Socket');
 });

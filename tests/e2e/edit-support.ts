@@ -11,6 +11,7 @@ import { expect as baseExpect, type Locator, type Page } from '@playwright/test'
 export const expect = baseExpect.configure({ timeout: 15_000 });
 
 import type { TestChain } from './chain.ts';
+import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
 
 export const SEEDED = 'Meeting at 10:00.\n';
@@ -28,10 +29,10 @@ export const sendRequests = (chain: TestChain) =>
 export const DOUBLE_PRESSES = {
   twice: (button: Locator) =>
     button.evaluate((b: HTMLElement) => {
-      b.click();
-      b.click();
+      b.click(); // press-raw: the person's second press, before any re-render
+      b.click(); // press-raw: (the same)
     }),
-  dblclick: (button: Locator) => button.dblclick(),
+  dblclick: (button: Locator) => button.dblclick(), // press-raw: a double click, second press dropped
   'enter-click': async (button: Locator) => {
     const box = await button.boundingBox();
     if (!box) throw new Error('the button is not on screen');
@@ -39,7 +40,7 @@ export const DOUBLE_PRESSES = {
     const page = button.page();
     await page.keyboard.press('Enter');
     // Straight at the point, with no wait for the button to be enabled: a person's second press.
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2); // press-raw: (the same)
   },
 } satisfies Record<string, (button: Locator) => Promise<void>>;
 
@@ -103,11 +104,11 @@ export async function start(
 
 /** Edit, type `text`, and connect (one click, one wallet installed). */
 export async function editAndConnect(page: Page, chain: TestChain, text: string): Promise<void> {
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   await page.locator('textarea.efs-edit-text').fill(text);
   chain.step('Edit; type the new text');
   // Typing needed no wallet; saving does. Connecting is one click with one wallet installed.
-  await page.locator('wa-button.efs-edit-connect').click();
+  await press(page.locator('wa-button.efs-edit-connect'));
   const wallet = page.locator('wa-dialog.efs-wallet-dialog');
   await expect(wallet).toContainText(/Your wallet is on .*Testnet/);
   await page.keyboard.press('Escape');
@@ -119,7 +120,7 @@ export async function editAndConnect(page: Page, chain: TestChain, text: string)
 export async function openReview(page: Page, chain: TestChain): Promise<Locator> {
   const reviewButton = page.locator('wa-button.efs-edit-review-button');
   await expect(reviewButton).not.toHaveAttribute('disabled');
-  await reviewButton.click();
+  await press(reviewButton);
   chain.step('Review and save: journal re-list, createWriter, planEditFile in the default Lens');
   const review = reviewDialog(page);
   await expect(review).toHaveAttribute('open', '');

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { createRpcReplay, type RpcReplay, type RpcTranscript } from '@efs/sdk/testing';
 import { expect, type Page } from '@playwright/test';
+import { press } from './press.ts';
 
 const DIST = process.env.EFS_DIST ?? 'apps/web/dist';
 const EVIDENCE = process.env.EFS_EVIDENCE ?? 'apps/web/dist-evidence';
@@ -203,7 +204,7 @@ export async function serveConfig(page: Page, config: unknown = TEST_CONFIG): Pr
 export const settingsButton = (page: Page) => page.locator('wa-button.efs-settings-button');
 
 export async function openSettings(page: Page): Promise<void> {
-  await settingsButton(page).click();
+  await press(settingsButton(page));
   await expect(page.locator('wa-drawer.efs-settings')).toHaveAttribute('open', '');
   // The drawer moves focus to its first section once it has finished opening.
   await expect(page.locator('[data-section="appearance"] h3')).toBeFocused();

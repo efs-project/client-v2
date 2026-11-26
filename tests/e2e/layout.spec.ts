@@ -1,5 +1,6 @@
 import { link } from '@efs/sdk';
 import { expect, test } from '@playwright/test';
+import { press } from './press.ts';
 import {
   booted,
   distText,
@@ -42,7 +43,7 @@ for (const [width, height] of VIEWPORTS) {
       // Narrow: panes become tabs; navigation moves behind a toggle.
       await expect(host.locator('wa-tab-group')).toBeVisible();
       await expect(toggle).toBeVisible();
-      await toggle.click();
+      await press(toggle);
       await expect(page.getByRole('navigation', { name: 'App navigation' })).toBeVisible();
     }
     await page.screenshot({ path: info.outputPath(`layout-${width}.png`) });
@@ -66,7 +67,7 @@ test('375 px: a file link opens on its Preview tab; the person can still switch 
   await expect(text).toHaveText('Meeting at 10:00.\n');
   await expect(text).toBeVisible();
   // The person's choice stands while the link stays the same.
-  await tab('Overview').click();
+  await press(tab('Overview'));
   await expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
   await expect(text).toBeHidden();
   // Arriving by the link again (back from another route) shows the file again.
@@ -84,12 +85,12 @@ test('narrow panes switch by tab and keep each view mounted', async ({ page }) =
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('./#/files');
   await booted(page);
-  await page.getByRole('tab', { name: 'Preview' }).click();
+  await press(page.getByRole('tab', { name: 'Preview' }));
   await expect(page.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true');
   const preview = page.getByRole('tabpanel', { name: 'Preview' });
   await expect(preview).toBeVisible();
   await expect(preview.getByRole('heading', { name: 'Preview' })).toBeAttached();
-  await page.getByRole('tab', { name: 'Overview' }).click();
+  await press(page.getByRole('tab', { name: 'Overview' }));
   await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
     'aria-selected',
     'true',

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { link } from '@efs/sdk';
 import { expect, type Page, test } from '@playwright/test';
+import { press } from './press.ts';
 import {
   booted,
   DEPLOYMENT,
@@ -100,7 +101,7 @@ test('an unreachable network is "unreachable", reads wait, and Try again asks ag
   await expect(main.getByText("Couldn't reach").first()).toBeVisible();
   const before = rpc.length;
   expect(before).toBeGreaterThan(0);
-  await main.getByRole('button', { name: 'Try again' }).first().click();
+  await press(main.getByRole('button', { name: 'Try again' }).first());
   await expect.poll(() => rpc.length).toBeGreaterThan(before);
   await expect(indicator(page)).toContainText('unreachable');
 });
@@ -143,7 +144,7 @@ test.describe('verified reads (recorded chain traffic)', () => {
     );
     await expect(preview(page)).toContainText('18 bytes');
     const downloading = page.waitForEvent('download');
-    await preview(page).getByRole('button', { name: 'Save a copy' }).click();
+    await press(preview(page).getByRole('button', { name: 'Save a copy' }));
     expect((await downloading).suggestedFilename()).toMatch(/^efs-[0-9a-f]{12}\.txt$/);
     expect(replay.misses).toEqual([]);
   });
@@ -193,9 +194,7 @@ test.describe('verified reads (recorded chain traffic)', () => {
     await expect(preview(page)).toContainText(/stored at\W*files\.example/);
     await expect(preview(page)).toContainText('see your IP address');
     expect(hits).toEqual([]);
-    await preview(page)
-      .getByRole('button', { name: /Load from\W+files\.example/ })
-      .click();
+    await press(preview(page).getByRole('button', { name: /Load from\W+files\.example/ }));
     await expect(preview(page).locator('.efs-preview-text')).toHaveText(ids.httpsText as string);
     await expect(preview(page)).toContainText(
       'Contents verified against the published fingerprint',

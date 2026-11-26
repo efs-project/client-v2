@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { press } from './press.ts';
 import { booted, recordRegistrations, registrations, settingsButton } from './support.ts';
 
 async function expectFallback(page: Page, message: 'browser' | 'load') {
@@ -118,7 +119,7 @@ test('an app chunk that fails to load shows a retry inside the shell', async ({ 
   await expect(settingsButton(page)).toBeVisible();
   // Browsers cache a failed module fetch, so "Try again" reloads the page.
   block = false;
-  await main.getByRole('button', { name: 'Try again' }).click();
+  await press(main.getByRole('button', { name: 'Try again' }));
   await expect(page.locator('efs-pane-host')).toBeVisible();
   expect(new URL(page.url()).hash).toBe('#/files');
 });

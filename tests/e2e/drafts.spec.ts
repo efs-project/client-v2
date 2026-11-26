@@ -7,6 +7,7 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { link } from '@efs/sdk';
 import { type Page, test } from '@playwright/test';
 import { editor, expect, preview, SEEDED } from './edit-support.ts';
+import { press } from './press.ts';
 import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './support.ts';
 
 const textarea = (page: Page) => page.locator('textarea.efs-edit-text');
@@ -54,7 +55,7 @@ test('an unsaved edit survives leaving the file, and is discarded only after ask
     if (m.type() === 'error') errors.push(m.text());
   });
   const replay = await openSeeded(page);
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   await textarea(page).fill('Meeting moved to 11:00.\n');
 
   await leaveAndComeBack(page);
@@ -63,25 +64,25 @@ test('an unsaved edit survives leaving the file, and is discarded only after ask
   await expect(editor(page).locator('.efs-edit-kept')).toHaveText('Your unsaved edit is back.');
 
   // Cancel asks; Keep editing (the default) keeps the edit and returns to the text.
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
   await expect(discardDialog(page)).toHaveAttribute('open', '');
   await expect(discardDialog(page)).toContainText('Discard your edit?');
   await expect(discardDialog(page).locator('wa-button.efs-edit-keep')).toBeFocused();
-  await discardDialog(page).locator('wa-button.efs-edit-keep').click();
+  await press(discardDialog(page).locator('wa-button.efs-edit-keep'));
   await expect(discardDialog(page)).not.toHaveAttribute('open');
   await expect(textarea(page)).toBeFocused();
   await expect(textarea(page)).toHaveValue('Meeting moved to 11:00.\n');
 
   // Escape keeps it too.
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
   await expect(discardDialog(page)).toHaveAttribute('open', '');
   await page.keyboard.press('Escape');
   await expect(discardDialog(page)).not.toHaveAttribute('open');
   await expect(textarea(page)).toHaveValue('Meeting moved to 11:00.\n');
 
   // Discard: the file as it is, focus on Edit, and nothing comes back later.
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
-  await discardDialog(page).locator('wa-button.efs-edit-discard-yes').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
+  await press(discardDialog(page).locator('wa-button.efs-edit-discard-yes'));
   await expect(editor(page)).toHaveCount(0);
   await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
   await expect(preview(page).locator('wa-button.efs-edit-start')).toBeFocused();
@@ -96,7 +97,7 @@ test("a kept edit whose file can't be opened for editing is said, and can be dis
   page,
 }) => {
   await openSeeded(page);
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   await textarea(page).fill('Meeting moved to 11:00.\n');
   await page.evaluate(() => {
     location.hash = '#/files';
@@ -109,7 +110,7 @@ test("a kept edit whose file can't be opened for editing is said, and can be dis
   await expect(notice).toContainText('You have an unsaved edit of this file');
   await expect(editor(page)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
-  await notice.locator('wa-button.efs-draft-discard').click();
+  await press(notice.locator('wa-button.efs-draft-discard'));
   await expect(notice).toHaveCount(0);
   await expect(preview(page).locator('.efs-preview')).toBeFocused();
   expect(await leavingAsks(page)).toBe(false);
@@ -117,12 +118,12 @@ test("a kept edit whose file can't be opened for editing is said, and can be dis
 
 test('an edit with no changes closes at once and keeps nothing', async ({ page }) => {
   await openSeeded(page);
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   // Changed, then changed back: nothing to keep.
   await textarea(page).fill('Something else.\n');
   await textarea(page).fill(SEEDED);
   expect(await leavingAsks(page)).toBe(false);
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
   await expect(editor(page)).toHaveCount(0);
   await expect(discardDialog(page)).toHaveCount(0);
   await leaveAndComeBack(page);
@@ -133,7 +134,7 @@ test('an edit with no changes closes at once and keeps nothing', async ({ page }
 test('leaving the page asks first only while an edit is unsaved', async ({ page }) => {
   await openSeeded(page);
   expect(await leavingAsks(page)).toBe(false);
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   await textarea(page).fill('Unsaved.\n');
   expect(await leavingAsks(page)).toBe(true);
   // Still unsaved while another app is open: it's kept, so leaving still asks.
@@ -143,8 +144,8 @@ test('leaving the page asks first only while an edit is unsaved', async ({ page 
   await expect(editor(page)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(true);
   await page.goBack();
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
-  await discardDialog(page).locator('wa-button.efs-edit-discard-yes').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
+  await press(discardDialog(page).locator('wa-button.efs-edit-discard-yes'));
   await expect(editor(page)).toHaveCount(0);
   expect(await leavingAsks(page)).toBe(false);
 });
@@ -167,7 +168,7 @@ for (const scheme of ['light', 'dark'] as const) {
   }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await openSeeded(page);
-    await preview(page).locator('wa-button.efs-edit-start').click();
+    await press(preview(page).locator('wa-button.efs-edit-start'));
     await expect(textarea(page)).toBeFocused();
     await page.keyboard.type('Typed.');
     const cancel = editor(page).locator('wa-button.efs-edit-cancel');
@@ -197,8 +198,8 @@ test('at 320 px the kept-edit note and "Discard your edit?" fit without scrollin
   await page.setViewportSize({ width: 320, height: 640 });
   await openSeeded(page);
   // Narrow: the panes are tabs, and the Preview is one of them.
-  await page.getByRole('tab', { name: 'Preview' }).click();
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(page.getByRole('tab', { name: 'Preview' }));
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   await textarea(page).fill('Meeting moved to 11:00.\n');
   await leaveAndComeBack(page);
   await expect(editor(page).locator('.efs-edit-kept')).toBeVisible();
@@ -207,7 +208,7 @@ test('at 320 px the kept-edit note and "Discard your edit?" fit without scrollin
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
   expect(await overflow(), 'kept note').toBeLessThanOrEqual(0);
-  await editor(page).locator('wa-button.efs-edit-cancel').click();
+  await press(editor(page).locator('wa-button.efs-edit-cancel'));
   await expect(discardDialog(page)).toHaveAttribute('open', '');
   await expect(discardDialog(page).locator('wa-button.efs-edit-keep')).toBeFocused();
   expect(await overflow(), 'discard dialog').toBeLessThanOrEqual(0);
@@ -231,9 +232,9 @@ test('closing the tab with an unsaved edit shows the browser\'s "leave site?" pr
   page,
 }) => {
   await openSeeded(page);
-  await preview(page).locator('wa-button.efs-edit-start').click();
+  await press(preview(page).locator('wa-button.efs-edit-start'));
   // Typed by the person: the browser asks only after a real interaction with the page.
-  await textarea(page).click();
+  await press(textarea(page));
   await page.keyboard.type('x');
   const asked = new Promise<string>((resolve) =>
     page.once('dialog', (dialog) => {

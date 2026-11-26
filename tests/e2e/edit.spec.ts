@@ -22,6 +22,7 @@ import {
   sendsStarted,
   start,
 } from './edit-support.ts';
+import { press } from './press.ts';
 import {
   booted,
   replayRpc,
@@ -54,13 +55,13 @@ test('edit, review, one approval: Saved · confirming, and Show my version reads
       "Open docs/readme.txt by object link with the sharer's Lens: pin, openFile, readBytes",
     );
     const review = await editAndReview(page, chain, text, true);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: runSequence (one part, one eth_sendTransaction)');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     await expect(review).toHaveCount(0);
     expect(sends(chain)).toHaveLength(1);
     // This view still shows the fixture's version; the person can put theirs first.
-    await preview(page).locator('wa-button.efs-edit-show-mine').click();
+    await press(preview(page).locator('wa-button.efs-edit-show-mine'));
     chain.step('Show my version: openFile and readBytes under mineFirst(account)');
     await expect(preview(page).locator('.efs-preview-text')).toHaveText(text);
     await expect(preview(page).locator('.efs-viewing-mine')).toBeVisible();
@@ -84,7 +85,7 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
     const review = await editAndReview(page, chain, text);
     await chain.control?.automine(false);
     chain.dropNextSendResponse();
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step(
       'Send: the wallet broadcasts, its answer is lost (AMBIGUOUS); the SDK checks the ledger once',
     );
@@ -114,7 +115,7 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
     // From the reload to Saved, the wallet was asked nothing at all (not only no second send).
     expect(chain.walletCalls.slice(before), 'no wallet request after the reload').toEqual([]);
     expect(sends(chain), 'the save was sent exactly once').toHaveLength(1);
-    await save(page, 'saved').locator('wa-button.efs-save-dismiss').click();
+    await press(save(page, 'saved').locator('wa-button.efs-save-dismiss'));
     await expect(page.locator('efs-saves-banner')).toHaveCount(0);
   } finally {
     await chain.finish();
@@ -141,7 +142,7 @@ test('a guest reading a file creates no storage and touches no wallet', async ({
   expect(replay.misses).toEqual([]);
 });
 
-for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
+for (const [how, pressTwice] of Object.entries(DOUBLE_PRESSES)) {
   test(`Send pressed twice (${how}) before the page catches up: one save, one send`, async ({
     page,
   }) => {
@@ -152,7 +153,7 @@ for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
     try {
       await start(page, chain, undefined, true);
       const review = await editAndReview(page, chain, `Twice is once (${how}).\n`, true);
-      await press(review.locator('wa-button.efs-review-send'));
+      await pressTwice(review.locator('wa-button.efs-review-send'));
       chain.step(`Send, twice (${how}): one runSequence, one eth_sendTransaction`);
       await expect(save(page, 'confirming').or(save(page, 'saved'))).toHaveCount(1);
       await expect(review).toHaveCount(0);

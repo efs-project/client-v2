@@ -28,6 +28,7 @@ import {
   send,
   withInbox,
 } from './folder-support.ts';
+import { press } from './press.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -40,7 +41,7 @@ test('New folder: bad names are refused as typed; then name, review, one send, a
   const chain = await testChain('client-folder-create', 'The realm root, then a new folder.');
   try {
     await openRoot(page, chain);
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     const name = dialog(page).locator('wa-input.efs-folder-name');
     await expect(name).toBeFocused();
     // checkName, as typed: Review stays off for a refused name.
@@ -53,11 +54,11 @@ test('New folder: bad names are refused as typed; then name, review, one send, a
     await name.locator('input').fill('..');
     await expect(dialog(page)).toContainText('A name can\'t be "." or "..".');
     await name.locator('input').fill('projects');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(/Creates the folder\W+projects\W+in\W+Root/);
     await expect(dialog(page)).toContainText('One approval in your wallet.');
     chain.step('New folder "projects": checkName, then planCreateFolder in the place Lens');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(save(page, 'saved').or(save(page, 'confirming'))).toBeVisible();
     await expect(row(page, 'projects').locator('.efs-entry-whose')).toHaveText('yours');
@@ -80,9 +81,9 @@ test('a name you already use here is refused with its own words, and nothing is 
     });
     await openRoot(page, chain);
     await expect(row(page, 'projects').locator('.efs-entry-whose')).toHaveText('yours');
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('projects');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page).locator('.efs-folder-refused')).toContainText(
       /You already have something called\W+projects\W+here/,
     );
@@ -100,11 +101,11 @@ test('a send the wallet refuses says so in the dialog; nothing is saved, and Sen
   const chain = await testChain('client-folder-refused', 'New folder, refused once in the wallet.');
   try {
     await openRoot(page, chain);
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('kept');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     chain.refuseSend(1);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page).locator('.efs-review-not-sent')).toContainText(
       'You declined in your wallet. Nothing was saved.',
     );
@@ -112,7 +113,7 @@ test('a send the wallet refuses says so in the dialog; nothing is saved, and Sen
     await expect(row(page, 'kept')).toHaveCount(0);
     chain.step('Send: the wallet refuses (4001); nothing broadcast');
     await expect(send(page)).toContainText('Send again');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'kept').locator('.efs-entry-whose')).toHaveText('yours');
     expect(chain.broadcasts).toHaveLength(1);
@@ -131,16 +132,16 @@ test('storage lost right after a send: "couldn\'t confirm", never "nothing was s
   );
   try {
     await openRoot(page, chain);
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('lost');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await chain.breakJournalAfterSend(page);
-    await send(page).click();
+    await press(send(page));
     // Never "nothing was saved": it may have gone out.
     await expect(dialog(page)).toContainText("We couldn't confirm this save yet. Checking…");
     await expect(dialog(page)).not.toContainText('Nothing was saved');
     chain.step('Send: broadcast; the journal write after it fails (thrown, may have sent)');
-    await dialog(page).locator('wa-button', { hasText: 'Close' }).click();
+    await press(dialog(page).locator('wa-button', { hasText: 'Close' }));
     // (The pause itself is unit-tested in folderHold: here the folder already landed, so a new
     // plan for the same name is refused as taken before any hold applies.)
     await chain.restoreJournal(page);
@@ -163,24 +164,24 @@ test('Rename: the review says links keep working and what the old name shows aft
     await expect(row(page, 'draft.txt').locator('.efs-entry-whose')).toHaveText('yours');
     // Another author's entries have no Rename or Remove.
     await expect(row(page, 'docs').locator('wa-button.efs-entry-rename')).toHaveCount(0);
-    await row(page, 'draft.txt').locator('wa-button.efs-entry-rename').click();
+    await press(row(page, 'draft.txt').locator('wa-button.efs-entry-rename'));
     const name = dialog(page).locator('wa-input.efs-folder-name input');
     await expect(name).toHaveValue('draft.txt');
     await name.fill('final.txt');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(
       /Rename\W+draft\.txt\W+to\W+final\.txt\W+Links to it keep working/,
     );
     await expect(dialog(page)).toContainText(/nothing is called\W+draft\.txt\W+here/);
     chain.step('Rename draft.txt to final.txt: planMoveEntries with a new name');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'final.txt')).toBeVisible();
     await expect(row(page, 'draft.txt')).toHaveCount(0);
     expect(sendRequests(chain)).toHaveLength(1);
     // Links to the file keep working: it opens from its row, by its permanent link, in the Lens
     // the row was shown in.
-    await row(page, 'final.txt').getByRole('link').click();
+    await press(row(page, 'final.txt').getByRole('link'));
     await expect
       .poll(() => new URL(page.url()).hash)
       .toContain(objectLink(chain.ids['draft.txt@6'] as string).split('?')[0] as string);
@@ -206,7 +207,7 @@ test("Remove releases: the dialog says the owner's same-named file will show; it
     await openRoot(page, chain);
     // The place Lens puts the reader first: yours shows.
     await expect(row(page, 'shared.txt').locator('.efs-entry-whose')).toHaveText('yours');
-    await row(page, 'shared.txt').locator('wa-button.efs-entry-remove').click();
+    await press(row(page, 'shared.txt').locator('wa-button.efs-entry-remove'));
     await expect(dialog(page)).toContainText(/Your\W+shared\.txt\W+stops appearing here/);
     await expect(dialog(page)).toContainText(/After this, this view shows .+shared\.txt\W+here/);
     await expect(dialog(page)).toContainText('This removal is itself public. You can restore it.');
@@ -219,8 +220,8 @@ test("Remove releases: the dialog says the owner's same-named file will show; it
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Remove, then Escape: kept, nothing sent');
 
-    await row(page, 'shared.txt').locator('wa-button.efs-entry-remove').click();
-    await send(page).click();
+    await press(row(page, 'shared.txt').locator('wa-button.efs-entry-remove'));
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     // The owner's shared.txt shows through (their own rows carry no label).
     await expect(row(page, 'shared.txt').locator('.efs-entry-whose')).toHaveCount(0);
@@ -229,9 +230,9 @@ test("Remove releases: the dialog says the owner's same-named file will show; it
     );
     chain.step("Remove: a release; the owner's shared.txt shows through");
 
-    await entries(page).locator('wa-button.efs-entries-restore').click();
+    await press(entries(page).locator('wa-button.efs-entries-restore'));
     await expect(dialog(page)).toContainText(/Restore\W+shared\.txt\W+here/);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'shared.txt').locator('.efs-entry-whose')).toHaveText('yours');
     expect(sendRequests(chain)).toHaveLength(2);
@@ -284,12 +285,12 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
       return { outer: outer.directory };
     });
     await openRoot(page, chain);
-    await entries(page).locator('wa-switch.efs-show-removed').click();
+    await press(entries(page).locator('wa-switch.efs-show-removed'));
     // Said only because the whole list was read (COMPLETE): outer/ is yours, and still here.
     await expect(removedList).toContainText("You haven't removed anything here.");
     chain.step('Show removed at the root: you have removed nothing here');
 
-    await listed('outer').locator('button.efs-entry-open').click();
+    await press(listed('outer').locator('button.efs-entry-open'));
     await expect(removedList.locator('.efs-entry')).toHaveCount(2);
     await expect(removedRow('old.txt')).toContainText('Removed');
     await expect(removedRow('inner')).toContainText('Removed');
@@ -304,7 +305,7 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
     // The same folder opened by its link: no trail, so no path to restore a folder by. Each move
     // waits for the folder's reads to settle, so a replay sees the calls in the recorded order.
     const atRoot = async () => {
-      await page.locator('wa-breadcrumb wa-breadcrumb-item').first().click();
+      await press(page.locator('wa-breadcrumb wa-breadcrumb-item').first());
       await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
       await expect(listed('outer')).toBeVisible();
       await expect(removedList).toContainText("You haven't removed anything here.");
@@ -333,13 +334,13 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
 
     // From the root again: the path is known, and the folder restores.
     await atRoot();
-    await listed('outer').locator('button.efs-entry-open').click();
+    await press(listed('outer').locator('button.efs-entry-open'));
     await expect(removedRow('inner').locator('wa-button.efs-removed-restore')).not.toHaveAttribute(
       'disabled',
     );
-    await removedRow('inner').locator('wa-button.efs-removed-restore').click();
+    await press(removedRow('inner').locator('wa-button.efs-removed-restore'));
     await expect(dialog(page)).toContainText(/Restore\W+inner\W+here/);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(listed('inner')).toBeVisible();
     await expect(removedRow('inner')).toHaveCount(0);
@@ -358,9 +359,9 @@ test('Move a file: the picker opens where it is, walks by names, and it lands in
   try {
     await withInbox(chain);
     await openRoot(page, chain);
-    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await press(row(page, 'inbox').locator('button.efs-entry-open'));
     await expect(row(page, 'note.txt')).toBeVisible();
-    await row(page, 'note.txt').locator('wa-button.efs-entry-move').click();
+    await press(row(page, 'note.txt').locator('wa-button.efs-entry-move'));
     await expect(dialog(page)).toContainText(/Move\W+note\.txt\W+to…/);
     // It opens in inbox/, where note.txt already is: not a destination.
     await expect(pickerRow(page, 'sub')).toBeVisible();
@@ -368,26 +369,26 @@ test('Move a file: the picker opens where it is, walks by names, and it lands in
     await expect(moveHere(page)).toHaveAttribute('disabled', '');
     chain.step('Move note.txt: the picker opens in inbox/, where it already is');
 
-    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await press(picker(page).locator('wa-breadcrumb-item').first());
     await expect(pickerRow(page, 'archive')).toBeVisible();
-    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await press(pickerRow(page, 'archive').locator('button.efs-entry-open'));
     await expect(picker(page)).toContainText('No folders in here.');
     await expect(moveHere(page)).not.toHaveAttribute('disabled');
     chain.step('Up to the root, into archive/: no folders in it, and it can take note.txt');
 
-    await moveHere(page).click();
+    await press(moveHere(page));
     await expect(dialog(page)).toContainText(/Move\W+note\.txt\W+to\W+archive/);
     await expect(dialog(page)).toContainText(/Your entry appears in\W+archive/);
     await expect(dialog(page)).not.toContainText('Checked under this lens');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'note.txt')).toHaveCount(0);
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step('Review and send: note.txt leaves inbox/');
 
-    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await press(page.locator('efs-files-view wa-breadcrumb-item').first());
     await expect(row(page, 'archive')).toBeVisible();
-    await row(page, 'archive').locator('button.efs-entry-open').click();
+    await press(row(page, 'archive').locator('button.efs-entry-open'));
     await expect(row(page, 'note.txt').locator('.efs-entry-whose')).toHaveCount(0);
     await expect(row(page, 'note.txt')).toBeVisible();
     chain.step('archive/ lists note.txt');
@@ -406,23 +407,23 @@ test("Move a folder: it can't be opened in the picker, its path travels with it,
   try {
     await withInbox(chain);
     await openRoot(page, chain);
-    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await press(row(page, 'inbox').locator('button.efs-entry-open'));
     await expect(row(page, 'sub')).toBeVisible();
-    await row(page, 'sub').locator('wa-button.efs-entry-move').click();
+    await press(row(page, 'sub').locator('wa-button.efs-entry-move'));
     await expect(pickerRow(page, 'sub')).toContainText("This is the folder you're moving.");
     await expect(pickerRow(page, 'sub').locator('button.efs-entry-open')).toBeDisabled();
     chain.step('Move sub/: in the picker, sub/ itself is shown but not opened');
 
-    await picker(page).locator('wa-breadcrumb-item').first().click();
+    await press(picker(page).locator('wa-breadcrumb-item').first());
     await expect(pickerRow(page, 'archive')).toBeVisible();
-    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await press(pickerRow(page, 'archive').locator('button.efs-entry-open'));
     await expect(picker(page)).toContainText('No folders in here.');
-    await moveHere(page).click();
+    await press(moveHere(page));
     await expect(dialog(page)).toContainText(/Move\W+sub\W+to\W+archive/);
     await expect(dialog(page)).toContainText(
       "Checked under this lens: the destination isn't inside this folder.",
     );
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'sub')).toHaveCount(0);
     await expect(row(page, 'note.txt')).toBeVisible();
@@ -441,10 +442,10 @@ test('New text file: name it, write it, leave and come back to it, save it, and 
   const chain = await testChain('client-new-text-file', 'The realm root; a new hello.txt.');
   try {
     await openRoot(page, chain);
-    await entries(page).locator('wa-button.efs-new-file').click();
+    await press(entries(page).locator('wa-button.efs-new-file'));
     await expect(dialog(page)).toContainText('New text file');
     await dialog(page).locator('wa-input.efs-folder-name input').fill('hello.txt');
-    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await press(dialog(page).locator('wa-button.efs-folder-write'));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(editorFor(page)).toContainText('A new text file in');
     // Focus lands in the text, not back on the toolbar (the dialog gives focus back as it closes).
@@ -457,23 +458,23 @@ test('New text file: name it, write it, leave and come back to it, save it, and 
     chain.step('New text file: named hello.txt, then written in the editor');
 
     // Leaving keeps it: the folder offers it back, unsaved, with its text.
-    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await press(row(page, 'docs').locator('button.efs-entry-open'));
     await expect(editorFor(page)).toHaveCount(0);
-    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await press(page.locator('efs-files-view wa-breadcrumb-item').first());
     await expect(row(page, 'docs')).toBeVisible();
     const unsaved = entries(page).locator('.efs-entry-unsaved');
     await expect(unsaved).toContainText('hello.txt');
     await expect(unsaved).toContainText('Not saved yet');
-    await unsaved.locator('button.efs-entry-open').click();
+    await press(unsaved.locator('button.efs-entry-open'));
     await expect(editorFor(page)).toContainText('Your unsaved new file is back.');
     await expect(editorFor(page).locator('textarea.efs-edit-text')).toHaveValue('Hello, world.\n');
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Into docs/ and back: hello.txt is offered back, with its text');
 
-    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    await press(editorFor(page).locator('wa-button.efs-edit-review-button'));
     const review = page.locator('wa-dialog.efs-edit-review');
     await expect(review).toContainText(/Creates\W+hello\.txt\W+in/);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(preview(page).locator('.efs-preview-text')).toHaveText('Hello, world.\n');
     expect(sendRequests(chain)).toHaveLength(1);
@@ -491,11 +492,11 @@ test('New text file with a name you already use here: refused in its own words, 
     await fileAtRoot(chain, 6, 'taken.txt', 'already here\n');
     await openRoot(page, chain);
     await expect(row(page, 'taken.txt')).toBeVisible();
-    await entries(page).locator('wa-button.efs-new-file').click();
+    await press(entries(page).locator('wa-button.efs-new-file'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('taken.txt');
-    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await press(dialog(page).locator('wa-button.efs-folder-write'));
     await editorFor(page).locator('textarea.efs-edit-text').fill('new words\n');
-    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    await press(editorFor(page).locator('wa-button.efs-edit-review-button'));
     await expect(editorFor(page).locator('.efs-new-refused')).toContainText(
       /You already have something called\W+taken\.txt\W+here/,
     );
@@ -503,10 +504,10 @@ test('New text file with a name you already use here: refused in its own words, 
 
     await editorFor(page).locator('wa-input.efs-new-name input').fill('fresh.txt');
     await expect(editorFor(page).locator('.efs-new-refused')).toHaveCount(0);
-    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    await press(editorFor(page).locator('wa-button.efs-edit-review-button'));
     const review = page.locator('wa-dialog.efs-edit-review');
     await expect(review).toContainText(/Creates\W+fresh\.txt\W+in/);
-    await review.locator('wa-button', { hasText: 'Cancel' }).first().click();
+    await press(review.locator('wa-button', { hasText: 'Cancel' }).first());
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Renamed in place to fresh.txt: it plans; Cancel sends nothing');
   } finally {
@@ -516,11 +517,11 @@ test('New text file with a name you already use here: refused in its own words, 
 
 /** At the root: New text file `name`, written with `text`, then Review (the review dialog). */
 async function writeNewFile(page: Page, name: string, text: string) {
-  await entries(page).locator('wa-button.efs-new-file').click();
+  await press(entries(page).locator('wa-button.efs-new-file'));
   await dialog(page).locator('wa-input.efs-folder-name input').fill(name);
-  await dialog(page).locator('wa-button.efs-folder-write').click();
+  await press(dialog(page).locator('wa-button.efs-folder-write'));
   await editorFor(page).locator('textarea.efs-edit-text').fill(text);
-  await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+  await press(editorFor(page).locator('wa-button.efs-edit-review-button'));
   const review = page.locator('wa-dialog.efs-edit-review');
   await expect(review).toContainText(new RegExp(`Creates\\W+${name.replace('.', '\\.')}\\W+in`));
   return review;
@@ -542,13 +543,13 @@ test('New text file whose save loses the name to a race: "Review changes" brings
     await expect(review).toContainText('2 approvals in your wallet');
     await fileAtRoot(chain, 6, 'big.txt', 'made elsewhere\n');
     chain.step('Elsewhere: #6 creates big.txt at the root first');
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     const changed = save(page, 'changed');
     await expect(changed.locator('wa-button.efs-save-reopen')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step('Send: the content lands; the finish loses the name (changed)');
 
-    await changed.locator('wa-button.efs-save-reopen').click();
+    await press(changed.locator('wa-button.efs-save-reopen'));
     await expect(editorFor(page).locator('.efs-edit-reopened')).toBeVisible();
     await expect(editorFor(page).locator('wa-input.efs-new-name')).toHaveJSProperty(
       'value',
@@ -575,13 +576,13 @@ test('New text file, storage lost right after Send: "couldn\'t confirm", never "
     await openRoot(page, chain);
     const review = await writeNewFile(page, 'note.txt', 'kept through it all\n');
     await chain.breakJournalAfterSend(page);
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: broadcast; the journal write after it fails (thrown, may have sent)');
     await expect(review.locator('.efs-review-unconfirmed')).toContainText(
       "We couldn't confirm this save yet.",
     );
     await expect(page.getByText(/nothing was saved/i)).toHaveCount(0);
-    await review.locator('wa-button[slot="footer"]').click();
+    await press(review.locator('wa-button[slot="footer"]'));
     // The text stays, and no new send while it's unconfirmed: the new file's place is held.
     await expect(editorFor(page).locator('textarea.efs-edit-text')).toHaveValue(
       'kept through it all\n',
@@ -623,18 +624,18 @@ test('Upload: a PNG named pic.txt is stored as image/png from its bytes, one sen
     );
     chain.step('Upload: the file is read; named by its own name first');
 
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(/Uploads\W+pic\.txt\W+to/);
     await expect(dialog(page).locator('.efs-upload-type')).toContainText(
       /Its type, from its contents:\W+image\/png/,
     );
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'pic.txt')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step('Review (image/png from its bytes, not its name), Send: pic.txt is listed');
 
-    await row(page, 'pic.txt').locator('a.efs-entry-open').click();
+    await press(row(page, 'pic.txt').locator('a.efs-entry-open'));
     const img = preview(page).locator('img.efs-preview-media');
     await expect(img).toHaveAttribute('src', /^blob:/);
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
@@ -686,7 +687,7 @@ test('Upload: a file over the limit says how large a file can be saved here, wit
         mimeType: 'text/plain',
         buffer: Buffer.from('x'.repeat(1200 * 1024)),
       });
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(
       'This file is too large to save here. Files up to about 1 MB can be saved here for now.',
     );
@@ -714,21 +715,21 @@ test('the same big file into two folders: the second waits until the first is fi
     await entries(page)
       .locator('input.efs-upload-input')
       .setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: TWO_PARTS });
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText(/2\W+approvals in your wallet/);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(save(page, 'confirming')).toHaveCount(1);
     expect(sendRequests(chain)).toHaveLength(2);
     chain.step('Upload big.txt at the root: two parts, two sends; Saved · confirming');
 
-    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await press(row(page, 'docs').locator('button.efs-entry-open'));
     await expect(row(page, 'readme.txt')).toBeVisible();
     await entries(page)
       .locator('input.efs-upload-input')
       .setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: TWO_PARTS });
-    await dialog(page).locator('wa-button.efs-folder-review').click();
-    await send(page).click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
+    await press(send(page));
     const note = dialog(page).locator('.efs-review-not-sent');
     await expect(note).toContainText(
       'An earlier save with the same contents is still confirming. You can send this once it has',
@@ -749,7 +750,7 @@ test('the same big file into two folders: the second waits until the first is fi
     );
     await page.clock.resume();
     await expect(send(page)).not.toHaveAttribute('disabled');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'big.txt')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(4);
@@ -769,7 +770,7 @@ test('Select a file and a folder, Move them into archive: one review lists both,
   try {
     await withInbox(chain);
     await openRoot(page, chain);
-    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await press(row(page, 'inbox').locator('button.efs-entry-open'));
     await expect(row(page, 'sub')).toBeVisible();
     await select(page, 'note.txt').check();
     await select(page, 'sub').check();
@@ -779,20 +780,20 @@ test('Select a file and a folder, Move them into archive: one review lists both,
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
       .analyze();
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
-    await selection(page).locator('wa-button.efs-selection-move').click();
+    await press(selection(page).locator('wa-button.efs-selection-move'));
     await expect(dialog(page)).toContainText(/Move\W+2\W+entries to…/);
     // sub/ is one of the folders moved: shown, never opened.
     await expect(pickerRow(page, 'sub').locator('button.efs-entry-open')).toBeDisabled();
     chain.step('Select note.txt and sub/, Move…: one picker for both');
 
-    await picker(page).locator('wa-breadcrumb-item').first().click();
-    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await press(picker(page).locator('wa-breadcrumb-item').first());
+    await press(pickerRow(page, 'archive').locator('button.efs-entry-open'));
     await expect(picker(page)).toContainText('No folders in here.');
-    await moveHere(page).click();
+    await press(moveHere(page));
     await expect(dialog(page)).toContainText(/Move these\W+2\W+entries to\W+archive/);
     await expect(dialog(page).locator('.efs-folder-items li')).toHaveCount(2);
     await expect(dialog(page)).toContainText('Checked under this lens');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'note.txt')).toHaveCount(0);
     await expect(row(page, 'sub')).toHaveCount(0);
@@ -830,25 +831,25 @@ test('a selection with one refused item plans nothing, lists it, and "Leave thes
       );
     });
     await openRoot(page, chain);
-    await row(page, 'inbox').locator('button.efs-entry-open').click();
+    await press(row(page, 'inbox').locator('button.efs-entry-open'));
     await expect(row(page, 'sub')).toBeVisible();
     await select(page, 'note.txt').check();
     await select(page, 'sub').check();
-    await selection(page).locator('wa-button.efs-selection-move').click();
-    await picker(page).locator('wa-breadcrumb-item').first().click();
-    await pickerRow(page, 'archive').locator('button.efs-entry-open').click();
+    await press(selection(page).locator('wa-button.efs-selection-move'));
+    await press(picker(page).locator('wa-breadcrumb-item').first());
+    await press(pickerRow(page, 'archive').locator('button.efs-entry-open'));
     await expect(picker(page)).toContainText('No folders in here.');
-    await moveHere(page).click();
+    await press(moveHere(page));
     await expect(dialog(page).locator('.efs-folder-refused')).toContainText(
       /You already have something called\W+note\.txt\W+here/,
     );
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('note.txt is taken in archive/: the whole selection is refused, and says which');
 
-    await dialog(page).locator('wa-button.efs-folder-leave-out').click();
+    await press(dialog(page).locator('wa-button.efs-folder-leave-out'));
     await expect(dialog(page)).toContainText(/Move\W+sub\W+to\W+archive/);
     await expect(dialog(page)).toContainText('Checked under this lens');
-    await dialog(page).locator('wa-button', { hasText: 'Cancel' }).first().click();
+    await press(dialog(page).locator('wa-button', { hasText: 'Cancel' }).first());
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Leave these out: sub/ alone is reviewed; Cancel sends nothing');
   } finally {
@@ -866,11 +867,11 @@ test('Select two files, Remove: one review lists both, one send; the notice offe
     await openRoot(page, chain);
     await select(page, 'a.txt').check();
     await select(page, 'b.txt').check();
-    await selection(page).locator('wa-button.efs-selection-remove').click();
+    await press(selection(page).locator('wa-button.efs-selection-remove'));
     await expect(dialog(page)).toContainText(/Remove\W+2\W+entries from/);
     await expect(dialog(page)).toContainText(/These\W+2\W+entries of yours stop appearing here/);
     await expect(dialog(page).locator('wa-button.efs-folder-keep')).toBeFocused();
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'a.txt')).toHaveCount(0);
     await expect(row(page, 'b.txt')).toHaveCount(0);
@@ -904,7 +905,7 @@ test('the folder tree: read as it opens, follows the trail both ways, leaves onl
     chain.step('The tree: the root open, its folders listed (in the place Lens), Root selected');
 
     // Choosing a folder in the tree opens it, and its own folders are read.
-    await treeFolder(page, 'inbox').locator('span.efs-tree-label').first().click();
+    await press(treeFolder(page, 'inbox').locator('span.efs-tree-label').first());
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(row(page, 'note.txt')).toBeVisible();
     await expect(treeFolder(page, 'inbox')).toHaveAttribute('selected', '');
@@ -914,7 +915,7 @@ test('the folder tree: read as it opens, follows the trail both ways, leaves onl
 
     // The listing moves the tree: opening sub/ from its row selects it there; read with no
     // folders, it's a leaf (no "Reading…" left behind).
-    await row(page, 'sub').locator('button.efs-entry-open').click();
+    await press(row(page, 'sub').locator('button.efs-entry-open'));
     await expect(entries(page)).toContainText('This folder is empty.');
     await expect(treeFolder(page, 'sub')).toHaveAttribute('selected', '');
     await expect(treeFolder(page, 'sub').locator('wa-tree-item')).toHaveCount(0);
@@ -987,7 +988,7 @@ test("the Overview shows a folder's README formatted (verified text only), links
     );
     chain.step('The root has no README: the Overview shows its summary');
 
-    await row(page, 'guide').locator('button.efs-entry-open').click();
+    await press(row(page, 'guide').locator('button.efs-entry-open'));
     const body = overview(page).locator('.efs-readme-body');
     await expect(body.locator('h3')).toHaveText('Welcome');
     await expect(body.locator('strong')).toHaveText('notes');
@@ -1008,7 +1009,7 @@ test("the Overview shows a folder's README formatted (verified text only), links
     chain.step('Open guide/: its README, verified, formatted; raw HTML and javascript: stay text');
 
     // An EFS link in the README opens in the app.
-    await body.locator('a', { hasText: 'the root' }).click();
+    await press(body.locator('a', { hasText: 'the root' }));
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(overview(page).locator('.efs-folder-summary')).toContainText(
       "The realm's shared folder.",
@@ -1071,12 +1072,12 @@ test("Remove and block this name: only the place's owner is offered it; the revi
   try {
     await withMine(chain, true);
     await openRoot(page, chain);
-    await row(page, 'mine').locator('button.efs-entry-open').click();
+    await press(row(page, 'mine').locator('button.efs-entry-open'));
     await expect(row(page, 'note.txt').locator('.efs-entry-whose')).toHaveCount(0);
-    await row(page, 'note.txt').locator('wa-button.efs-entry-remove').click();
+    await press(row(page, 'note.txt').locator('wa-button.efs-entry-remove'));
     // A plain removal first: #0's note.txt (in this view's Lens) would show through.
     await expect(dialog(page)).toContainText(/After this, this view shows .+note\.txt\W+here/);
-    await dialog(page).locator('wa-button.efs-folder-block').click();
+    await press(dialog(page).locator('wa-button.efs-folder-block'));
     await expect(dialog(page)).toContainText(/Remove and block\W+note\.txt\W+in\W+mine/);
     await expect(dialog(page).locator('.efs-folder-block-detail')).toContainText(
       /Other people's files called\W+note\.txt\W+won't show here either/,
@@ -1087,7 +1088,7 @@ test("Remove and block this name: only the place's owner is offered it; the revi
     await expect(dialog(page)).toContainText(/After this, nothing is called\W+note\.txt\W+here/);
     chain.step('Remove, then Remove and block this name instead: planned as a block, said in full');
 
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'note.txt')).toHaveCount(0);
     await expect(entries(page).locator('.efs-entries-removed')).toContainText(
@@ -1125,16 +1126,16 @@ test('Restore unblocks a blocked name: listed as "Removed and blocked", the revi
       );
     });
     await openRoot(page, chain);
-    await row(page, 'mine').locator('button.efs-entry-open').click();
+    await press(row(page, 'mine').locator('button.efs-entry-open'));
     await expect(entries(page)).toContainText('This folder is empty.');
-    await entries(page).locator('wa-switch.efs-show-removed').click();
+    await press(entries(page).locator('wa-switch.efs-show-removed'));
     const removed = page.locator('efs-files-removed .efs-entry');
     await expect(removed).toContainText('Removed and blocked');
-    await removed.locator('wa-button.efs-removed-restore').click();
+    await press(removed.locator('wa-button.efs-removed-restore'));
     await expect(dialog(page).locator('.efs-folder-unblock')).toContainText(
       'This also unblocks the name here.',
     );
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'note.txt')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(1);
@@ -1165,7 +1166,7 @@ test('a block with nothing of yours under it (NEVER_BOUND) offers Unblock, not R
     await openRoot(page, chain);
     // You first: your block hides the owner's theirs.txt from this view.
     await expect(listed('theirs.txt')).toHaveCount(0);
-    await entries(page).locator('wa-switch.efs-show-removed').click();
+    await press(entries(page).locator('wa-switch.efs-show-removed'));
     const removed = page.locator('efs-files-removed .efs-entry', {
       has: page.locator('.efs-entry-name', { hasText: 'theirs.txt' }),
     });
@@ -1182,12 +1183,12 @@ test('a block with nothing of yours under it (NEVER_BOUND) offers Unblock, not R
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step('Show removed: your lone block is listed with Unblock, never Restore');
 
-    await removed.locator('wa-button.efs-removed-unhide').click();
+    await press(removed.locator('wa-button.efs-removed-unhide'));
     await expect(dialog(page)).toContainText(/Unblock\W+theirs\.txt\W+here/);
     // What shows at the name afterwards: the owner's entry.
     await expect(dialog(page).locator('.efs-folder-after')).toContainText(/theirs\.txt/);
     await expect(send(page)).toHaveText('Unblock');
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(listed('theirs.txt')).toBeVisible();
     await expect(page.locator('efs-files-removed')).toContainText(
@@ -1206,7 +1207,7 @@ async function listAll(page: Page, first: string): Promise<void> {
   await expect(row(page, first)).toBeVisible();
   const more = entries(page).locator('wa-button.efs-entries-more');
   while ((await more.count()) > 0) {
-    await more.click();
+    await press(more);
     await expect(entries(page).locator('wa-button.efs-entries-more[loading]')).toHaveCount(0);
   }
 }
@@ -1267,18 +1268,18 @@ test('64 entries selected: Move them all, then Remove them all; every part is se
     };
 
     // Move all 64 into dest/.
-    await row(page, 'bulk').locator('button.efs-entry-open').click();
+    await press(row(page, 'bulk').locator('button.efs-entry-open'));
     await selectAll();
-    await selection(page).locator('wa-button.efs-selection-move').click();
-    await picker(page).locator('wa-breadcrumb-item').first().click();
-    await pickerRow(page, 'dest').locator('button.efs-entry-open').click();
-    await moveHere(page).click();
+    await press(selection(page).locator('wa-button.efs-selection-move'));
+    await press(picker(page).locator('wa-breadcrumb-item').first());
+    await press(pickerRow(page, 'dest').locator('button.efs-entry-open'));
+    await press(moveHere(page));
     await expect(dialog(page)).toContainText(/Move these\W+64\W+entries to\W+dest/, {
       timeout: 60_000,
     });
     const moveParts = await parts();
     const before = sendRequests(chain).length;
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open', '', { timeout: 120_000 });
     await expect(complete).toHaveCount(1, { timeout: 120_000 });
     await expect(saves).toHaveCount(1);
@@ -1287,14 +1288,14 @@ test('64 entries selected: Move them all, then Remove them all; every part is se
     chain.step(`Move 64 into dest/: ${moveParts} parts, each sent once; Saved; bulk/ is empty`);
 
     // Remove all 64 from dest/.
-    await page.locator('wa-breadcrumb wa-breadcrumb-item').first().click();
-    await row(page, 'dest').locator('button.efs-entry-open').click();
+    await press(page.locator('wa-breadcrumb wa-breadcrumb-item').first());
+    await press(row(page, 'dest').locator('button.efs-entry-open'));
     await selectAll();
-    await selection(page).locator('wa-button.efs-selection-remove').click();
+    await press(selection(page).locator('wa-button.efs-selection-remove'));
     await expect(dialog(page)).toContainText(/Remove\W+64\W+entries from/, { timeout: 60_000 });
     const removeParts = await parts();
     const sentBefore = sendRequests(chain).length;
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open', '', { timeout: 120_000 });
     await expect(entries(page).locator('.efs-entry')).toHaveCount(0, { timeout: 120_000 });
     await expect(entries(page).locator('.efs-entries-removed')).toContainText(
@@ -1345,32 +1346,32 @@ test("At someone else's address: New folder and New text file say who sees your 
     await expect(row(page, 'pet.txt')).toBeVisible();
     // Not your address: nothing of anyone else's to block here.
     await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-block')).toHaveCount(0);
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('mine');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page).locator('.efs-attach-notice')).toContainText(
       /Your entry appears at\W+0x[0-9A-Fa-f]{4}…[0-9A-Fa-f]{4}\W+for you, for anyone whose view includes you/,
     );
     chain.step("New folder at #5's address: the review says who sees your entry");
 
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'mine').locator('.efs-entry-whose')).toHaveText('yours');
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step('Send: one approval; mine/ shows at the address as yours');
 
-    await entries(page).locator('wa-button.efs-new-file').click();
+    await press(entries(page).locator('wa-button.efs-new-file'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('hello.txt');
-    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await press(dialog(page).locator('wa-button.efs-folder-write'));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await editorFor(page).locator('textarea.efs-edit-text').fill('Hello from #6.\n');
-    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    await press(editorFor(page).locator('wa-button.efs-edit-review-button'));
     const review = page.locator('wa-dialog.efs-edit-review');
     await expect(review).toContainText(/Creates\W+hello\.txt\W+in/);
     await expect(review.locator('.efs-attach-notice')).toContainText(
       /Your entry appears at\W+0x[0-9A-Fa-f]{4}…[0-9A-Fa-f]{4}/,
     );
-    await review.locator('wa-button.efs-review-send').click();
+    await press(review.locator('wa-button.efs-review-send'));
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(preview(page).locator('.efs-preview-text')).toHaveText('Hello from #6.\n');
     expect(sendRequests(chain)).toHaveLength(2);
@@ -1406,13 +1407,13 @@ test("At your own address: writes need no notice; Block someone else's entry the
     await openRoot(page, chain);
     await goTo(page, `#/r/testnet/${six}`);
     await expect(row(page, 'spam.txt').locator('.efs-entry-whose')).toHaveText(/0x.+'s/);
-    await entries(page).locator('wa-button.efs-new-folder').click();
+    await press(entries(page).locator('wa-button.efs-new-folder'));
     await dialog(page).locator('wa-input.efs-folder-name input').fill('notes');
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     // The place is named by its address, never "Root".
     await expect(dialog(page)).toContainText(/Creates the folder\W+notes\W+in\W+0x[0-9A-Fa-f]{4}…/);
     await expect(dialog(page).locator('.efs-attach-notice')).toHaveCount(0);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     // Your own address: your entries are its owner's, unlabelled.
     await expect(row(page, 'notes')).toBeVisible();
@@ -1420,7 +1421,7 @@ test("At your own address: writes need no notice; Block someone else's entry the
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step("New folder at your own address: no notice; it shows as the owner's");
 
-    await row(page, 'spam.txt').locator('wa-button.efs-entry-block').click();
+    await press(row(page, 'spam.txt').locator('wa-button.efs-entry-block'));
     await expect(dialog(page)).toContainText(/Block\W+spam\.txt\W+by\W+0x.+here/);
     await expect(dialog(page).locator('.efs-hide-reach')).toContainText(
       "It's your block, not a deletion",
@@ -1433,7 +1434,7 @@ test("At your own address: writes need no notice; Block someone else's entry the
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step("Block spam.txt (#0's) at your own address: the review says what a block does");
 
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'spam.txt')).toHaveCount(0);
     const notice = entries(page).locator('.efs-entries-removed');
@@ -1441,9 +1442,9 @@ test("At your own address: writes need no notice; Block someone else's entry the
     expect(sendRequests(chain)).toHaveLength(2);
     chain.step('Send: spam.txt is gone for you; the notice offers Unblock');
 
-    await notice.locator('wa-button.efs-entries-restore').click();
+    await press(notice.locator('wa-button.efs-entries-restore'));
     await expect(dialog(page)).toContainText(/Unblock\W+spam\.txt\W+here/);
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'spam.txt')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(3);
@@ -1479,14 +1480,14 @@ test('At your own address: Block works on a junk entry too, one that points at n
     const junk = row(page, 'junk.bin');
     await expect(junk).toHaveAttribute('data-kind', 'other');
     await expect(junk.locator('.efs-entry-whose')).toHaveText(/0x.+'s/);
-    await junk.locator('wa-button.efs-entry-block').click();
+    await press(junk.locator('wa-button.efs-entry-block'));
     await expect(dialog(page)).toContainText(/Block\W+junk\.bin\W+by\W+0x.+here/);
     await expect(dialog(page).locator('.efs-folder-after')).toContainText(
       /nothing is called\W+junk\.bin\W+here/,
     );
     chain.step('Block junk.bin (an "other" row by #0) at your own address: planned like any entry');
 
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(junk).toHaveCount(0);
     await expect(entries(page).locator('.efs-entries-removed')).toContainText(
@@ -1534,11 +1535,11 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
         mimeType: 'application/octet-stream',
         buffer: Buffer.alloc(1_500_000, 7),
       });
-    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await press(dialog(page).locator('wa-button.efs-folder-review'));
     await expect(dialog(page)).toContainText('This file is too large to save here');
-    await dialog(page).locator('wa-button.efs-link-offer').click();
+    await press(dialog(page).locator('wa-button.efs-link-offer'));
     await expect(dialog(page).locator('.efs-link-fingerprint')).toContainText(/0x[0-9a-f]{64}/);
-    await dialog(page).locator('wa-button', { hasText: 'Cancel' }).click();
+    await press(dialog(page).locator('wa-button', { hasText: 'Cancel' }));
     await expect(dialog(page)).not.toHaveAttribute('open');
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('A file too large for the chain: refused, with "Store it elsewhere and link it"');
@@ -1546,7 +1547,7 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
     await entries(page)
       .locator('input.efs-upload-input')
       .setInputFiles({ name: 'talk.txt', mimeType: 'text/plain', buffer: Buffer.from(TALK) });
-    await dialog(page).locator('wa-button.efs-link-offer').click();
+    await press(dialog(page).locator('wa-button.efs-link-offer'));
     const link = dialog(page);
     await expect(link.locator('.efs-link-fingerprint')).toContainText(
       // SHA-256 of TALK, made on this device.
@@ -1565,7 +1566,7 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
     );
     await where.fill(`ar://${AR_ID}`);
     await expect(link.locator('.efs-link-rule')).toHaveCount(0);
-    await link.locator('wa-button.efs-link-review').click();
+    await press(link.locator('wa-button.efs-link-review'));
     await expect(link.locator('.efs-link-says')).toContainText(/Links\W+talk\.txt\W+in/);
     await expect(link.locator('.efs-link-where')).toHaveText(`ar://${AR_ID}`);
     await expect(link.locator('.efs-link-promise')).toContainText(
@@ -1577,14 +1578,14 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
       'Link talk.txt at ar://…: fingerprinted here, the address checked, the review says what is kept',
     );
 
-    await send(page).click();
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
     await expect(row(page, 'talk.txt')).toBeVisible();
     expect(sendRequests(chain)).toHaveLength(1);
     chain.step('Send: one approval; talk.txt is listed');
 
     // No Arweave gateway is set up (the client ships none): the Preview says so and offers.
-    await row(page, 'talk.txt').locator('a.efs-entry-open').click();
+    await press(row(page, 'talk.txt').locator('a.efs-entry-open'));
     const offer = preview(page).locator('.efs-gateway-offer');
     await expect(offer).toContainText('This file is stored on Arweave');
     await expect(offer.locator('.efs-gateway-note')).toContainText(
@@ -1595,7 +1596,7 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
       'Open it: stored on Arweave, no gateway: "Use public gateways", named, never on silently',
     );
 
-    await offer.locator('wa-button.efs-gateway-public').click();
+    await press(offer.locator('wa-button.efs-gateway-public'));
     await expect(preview(page).locator('.efs-preview-text')).toHaveText(TALK, { timeout: 20_000 });
     await expect(preview(page).locator('.efs-gateway-offer')).toHaveCount(0);
     expect(arweave.length).toBeGreaterThan(0);
@@ -1603,16 +1604,16 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
     chain.step('Use public gateways: saved as a setting; the copy is fetched and verified');
 
     // A host answering different bytes: rejected, never shown as the file.
-    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await press(page.locator('efs-files-view wa-breadcrumb-item').first());
     await entries(page)
       .locator('input.efs-upload-input')
       .setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('notes\n') });
-    await dialog(page).locator('wa-button.efs-link-offer').click();
+    await press(dialog(page).locator('wa-button.efs-link-offer'));
     await dialog(page).locator('wa-input.efs-link-locator input').fill(`ipfs://${CID}`);
-    await dialog(page).locator('wa-button.efs-link-review').click();
-    await send(page).click();
+    await press(dialog(page).locator('wa-button.efs-link-review'));
+    await press(send(page));
     await expect(dialog(page)).not.toHaveAttribute('open');
-    await row(page, 'notes.txt').locator('a.efs-entry-open').click();
+    await press(row(page, 'notes.txt').locator('a.efs-entry-open'));
     await expect(preview(page).locator('efs-outcome')).toContainText(
       "don't match the published fingerprint",
       { timeout: 20_000 },
@@ -1626,7 +1627,7 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
   }
 });
 
-for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
+for (const [how, pressTwice] of Object.entries(DOUBLE_PRESSES)) {
   test(`a folder save whose Send is pressed twice (${how}) is sent once`, async ({ page }) => {
     const name = `once-${how}`;
     const chain = await testChain(
@@ -1635,11 +1636,11 @@ for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
     );
     try {
       await openRoot(page, chain);
-      await entries(page).locator('wa-button.efs-new-folder').click();
+      await press(entries(page).locator('wa-button.efs-new-folder'));
       await dialog(page).locator('wa-input.efs-folder-name input').fill(name);
-      await dialog(page).locator('wa-button.efs-folder-review').click();
+      await press(dialog(page).locator('wa-button.efs-folder-review'));
       await expect(send(page)).toBeVisible();
-      await press(send(page));
+      await pressTwice(send(page));
       chain.step(`Send, twice (${how}): one runSequence, one eth_sendTransaction`);
       await expect(dialog(page)).not.toHaveAttribute('open');
       await expect(row(page, name).locator('.efs-entry-whose')).toHaveText('yours');
