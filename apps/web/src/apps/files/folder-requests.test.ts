@@ -69,6 +69,20 @@ describe('placesOf', () => {
     );
     expect(placesOf({ kind: 'createFolder', folder, name: 'x' })).toHaveLength(1);
   });
+  it("an address's places use the key the caller read for it (the SDK's homeId), lower-cased", () => {
+    const home = { kind: 'home' as const, address: `0x${'ab'.repeat(20)}` as never };
+    const word = `0x${'00'.repeat(12)}${'AB'.repeat(20)}`;
+    const keyOf = (p: { kind: string }) => (p.kind === 'home' ? word : undefined);
+    expect(placesOf({ kind: 'createFolder', folder: home, name: 'Notes' }, keyOf)).toEqual([
+      { folder: word.toLowerCase(), name: 'Notes' },
+    ]);
+    // A folder still keys by its record when the caller knows only addresses.
+    expect(placesOf({ kind: 'hide', entries: [{ folder, name: 'spam' }] }, keyOf)).toEqual([
+      { folder: DIR.toLowerCase(), name: 'spam' },
+    ]);
+    // An address whose key isn't read yet: held fail-closed, as before.
+    expect(placesOf({ kind: 'hide', entries: [{ folder: home, name: 'spam' }] })).toBeUndefined();
+  });
   it('remove and restore hold every entry they name', () => {
     const entries = [
       { folder, name: 'a' },
@@ -93,6 +107,7 @@ describe('planRequest', () => {
     planRemoveEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planRestoreEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planUnhideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
+    planHideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planTag: vi.fn(async () => ({ status: 'PLANNED' })),
     planDeny: vi.fn(async () => ({ status: 'PLANNED' })),
     planUntag: vi.fn(async () => ({ status: 'PLANNED' })),
@@ -152,6 +167,25 @@ describe('planRequest', () => {
       lens,
     });
     expect(p.planRestoreEntries).not.toHaveBeenCalled();
+  });
+
+  it("Block hides someone else's entry through planHideEntries, in the view's Lens", async () => {
+    const p = planners();
+    const entries = [{ folder, name: 'spam' }];
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'hide', entries },
+      lens,
+      signal,
+    );
+    expect((p.planHideEntries.mock.calls[0] as unknown[] | undefined)?.[2]).toEqual({
+      entries,
+      lens,
+    });
+    expect(p.planRemoveEntries).not.toHaveBeenCalled();
+    expect(p.planUnhideEntries).not.toHaveBeenCalled();
   });
 
   it("a rename is a move with only a new name, in the view's Lens", async () => {
@@ -290,6 +324,12 @@ describe('withoutIndices: "Leave these out and review the rest"', () => {
       stance: 'tag',
     });
   });
+  it('drops refused blocks too', () => {
+    expect(withoutIndices({ kind: 'hide', entries }, [0])).toEqual({
+      kind: 'hide',
+      entries: [entries[1], entries[2]],
+    });
+  });
   it('drops refused unblocks too', () => {
     expect(withoutIndices({ kind: 'unhide', entries }, [1])).toEqual({
       kind: 'unhide',
@@ -307,6 +347,7 @@ describe('copy', () => {
     expect(refusalMessage('NAME_TAKEN_MINE')).toBe('files.name.takenMine');
     expect(refusalMessage('PATH_CHANGED')).toBe('files.refused.pathChanged');
     expect(refusalMessage('NOT_REMOVED')).toBe('files.refused.notRemoved');
+    expect(refusalMessage('ALREADY_HIDDEN')).toBe('files.refused.alreadyHidden');
     // The tag release's restore and unhide refusals.
     expect(refusalMessage('NEVER_BOUND')).toBe('files.refused.neverBound');
     expect(refusalMessage('HISTORY_UNKNOWN')).toBe('files.refused.historyUnknown');

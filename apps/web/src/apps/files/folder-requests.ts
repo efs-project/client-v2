@@ -17,15 +17,16 @@ export type FolderPlanners = Pick<
   | 'planRemoveEntries'
   | 'planRestoreEntries'
   | 'planUnhideEntries'
+  | 'planHideEntries'
 > &
   Pick<typeof import('@efs/sdk/tags'), 'planTag' | 'planDeny' | 'planUntag'>;
 
 export type FolderRequest =
-  | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly name: string }
+  | { readonly kind: 'createFolder'; readonly folder: ParentRef; readonly name: string }
   /** Upload: a new file from bytes, with the media type its bytes support ("" unknown). */
   | {
       readonly kind: 'createFile';
-      readonly folder: FolderRef;
+      readonly folder: ParentRef;
       readonly name: string;
       readonly content: Uint8Array;
       readonly mediaType: string;
@@ -53,6 +54,12 @@ export type FolderRequest =
    * entry, NEVER_BOUND), so the Lens shows the next author's entry there again.
    */
   | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] }
+  /**
+   * Block others' entries here (a mask at the person's own position at each name): what the owner
+   * of a place offers against spam. The entry's author still sees it, as does anyone who ranks
+   * them first.
+   */
+  | { readonly kind: 'hide'; readonly entries: readonly EntryRef[] }
   /**
    * A tag (one author's statement about each target at one place: a tag's words, or an address).
    * `stance`: "tag" (it applies, number ≥ 0, default 0), "deny" ("Not this", below 0, default −1),
@@ -85,8 +92,20 @@ export type RestoreEntry = EntryRef & { readonly via?: ViewPath };
  * doesn't place entries under an address until homes are wired, and its key is the SDK's padded
  * address, so a request naming one is held fail-closed (undefined) rather than keyed by guess.
  */
-const place = (parent: ParentRef, name: string): Place | undefined =>
-  parent.kind === 'folder' ? { folder: parent.directory.toLowerCase(), name } : undefined;
+/**
+ * The chain key of a place a save names (a folder's record, or an address's padded word), as the
+ * SDK's effects name it; undefined when it isn't known here (an address before its key is read).
+ */
+export type ParentKeyOf = (parent: ParentRef) => string | undefined;
+
+/** A folder's chain key (its record, lowercase); an address's needs the SDK's homeId. */
+export const folderKey: ParentKeyOf = (p) =>
+  p.kind === 'folder' ? p.directory.toLowerCase() : undefined;
+
+const place = (parent: ParentRef, name: string, keyOf: ParentKeyOf): Place | undefined => {
+  const key = keyOf(parent) ?? folderKey(parent);
+  return key ? { folder: key.toLowerCase(), name } : undefined;
+};
 
 /** All the places, or undefined (fail-closed) when any of them can't be keyed. */
 const known = (places: readonly (Place | undefined)[]): readonly Place[] | undefined =>
@@ -96,21 +115,24 @@ const known = (places: readonly (Place | undefined)[]): readonly Place[] | undef
  * Every (folder, name) the request touches: what a send of it holds, and what holds it. Undefined
  * when one can't be keyed: then it holds, and is held by, every unsettled save of the account.
  */
-export function placesOf(r: FolderRequest): readonly Place[] | undefined {
+export function placesOf(
+  r: FolderRequest,
+  keyOf: ParentKeyOf = folderKey,
+): readonly Place[] | undefined {
+  const at = (parent: ParentRef, name: string) => place(parent, name, keyOf);
   switch (r.kind) {
     case 'createFolder':
     case 'createFile':
-      return known([place(r.folder, r.name)]);
+      return known([at(r.folder, r.name)]);
     case 'rename':
-      return known([place(r.from.folder, r.from.name), place(r.from.folder, r.to)]);
+      return known([at(r.from.folder, r.from.name), at(r.from.folder, r.to)]);
     case 'move':
-      return known(
-        r.moves.flatMap((m) => [place(m.from.folder, m.from.name), place(r.to, m.from.name)]),
-      );
+      return known(r.moves.flatMap((m) => [at(m.from.folder, m.from.name), at(r.to, m.from.name)]));
     case 'remove':
     case 'restore':
     case 'unhide':
-      return known(r.entries.map((e) => place(e.folder, e.name)));
+    case 'hide':
+      return known(r.entries.map((e) => at(e.folder, e.name)));
     case 'tag':
       // A tag is a statement at a tag (or an address), never a folder entry: it holds no name.
       return [];
@@ -126,6 +148,7 @@ export type AnyFolderPlan =
       | import('@efs/sdk/files').RemoveReview
       | import('@efs/sdk/files').RestoreReview
       | import('@efs/sdk/files').UnhideReview
+      | import('@efs/sdk/files').HideReview
     >;
 
 /** Plans `r` through the SDK, in the Lens the person sees the folder through. */
@@ -179,6 +202,8 @@ export function planRequest(
       return planners.planRestoreEntries(efs, writer, { entries: r.entries, lens }, o);
     case 'unhide':
       return planners.planUnhideEntries(efs, writer, { entries: r.entries, lens }, o);
+    case 'hide':
+      return planners.planHideEntries(efs, writer, { entries: r.entries, lens }, o);
     case 'tag': {
       // A tag is the writer's own statement: no Lens decides it.
       const input = { topic: r.place, targets: r.targets };
@@ -214,7 +239,8 @@ export function withoutIndices(
       const entries = keep(r.entries);
       return entries.length > 0 ? { ...r, entries } : undefined;
     }
-    case 'unhide': {
+    case 'unhide':
+    case 'hide': {
       const entries = keep(r.entries);
       return entries.length > 0 ? { ...r, entries } : undefined;
     }
@@ -237,6 +263,7 @@ const REFUSAL: Readonly<Record<string, MessageId>> = {
   NEVER_BOUND: 'files.refused.neverBound',
   HISTORY_UNKNOWN: 'files.refused.historyUnknown',
   NOT_HIDDEN: 'files.refused.notHidden',
+  ALREADY_HIDDEN: 'files.refused.alreadyHidden',
   TARGET_ABSENT: 'files.refused.targetAbsent',
   UNCHANGED: 'files.refused.tagUnchanged',
   NOT_STATED: 'files.refused.notStated',

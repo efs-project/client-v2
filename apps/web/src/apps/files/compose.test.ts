@@ -22,7 +22,13 @@ describe('the composer', () => {
   it('holds one new file at a time, where it was started', () => {
     const c = createComposer();
     expect(c.current.get()).toBeUndefined();
-    const f = { folder: folder('a'), folderName: 'docs', name: 'n.txt', route: '~efs/o/0xa' };
+    const f = {
+      folder: folder('a'),
+      key: '0xa',
+      folderName: 'docs',
+      name: 'n.txt',
+      route: '~efs/o/0xa',
+    };
     c.start(f);
     expect(c.current.get()).toEqual(f);
     c.end();

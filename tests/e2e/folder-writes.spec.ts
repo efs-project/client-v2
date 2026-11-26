@@ -1243,3 +1243,143 @@ test('64 entries selected: Move them all, then Remove them all; every part is se
     await chain.finish();
   }
 });
+
+/** Goes to `hash` in the same page (a link followed in the app). */
+const goTo = (page: Page, hash: string) =>
+  page.evaluate((h) => {
+    location.hash = h;
+  }, hash);
+
+test("At someone else's address: New folder and New text file say who sees your entry before you sign; it shows as yours; no Block there", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-home-attach',
+    'anvil #5 places pet.txt at its own address; anvil #6 (the wallet) adds a folder and a text file there.',
+  );
+  try {
+    await chain.actAs?.(5, async ({ files, lens, writer, efs, account, save: done }) => {
+      await done(
+        await files.planCreateFile(efs, writer, {
+          folder: { kind: 'home', address: account as `0x${string}` },
+          name: 'pet.txt',
+          content: new TextEncoder().encode('pet.txt by #5\n'),
+          lens,
+        }),
+      );
+      return { account5: account };
+    });
+    const five = chain.ids.account5 as string;
+    await openRoot(page, chain);
+    await goTo(page, `#/r/testnet/${five}`);
+    await expect(row(page, 'pet.txt')).toBeVisible();
+    // Not your address: nothing of anyone else's to block here.
+    await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-block')).toHaveCount(0);
+    await entries(page).locator('wa-button.efs-new-folder').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('mine');
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await expect(dialog(page).locator('.efs-attach-notice')).toContainText(
+      /Your entry appears at\W+0x[0-9A-Fa-f]{4}…[0-9A-Fa-f]{4}\W+for you, for anyone whose view includes you/,
+    );
+    chain.step("New folder at #5's address: the review says who sees your entry");
+
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'mine').locator('.efs-entry-whose')).toHaveText('yours');
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Send: one approval; mine/ shows at the address as yours');
+
+    await entries(page).locator('wa-button.efs-new-file').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('hello.txt');
+    await dialog(page).locator('wa-button.efs-folder-write').click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await editorFor(page).locator('textarea.efs-edit-text').fill('Hello from #6.\n');
+    await editorFor(page).locator('wa-button.efs-edit-review-button').click();
+    const review = page.locator('wa-dialog.efs-edit-review');
+    await expect(review).toContainText(/Creates\W+hello\.txt\W+in/);
+    await expect(review.locator('.efs-attach-notice')).toContainText(
+      /Your entry appears at\W+0x[0-9A-Fa-f]{4}…[0-9A-Fa-f]{4}/,
+    );
+    await review.locator('wa-button.efs-review-send').click();
+    await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('Hello from #6.\n');
+    expect(sendRequests(chain)).toHaveLength(2);
+    await chain.idle(500);
+    chain.step(
+      'New text file at the address: the same notice in the review; saved, it opens by its link',
+    );
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("At your own address: writes need no notice; Block someone else's entry there, it's gone for you; Unblock brings it back", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-home-block',
+    "anvil #0 (in the default Lens) places spam.txt at anvil #6's address; #6 (the wallet) adds notes/ there, blocks spam.txt, then unblocks it.",
+  );
+  try {
+    await chain.actAs?.(6, async ({ account }) => ({ account6: account }));
+    const six = chain.ids.account6 as string;
+    await chain.actAs?.(0, async ({ files, lens, writer, efs, save: done }) => {
+      await done(
+        await files.planCreateFile(efs, writer, {
+          folder: { kind: 'home', address: six as `0x${string}` },
+          name: 'spam.txt',
+          content: new TextEncoder().encode('spam by #0\n'),
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await goTo(page, `#/r/testnet/${six}`);
+    await expect(row(page, 'spam.txt').locator('.efs-entry-whose')).toHaveText(/0x.+'s/);
+    await entries(page).locator('wa-button.efs-new-folder').click();
+    await dialog(page).locator('wa-input.efs-folder-name input').fill('notes');
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    // The place is named by its address, never "Root".
+    await expect(dialog(page)).toContainText(/Creates the folder\W+notes\W+in\W+0x[0-9A-Fa-f]{4}…/);
+    await expect(dialog(page).locator('.efs-attach-notice')).toHaveCount(0);
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    // Your own address: your entries are its owner's, unlabelled.
+    await expect(row(page, 'notes')).toBeVisible();
+    await expect(row(page, 'notes').locator('.efs-entry-whose')).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step("New folder at your own address: no notice; it shows as the owner's");
+
+    await row(page, 'spam.txt').locator('wa-button.efs-entry-block').click();
+    await expect(dialog(page)).toContainText(/Block\W+spam\.txt\W+by\W+0x.+here/);
+    await expect(dialog(page).locator('.efs-hide-reach')).toContainText(
+      "It's your block, not a deletion",
+    );
+    await expect(send(page)).toHaveText('Block');
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-listing')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    chain.step("Block spam.txt (#0's) at your own address: the review says what a block does");
+
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'spam.txt')).toHaveCount(0);
+    const notice = entries(page).locator('.efs-entries-removed');
+    await expect(notice).toContainText(/You blocked\W+spam\.txt\W+here/);
+    expect(sendRequests(chain)).toHaveLength(2);
+    chain.step('Send: spam.txt is gone for you; the notice offers Unblock');
+
+    await notice.locator('wa-button.efs-entries-restore').click();
+    await expect(dialog(page)).toContainText(/Unblock\W+spam\.txt\W+here/);
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'spam.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(3);
+    await chain.idle(500);
+    chain.step("Unblock: one send; #0's spam.txt shows at your address again");
+  } finally {
+    await chain.finish();
+  }
+});

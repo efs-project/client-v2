@@ -395,10 +395,12 @@ test("an address lists its own entries like a folder: yours first, the owner's u
     await expect(row(page, 'docs')).toBeVisible();
     await expect(row(page, 'docs').locator('.efs-entry-whose')).toHaveCount(0);
     await expect(row(page, 'pet.txt').locator('.efs-entry-whose')).toHaveText('yours');
-    // Read-only here for now: no create or remove at an address.
-    await expect(page.locator('efs-files-listing wa-button.efs-new-folder')).toHaveCount(0);
-    await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-remove')).toHaveCount(0);
-    chain.step("The address: its entries, yours first, the owner's unlabelled; read-only");
+    // Writable once the address's key is read: New folder here, Remove on your own pet.txt; no
+    // Block on #5's docs/ (it isn't your address).
+    await expect(page.locator('efs-files-listing wa-button.efs-new-folder')).toBeVisible();
+    await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-remove')).toBeVisible();
+    await expect(row(page, 'docs').locator('wa-button.efs-entry-block')).toHaveCount(0);
+    chain.step("The address: its entries, yours first, the owner's unlabelled; yours to change");
 
     await settled(page);
     await row(page, 'docs').locator('button.efs-entry-open').click();

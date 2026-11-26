@@ -7,7 +7,7 @@
 // - The rules for what can't be opened or picked are in picker-model.ts.
 
 import type { Efs } from '@efs/sdk';
-import type { FolderRef, FolderRow } from '@efs/sdk/files';
+import type { FolderRef, FolderRow, ParentRef } from '@efs/sdk/files';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
@@ -57,8 +57,8 @@ export class EfsFolderPicker extends EfsElement {
   declare translator: Translator;
   /** Where to open: the trail to the folder the person is in (used only if every name is known). */
   declare start: readonly NavStep[];
-  /** The folder the entry is in now. */
-  declare source: FolderRef;
+  /** The folder (or address) the entry is in now. */
+  declare source: ParentRef;
   /** The folders being moved (the selection's folders; none when only files move). */
   declare moving: readonly FolderRef[];
 

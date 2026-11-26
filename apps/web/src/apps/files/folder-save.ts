@@ -10,7 +10,7 @@
 
 import type { Efs, Lens, NameCheck } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
-import type { EntryRef, FolderRef } from '@efs/sdk/files';
+import type { EntryRef, FolderRef, ParentRef } from '@efs/sdk/files';
 import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
 import { saveHold, statementKey } from '../../shell/save-hold.ts';
@@ -26,13 +26,16 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { approvalsLine } from './approvals.ts';
+import { attachNotice } from './attach-notice.ts';
 import type { PickerSelection } from './folder-picker.ts';
 import {
   type AnyFolderPlan,
   type FolderPlanners,
   type FolderRequest,
   folderHold,
+  folderKey,
   nameRuleMessage,
+  type ParentKeyOf,
   placesOf,
   planRequest,
   refusalMessage,
@@ -50,7 +53,9 @@ export const FOCUS_LOST_EVENT = 'efs-folder-focus-lost';
 /** "New text file", named: the editor takes it from here (the listing starts the composer). */
 export const COMPOSE_EVENT = 'efs-compose';
 export interface ComposeDetail {
-  readonly folder: FolderRef;
+  readonly folder: ParentRef;
+  /** The place's chain key, lowercase, as save holds name it (a folder's record, an address's word). */
+  readonly key: string;
   readonly folderName: string;
   readonly name: string;
 }
@@ -76,18 +81,19 @@ const loadPlanners = async (): Promise<FolderPlanners> => {
     planRemoveEntries: files.planRemoveEntries,
     planRestoreEntries: files.planRestoreEntries,
     planUnhideEntries: files.planUnhideEntries,
+    planHideEntries: files.planHideEntries,
   };
 };
 
 /** What the dialog is asked to do. Create and Rename are named in the dialog first. */
 export type FolderAsk =
-  | { readonly kind: 'createFolder'; readonly folder: FolderRef; readonly folderName: string }
+  | { readonly kind: 'createFolder'; readonly folder: ParentRef; readonly folderName: string }
   /** Named here, then written in the editor (no plan in this dialog). */
-  | { readonly kind: 'createFile'; readonly folder: FolderRef; readonly folderName: string }
+  | { readonly kind: 'createFile'; readonly folder: ParentRef; readonly folderName: string }
   /** Upload: a file's bytes, named here (its own name first), planned and sent from here. */
   | {
       readonly kind: 'upload';
-      readonly folder: FolderRef;
+      readonly folder: ParentRef;
       readonly folderName: string;
       /** The file's own name, offered first. */
       readonly name: string;
@@ -116,6 +122,8 @@ export type FolderAsk =
     }
   /** Unblock the person's own lone blocks (NEVER_BOUND rows in "Show removed"). */
   | { readonly kind: 'unhide'; readonly entries: readonly EntryRef[] }
+  /** "Block this name here": others' entries, offered by the place's owner. */
+  | { readonly kind: 'hide'; readonly entries: readonly EntryRef[]; readonly folderName: string }
   /**
    * Tag things (a file, a folder, an address), chosen where they're shown: the place is picked in
    * the dialog. `names`: each target as it was shown, for the review and any refusal.
@@ -195,9 +203,15 @@ export class EfsFolderSave extends EfsElement {
     host: { attribute: false },
     efs: { attribute: false },
     lens: { attribute: false },
+    keyOf: { attribute: false },
   };
   declare host: AppHost;
   declare efs: Efs | undefined;
+  /**
+   * The chain key of a parent the person writes in (an address's padded word, read lazily by the
+   * listing): what holds key on. Without it, an address's places are held fail-closed.
+   */
+  declare keyOf: ParentKeyOf | undefined;
   /** The Lens the person sees the folder through (the place Lens). */
   declare lens: Lens | undefined;
 
@@ -389,6 +403,8 @@ export class EfsFolderSave extends EfsElement {
         };
       case 'unhide':
         return { kind: 'unhide', entries: ask.entries };
+      case 'hide':
+        return { kind: 'hide', entries: ask.entries };
       case 'tag':
         throw new Error('a tag is planned from the tag picker');
     }
@@ -466,7 +482,7 @@ export class EfsFolderSave extends EfsElement {
         signer: writer.account,
         unconfirmed: this.host.saving.unconfirmed.get(),
         saves: this.host.saving.saves.get(),
-        places: placesOf(request),
+        places: placesOf(request, this.keyOf),
         ...(statements ? { statements } : {}),
         except,
       },
@@ -478,7 +494,7 @@ export class EfsFolderSave extends EfsElement {
     const { request, plan, writer } = s;
     const again = s.sent?.sequenceId;
     this.#phase.set({ ...s, phase: 'sending' });
-    const places = placesOf(request);
+    const places = placesOf(request, this.keyOf);
     // Back to the review, keeping what the last attempt said unless something new replaces it.
     const back = (next: { sent?: NotSent; note?: MessageId } = {}) => {
       const sent = next.sent ?? s.sent;
@@ -663,6 +679,16 @@ export class EfsFolderSave extends EfsElement {
       }`;
   }
 
+  /**
+   * Creating at someone else's address: who sees the entry, said in the review before anything is
+   * signed. Its owner's own entry with the same name comes first for people viewing the address.
+   */
+  #attachNotice(request: FolderRequest, writer: EfsWriter) {
+    if (request.kind !== 'createFolder' && request.kind !== 'createFile') return nothing;
+    const t = this.host.translator.t.bind(this.host.translator);
+    return attachNotice(t, request.folder, writer.principal);
+  }
+
   /** A tagged thing as the dialog names it: the name it was shown by, else its short id. */
   #targetName(index: number): string {
     const ask = this.#ask.get();
@@ -753,7 +779,9 @@ export class EfsFolderSave extends EfsElement {
         return;
       if (writes) {
         // Named: the editor writes it (no wallet needed to type), once this dialog has closed.
-        this.#composing = { folder: ask.folder, folderName: ask.folderName, name: check.text };
+        const key = (this.keyOf ?? folderKey)(ask.folder);
+        if (!key) return;
+        this.#composing = { folder: ask.folder, key, folderName: ask.folderName, name: check.text };
         this.#phase.set({ phase: 'closed' });
         return;
       }
@@ -959,6 +987,23 @@ export class EfsFolderSave extends EfsElement {
       }
       case 'efs.tagReview':
         return ask.kind === 'tag' ? this.#tagReview(ask, r) : nothing;
+      case 'efs.hideReview': {
+        // Whose entry the block covers, for whom it stops showing, and who still sees it.
+        return html`<ul class="efs-folder-items">
+          ${r.entries.map(
+            (x) => html`<li class="efs-hide-item">
+              <p>
+                ${t('files.hide.review', {
+                  name: x.entry.name,
+                  author: this.#who(x.shownNow.author),
+                })}
+              </p>
+              ${after(x.shownAfter, x.entry.name)}
+            </li>`,
+          )}
+        </ul>
+        <p class="efs-quiet efs-hide-reach">${t('files.hide.reach')}</p>`;
+      }
       case 'efs.unhideReview': {
         // Your block goes; what shows at the name afterwards is the next author's, or nothing.
         const e = r.entries[0];
@@ -1000,9 +1045,11 @@ export class EfsFolderSave extends EfsElement {
                   ? 'files.restore'
                   : ask?.kind === 'unhide'
                     ? 'files.unhide.title'
-                    : ask?.kind === 'tag'
-                      ? 'files.tag.title'
-                      : 'files.remove.title';
+                    : ask?.kind === 'hide'
+                      ? 'files.hide.title'
+                      : ask?.kind === 'tag'
+                        ? 'files.tag.title'
+                        : 'files.remove.title';
     const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
     const first =
       ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
@@ -1162,6 +1209,7 @@ export class EfsFolderSave extends EfsElement {
                     : undefined;
           body = html`<div class="wa-stack wa-gap-s">
               ${this.#reviewLines(ask, s.plan)}
+              ${this.#attachNotice(s.request, s.writer)}
               <p class="efs-review-prompts">
                 ${approvalsLine(t, prompts)}
               </p>
@@ -1250,9 +1298,11 @@ export class EfsFolderSave extends EfsElement {
                               : 'files.remove.yes'
                             : ask.kind === 'unhide'
                               ? 'files.unhide.yes'
-                              : s.plan.review.kind === 'efs.tagReview'
-                                ? TAG_SEND[tagStance(s.plan.review)]
-                                : 'review.send',
+                              : ask.kind === 'hide'
+                                ? 'files.hide.yes'
+                                : s.plan.review.kind === 'efs.tagReview'
+                                  ? TAG_SEND[tagStance(s.plan.review)]
+                                  : 'review.send',
                       )}</wa-button
                     >`
             }`;

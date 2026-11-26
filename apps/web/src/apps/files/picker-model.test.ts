@@ -32,6 +32,10 @@ describe('the folder picker', () => {
     expect(cannotMoveHere(folder('a'), folder('A'))).toBe('files.move.same');
     expect(cannotMoveHere(folder('c'), folder('a'))).toBeUndefined();
   });
+  it('an entry at an address can move into any folder: an address is never the same folder', () => {
+    const home = { kind: 'home' as const, address: `0x${'ab'.repeat(20)}` as `0x${string}` };
+    expect(cannotMoveHere(folder('a'), home)).toBeUndefined();
+  });
   it('says "no folders in here" only for a complete read; otherwise as the listing does', () => {
     expect(pickerNotice(page(0, { state: 'COMPLETE' }))).toEqual({ id: 'files.move.noFolders' });
     expect(pickerNotice(page(0, { state: 'COMPLETE' }, { filtered: 3 }))).toEqual({
