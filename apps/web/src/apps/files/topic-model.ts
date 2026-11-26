@@ -10,7 +10,7 @@
 // - Each row is placed by who decided it (`decider`): a Lens author's rows first, then the public
 //   tier's, labelled; Raw applies no rule.
 
-import type { Reason } from '@efs/sdk';
+import type { Reason, WordDetail } from '@efs/sdk';
 import type {
   BroaderResult,
   Joined,
@@ -502,23 +502,11 @@ export function fromBroader(result: BroaderResult, read: WordsById): BroaderStat
 }
 
 /**
- * parseLink's `detail` names for a bad word (sdk-v2 59bb9fb, api-0.1 "parseLink"): its word grammar's, then the
- * chain's codes. The SDK types `detail` as a string, so this list is copied from its docs; one it doesn't name is
- * shown as given. With the SDK's own fold, `forbidden-ascii` is only ever punctuation or a symbol: a capital or a
- * space left in a word that isn't all ASCII (the fold changes only all-ASCII words) is `unfolded`.
+ * The words for each reason parseLink gives a refused tag word: its `detail`, the SDK's closed WordDetail (sdk-v2
+ * f27c190), so a reason it adds or renames fails to compile here. With the SDK's own fold, `forbidden-ascii` is only
+ * ever punctuation or a symbol: a capital or a space left in a word that isn't all ASCII (the fold changes only
+ * all-ASCII words) is `unfolded`. `fold-refused` is a caller's own fold refusing; this app passes none.
  */
-type WordDetail =
-  | 'length'
-  | 'malformed-utf8'
-  | 'slash'
-  | 'control'
-  | 'forbidden-ascii'
-  | 'unfolded'
-  | 'trailing-dot'
-  | 'leading-dash'
-  | 'address-shaped'
-  | 'refused-character';
-
 const BAD_WORD_REASONS: Readonly<Record<WordDetail, MessageId>> = {
   length: 'files.badWord.length',
   'malformed-utf8': 'files.badWord.malformed',
@@ -530,11 +518,10 @@ const BAD_WORD_REASONS: Readonly<Record<WordDetail, MessageId>> = {
   'leading-dash': 'files.badWord.leadingDash',
   'address-shaped': 'files.badWord.addressShaped',
   'refused-character': 'files.badWord.refusedCharacter',
+  'fold-refused': 'files.badWord.foldRefused',
 };
 
-/** The words for parseLink's `detail` on a bad word; undefined for one this list doesn't name. */
-export function badWordReason(detail: string | undefined): MessageId | undefined {
-  return detail !== undefined && Object.hasOwn(BAD_WORD_REASONS, detail)
-    ? BAD_WORD_REASONS[detail as WordDetail]
-    : undefined;
+/** The words for parseLink's `detail` on a refused tag word. */
+export function badWordReason(detail: WordDetail): MessageId {
+  return BAD_WORD_REASONS[detail];
 }

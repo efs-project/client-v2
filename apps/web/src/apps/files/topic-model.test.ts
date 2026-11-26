@@ -466,8 +466,7 @@ describe("a refused word's reason: parseLink's detail, in the person's words (sd
     const reason = (link: string) => {
       const parsed = parseLink(link);
       if (parsed.status !== 'INVALID' || parsed.rule !== 'bad-word') return parsed.status;
-      const id = badWordReason(parsed.detail);
-      return id ? t(id) : `unnamed: ${parsed.detail}`;
+      return t(badWordReason(parsed.detail));
     };
     // The fold changes only an all-ASCII word, so a capital or a space left beside other text
     // is "unfolded", never forbidden-ascii.
@@ -484,9 +483,14 @@ describe("a refused word's reason: parseLink's detail, in the person's words (sd
     // What the fold makes of an all-ASCII word is a word: no reason at all.
     expect(reason('Cars%20Tesla')).toBe('OK');
   });
-  it('a detail the list does not name has no words (shown as given)', () => {
-    expect(badWordReason('constructor')).toBeUndefined();
-    expect(badWordReason('code-12')).toBeUndefined();
-    expect(badWordReason(undefined)).toBeUndefined();
+  it('every reason the SDK can give has its own words (WORD_DETAILS, at runtime too)', async () => {
+    const { WORD_DETAILS } = await import('@efs/sdk/links');
+    const { loadTranslator } = await import('../../ui/i18n.ts');
+    const { t } = await loadTranslator('en');
+    expect(WORD_DETAILS).toHaveLength(11);
+    const said = WORD_DETAILS.map((detail) => t(badWordReason(detail)));
+    expect(new Set(said).size, 'no two reasons share their words').toBe(WORD_DETAILS.length);
+    // A caller's own fold refusing (this app passes none).
+    expect(t(badWordReason('fold-refused'))).toBe("this app's rule for tag words refused it");
   });
 });
