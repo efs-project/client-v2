@@ -6,7 +6,7 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
-import { expect, preview, save } from './edit-support.ts';
+import { expect, objectLink, preview, SEEDED, save } from './edit-support.ts';
 import { fileAtRoot, openRoot, row } from './folder-support.ts';
 import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
@@ -40,7 +40,7 @@ async function open(page: Page, chain: TestChain, route: string): Promise<void> 
 const settled = (page: Page) =>
   expect(
     page.locator(
-      'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-file-tags[data-reading], efs-files-tag-picker[data-reading]',
+      'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-file-tags[data-reading], efs-files-file-versions[data-reading], efs-files-tag-picker[data-reading]',
     ),
   ).toHaveCount(0);
 
@@ -720,7 +720,9 @@ const sideways = (page: Page) =>
   page.evaluate(() => {
     const scroll = Math.max(0, document.documentElement.scrollWidth - innerWidth);
     const past = [
-      ...document.querySelectorAll('efs-files-topic *, efs-files-word *, efs-files-listing *'),
+      ...document.querySelectorAll(
+        'efs-files-topic *, efs-files-word *, efs-files-listing *, efs-files-file-versions *',
+      ),
     ]
       .filter((el) => {
         const r = el.getBoundingClientRect();
@@ -731,15 +733,16 @@ const sideways = (page: Page) =>
     return { scroll, past };
   });
 
-test('320 px: a tag, a word page and an address view fit with no sideways scroll', async ({
+test('320 px: a tag, a word page, an address view and a file with Versions open fit with no sideways scroll', async ({
   page,
 }) => {
   const chain = await testChain(
     'client-views-320',
-    'c.txt tagged /photos/sunsets and /sunsets by anvil #0; note.txt at anvil #0’s address.',
+    'c.txt tagged /photos/sunsets and /sunsets by anvil #0; note.txt at anvil #0’s address; the seeded readme.txt gets a version of its own from anvil #2.',
   );
   try {
     await taggedFile(chain, 0, 'c.txt', [['photos', 'sunsets'], ['sunsets']]);
+    await chain.editAs?.(2, 'Version by #2.\n');
     await chain.actAs?.(0, async ({ files, lens, writer, efs, account, save }) => {
       await save(
         await files.planCreateFile(efs, writer, {
@@ -773,6 +776,16 @@ test('320 px: a tag, a word page and an address view fit with no sideways scroll
     await chain.idle(500);
     expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
     chain.step("anvil #0's address at 320 px: its full address and a long name fit");
+
+    // Versions (PM, 2026-11-26): each row's label, marks and button fit at 320 px.
+    await go(page, `#/r/testnet/${objectLink(chain.ids.file as string)}`);
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
+    await press(preview(page).locator('efs-files-file-versions summary'));
+    await expect(preview(page).locator('efs-files-file-versions li.efs-version')).toHaveCount(2);
+    await settled(page);
+    await chain.idle(500);
+    expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
+    chain.step('readme.txt at 320 px with Versions open: its rows, marks and buttons fit');
   } finally {
     await chain.finish();
   }

@@ -26,6 +26,7 @@ import { tRich } from '../../ui/rich.ts';
 import { visible, wordParts } from '../../ui/visible-text.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import type { EditDoneDetail } from './editor.ts';
+import type { VersionShowDetail } from './file-versions.ts';
 import { placeLens } from './folder-model.ts';
 import type { EfsFolderSave, FolderSavedDetail } from './folder-save.ts';
 import { dataUrl, MEDIA_MAX_BYTES, SVG_MAX_BYTES, SVG_MIME } from './media.ts';
@@ -90,6 +91,21 @@ const loadReads = async (): Promise<PreviewReads> => {
 /** `load-failed`: the SDK's chunk didn't load (only a page reload can retry it). */
 type PaneState = PreviewState | { readonly phase: 'failed' } | { readonly phase: 'load-failed' };
 
+/** What a pane state shows, to tell when the file's own view moved: its status, author, revision. */
+function ownViewKey(s: PaneState): string {
+  if (!('open' in s)) return s.phase;
+  return s.open.status === 'PRESENT'
+    ? `${s.open.file.author ?? ''}|${s.open.file.revision}`
+    : s.open.status;
+}
+
+/** The author of the version a pane state shows, if it shows one. */
+function shownAuthor(s: PaneState | undefined): string | undefined {
+  return s && 'open' in s && s.open.status === 'PRESENT'
+    ? (s.open.file.author ?? undefined)
+    : undefined;
+}
+
 export class EfsFilesPreview extends EfsElement {
   static override properties = {
     host: { attribute: false },
@@ -124,8 +140,18 @@ export class EfsFilesPreview extends EfsElement {
   #loaded: { efs: Efs; key: string } | undefined;
   /** The editor is open on the file shown. */
   #editing = state(false);
-  /** "Show my version": the view's Lens with this account first, for this file, in this tab. */
-  #mine = state<string | undefined>(undefined);
+  /**
+   * "Show my version", or a version's Show in Versions: the view's Lens with this author first, for
+   * this file, in this tab. `gated`: a public-tier version, behind the media gate until "Show
+   * preview" (the creator's and the Lens authors' are not, as the file view's own fallback).
+   */
+  #first = state<
+    { readonly author: string; readonly own: boolean; readonly gated: boolean } | undefined
+  >(undefined);
+  /** What the file's own view (no Show override) showed last: Versions reads again when it moves. */
+  #ownView = state('');
+  /** Saves of this file from this pane that reached the ledger: Versions reads again after each. */
+  #fileSaves = state(0);
   /** After a save this view won't show: whose version it shows instead. */
   #notInView = state<string | undefined>(undefined);
   /** The person's own text, brought back by the banner's "Review changes". */
@@ -182,7 +208,8 @@ export class EfsFilesPreview extends EfsElement {
       this.#editing.set(resumed);
       this.#resumed = resumed;
       this.#draftText.set(undefined);
-      this.#mine.set(undefined);
+      this.#first.set(undefined);
+      this.#ownView.set('');
       this.#notInView.set(undefined);
       queueMicrotask(() => this.#load(efs, link, false));
     });
@@ -193,7 +220,10 @@ export class EfsFilesPreview extends EfsElement {
         if (p.state !== 'COMPLETE' || !this.#handedOff.has(p.sequenceId)) continue;
         if (this.#refreshed.has(p.sequenceId)) continue;
         this.#refreshed.add(p.sequenceId);
-        queueMicrotask(() => this.#reload());
+        queueMicrotask(() => {
+          this.#fileSaves.set(this.#fileSaves.get() + 1);
+          this.#reload();
+        });
       }
     });
     // A new file handed off from here is Saved: open it by its link, if the person is still where
@@ -292,14 +322,16 @@ export class EfsFilesPreview extends EfsElement {
           this.#mediaUrl.set(this.#mediaUrlFor(s, run));
           this.#mediaFailed.set(false);
           this.#state.set(s);
-          if ('open' in s && s.open.status === 'PRESENT' && !this.#mine.get()) {
+          if ('open' in s && s.open.status === 'PRESENT' && !this.#first.get()) {
             this.#noteReorder(efs, link.canonical, s.open.file.author);
           }
+          if (!this.#first.get() && s.phase !== 'opening') this.#ownView.set(ownViewKey(s));
         };
         // The media gate: a file opened from a tag's public tier fetches nothing until asked.
         const gated =
           link.target.kind === 'file' &&
-          (this.nav?.gated.get().has(link.target.subject.toLowerCase()) ?? false);
+          ((this.nav?.gated.get().has(link.target.subject.toLowerCase()) ?? false) ||
+            this.#first.get()?.gated === true);
         return runPreview(reads, efs, link.target, run.signal, show, {
           force,
           ...(gated ? { gated } : {}),
@@ -368,10 +400,10 @@ export class EfsFilesPreview extends EfsElement {
    * tab, the Lens it was listed in; else the default. "Mine first" goes in front of that.
    */
   #viewLens(efs: Efs, link: Extract<LinkState, { status: 'target' }>): Lens | undefined {
-    const mine = this.#mine.get();
-    if (!mine) return readLens(efs, link, this.nav, readerOf(this.host));
+    const first = this.#first.get();
+    if (!first) return readLens(efs, link, this.nav, readerOf(this.host));
     const listed = link.target.kind === 'file' ? this.nav?.lensFor(link.target.subject) : undefined;
-    return efs.lens.mineFirst(mine as never, link.lens ?? listed ?? efs.lens.default);
+    return efs.lens.mineFirst(first.author as never, link.lens ?? listed ?? efs.lens.default);
   }
 
   /**
@@ -495,6 +527,30 @@ export class EfsFilesPreview extends EfsElement {
     </div>`;
   }
 
+  /**
+   * When Versions reads again: another opened Lens, a save of this file reaching the ledger, or the
+   * file's own view (no Show override) showing something else, so "Showing here" and the decision
+   * line can't go stale.
+   */
+  #versionsStamp(efs: Efs, link: Extract<LinkState, { status: 'target' }>): string {
+    const lens = readLens(efs, link, this.nav, readerOf(this.host));
+    const principals = (lens ?? efs.lens.default).principals.join(',').toLowerCase();
+    return `${principals}|${this.#fileSaves.get()}|${this.#ownView.get()}`;
+  }
+
+  /** A row's Show (or a public row's Open) in Versions: that author first, as Show my version. */
+  #onVersionShow(event: Event, efs: Efs): void {
+    const { author, gated } = (event as CustomEvent<VersionShowDetail>).detail;
+    event.stopPropagation();
+    const reader = readerOf(this.host);
+    const own =
+      reader !== undefined &&
+      efs.lens.principalOf(reader as never).toLowerCase() === author.toLowerCase();
+    this.#notInView.set(undefined);
+    this.#first.set({ author, own, gated });
+    this.#reload();
+  }
+
   #onEditDone = (event: Event): void => {
     const detail = (event as CustomEvent<EditDoneDetail>).detail;
     event.stopPropagation();
@@ -511,7 +567,10 @@ export class EfsFilesPreview extends EfsElement {
     if (p) {
       this.#lastAccount = p.account;
       this.#handedOff.add(p.sequenceId);
-      if (p.state === 'COMPLETE') this.#refreshed.add(p.sequenceId);
+      if (p.state === 'COMPLETE') {
+        this.#refreshed.add(p.sequenceId);
+        this.#fileSaves.set(this.#fileSaves.get() + 1);
+      }
     }
     // Saved already, or the person asked for the newer version: show the file as it is now.
     // Otherwise the refresh comes when the banner sees the save reach the ledger.
@@ -689,7 +748,7 @@ export class EfsFilesPreview extends EfsElement {
 
   #viewNotices(t: Translator['t']) {
     const other = this.#notInView.get();
-    if (other !== undefined && !this.#mine.get()) {
+    if (other !== undefined && !this.#first.get()) {
       return html`<wa-callout variant="neutral" size="small" class="efs-edit-not-in-view">
         <span slot="icon">${appIcon('circle-info')}</span>
         <div class="wa-split wa-gap-s">
@@ -705,7 +764,11 @@ export class EfsFilesPreview extends EfsElement {
             size="s"
             class="efs-edit-show-mine"
             @click=${() => {
-              this.#mine.set(this.#lastAccount);
+              this.#first.set(
+                this.#lastAccount
+                  ? { author: this.#lastAccount, own: true, gated: false }
+                  : undefined,
+              );
               this.#notInView.set(undefined);
               this.#reload();
             }}
@@ -714,14 +777,29 @@ export class EfsFilesPreview extends EfsElement {
         </div>
       </wa-callout>`;
     }
-    if (this.#mine.get()) {
-      return html`<p class="wa-cluster wa-gap-xs efs-quiet efs-viewing-mine">
-        ${t('files.edit.viewingMine')}
+    const first = this.#first.get();
+    if (first) {
+      return html`<p
+        class="wa-cluster wa-gap-xs efs-quiet ${first.own ? 'efs-viewing-mine' : 'efs-viewing-author'}"
+      >
+        ${
+          first.own
+            ? t('files.edit.viewingMine')
+            : t('files.versions.viewingAuthor', {
+                author: authorLabel(
+                  verifiedEfs(this.host.reader.get()),
+                  first.author,
+                  undefined,
+                  this.host.names.get(),
+                ),
+              })
+        }
         <wa-button
           size="s"
           appearance="plain"
+          class="efs-show-original"
           @click=${() => {
-            this.#mine.set(undefined);
+            this.#first.set(undefined);
             this.#reload();
           }}
           >${t('files.edit.showShared')}</wa-button
@@ -816,7 +894,10 @@ export class EfsFilesPreview extends EfsElement {
           @efs-retry=${retry}
         ></efs-outcome>`;
       case 'gated':
+        // A public version shown from Versions says whose it is, with the way back, before its
+        // contents are asked for.
         return html`${this.#facts(s.open, t)}
+          ${this.#viewNotices(t)}
           <div class="wa-stack wa-gap-xs efs-preview-gated">
             <p>${t('files.preview.gated')}</p>
             <div>
@@ -824,7 +905,10 @@ export class EfsFilesPreview extends EfsElement {
                 size="s"
                 class="efs-preview-show"
                 @click=${() => {
-                  this.nav?.ungate(s.open.file.file);
+                  // A public version shown from Versions: let it through for this view only.
+                  const first = this.#first.get();
+                  if (first?.gated) this.#first.set({ ...first, gated: false });
+                  else this.nav?.ungate(s.open.file.file);
                   this.#reload();
                 }}
                 >${t('files.preview.showPreview')}</wa-button
@@ -1122,7 +1206,16 @@ export class EfsFilesPreview extends EfsElement {
               .subject=${link.target.subject}
               .lens=${this.#viewLens(efs, link)}
               .edits=${this.tagEdits}
-            ></efs-files-file-tags>`
+            ></efs-files-file-tags>
+            <efs-files-file-versions
+              .host=${this.host}
+              .efs=${efs}
+              .subject=${link.target.subject}
+              .lens=${readLens(efs, link, this.nav, readerOf(this.host))}
+              .shown=${shownAuthor(s)}
+              .stamp=${this.#versionsStamp(efs, link)}
+              @efs-version-show=${(event: Event) => this.#onVersionShow(event, efs)}
+            ></efs-files-file-versions>`
           : nothing
       }
     </div>`;

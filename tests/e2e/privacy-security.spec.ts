@@ -158,6 +158,7 @@ test('only the expected custom elements are registered', async ({ page }) => {
     'efs-endpoint-list',
     'efs-file-editor',
     'efs-files-file-tags',
+    'efs-files-file-versions',
     'efs-files-folder-picker',
     'efs-files-folder-save',
     'efs-files-listing',
