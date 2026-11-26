@@ -60,7 +60,7 @@ function statementsOf(topic: unknown, things: unknown): Touches {
   return { kind: 'statements', keys };
 }
 
-/** Folder ids compare case-insensitively (hex); names are exact (files-name/2 is byte-exact). */
+/** Folder ids compare case-insensitively (hex); names are exact (files-name/3 is byte-exact). */
 export const placeKey = (folder: unknown, name: unknown): string | undefined =>
   typeof folder === 'string' && typeof name === 'string'
     ? `${folder.toLowerCase()}\u0000${name}`

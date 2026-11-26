@@ -1,7 +1,7 @@
 // What the person asked a folder to do, as plain data: the places it holds, how the SDK plans it,
 // and the words for each refusal. Pure apart from the injected planners, so every rule is tested.
 
-import type { Efs, Lens } from '@efs/sdk';
+import type { Efs, Lens, NameRule } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
 import type {
   EntryRef,
@@ -348,21 +348,22 @@ export function refusalMessage(code: string): MessageId {
 }
 
 /** The message for a name `checkName` refused, by its rule. */
-const NAME_RULE: Readonly<Record<string, MessageId>> = {
+// Keyed on the SDK's own NameRule (files-name/3, sdk-v2 59bb9fb), so a rule the SDK adds or renames fails to
+// compile here instead of falling back to the wrong words.
+const NAME_RULE: Readonly<Record<NameRule, MessageId>> = {
   empty: 'files.name.rule.empty',
   'too-long': 'files.name.rule.tooLong',
-  'dot-or-dotdot': 'files.name.rule.dots',
   'reserved-prefix': 'files.name.rule.reserved',
-  'malformed-utf8': 'files.name.rule.character',
+  'reserved-character': 'files.name.rule.reservedCharacter',
   'excluded-character': 'files.name.rule.character',
+  'malformed-utf8': 'files.name.rule.character',
+  'trailing-dot': 'files.name.rule.trailingDot',
   'leading-whitespace': 'files.name.rule.space',
   'trailing-whitespace': 'files.name.rule.space',
 };
 
-export function nameRuleMessage(rule: string): MessageId {
-  return Object.hasOwn(NAME_RULE, rule)
-    ? (NAME_RULE[rule] as MessageId)
-    : 'files.name.rule.character';
+export function nameRuleMessage(rule: NameRule): MessageId {
+  return Object.hasOwn(NAME_RULE, rule) ? NAME_RULE[rule] : 'files.name.rule.character';
 }
 
 /** Why a reviewed folder save can't be sent now, in the order it's checked. */

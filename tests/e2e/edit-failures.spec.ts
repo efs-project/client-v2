@@ -430,7 +430,7 @@ test('a funds refusal resent too close to its deadline waits for EXPIRED, then S
 }) => {
   const chain = await testChain(
     'client-insufficient-funds-late',
-    "As \"a wallet short of funds\", but by the time Send again is pressed the chain's clock is within a minute of the plan's deadline (control.advance 850, one block). The SDK doesn't send the same plan again (IN_FLIGHT, ALREADY_ATTEMPTED): the banner says it is too close to its deadline, with nothing to press. The chain passes the deadline and finalizes past it; the banner proves it never went out (EXPIRED), and Send again plans it anew and sends it: Saved · confirming. Two wallet requests, one broadcast.",
+    "As \"a wallet short of funds\", but by the time Send again is pressed the chain's clock is within a minute of the plan's deadline (control.advance 850, one block). The SDK doesn't send the same plan again and answers at once, with no settle wait (IN_FLIGHT, ALREADY_ATTEMPTED): the banner says it is too close to its deadline, with nothing to press. The chain passes the deadline and finalizes past it; the banner proves it never went out (EXPIRED), and Send again plans it anew and sends it: Saved · confirming. Two wallet requests, one broadcast.",
   );
   try {
     const funds = await refusedForFunds(page, chain);
@@ -439,13 +439,11 @@ test('a funds refusal resent too close to its deadline waits for EXPIRED, then S
     await chain.control?.mine(1);
     chain.step("Funds added; the chain is within a minute of the plan's deadline");
     await press(funds.locator('wa-button.efs-save-continue'));
-    chain.step('Send again: too close to the deadline, the same plan is not sent again');
-    // It sends nothing, yet the SDK answers it AMBIGUOUS and checks the ledger for its settle
-    // time again (60 s; sdk-v2 f1c5625), the banner saying "Checking the network for your save…".
-    await expect(save(page, 'checking')).toBeVisible();
-    await chain.idle(300);
-    await page.clock.fastForward(61_000);
-    chain.step('After 61 s: the settle wait ends; IN_FLIGHT, ALREADY_ATTEMPTED');
+    // It sends nothing, so the SDK answers at once, with no settle wait (sdk-v2 9ec7860):
+    // IN_FLIGHT, ALREADY_ATTEMPTED.
+    chain.step(
+      'Send again: too close to the deadline, the same plan is not sent again; answered at once',
+    );
     const late = save(page, 'funds-late');
     await expect(late).toContainText(
       'This save is too close to its deadline to send again as it is. Checking that it never went out; then you can send it again.',

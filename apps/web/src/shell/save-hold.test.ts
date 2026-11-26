@@ -144,7 +144,7 @@ describe('saveHold for folder operations: per (folder, name), fail-closed', () =
     expect(at(DIR, 'a.txt')([partial(restored)]).hold).toEqual({ kind: 'unsettled' });
   });
 
-  it('names are exact: a different case is a different name (files-name/2)', () => {
+  it('names are exact: a different case is a different name (files-name/3)', () => {
     expect(at(DIR, 'A.txt')([partial(create(DIR, 'a.txt'))])).toEqual({ lapsed: false });
   });
 

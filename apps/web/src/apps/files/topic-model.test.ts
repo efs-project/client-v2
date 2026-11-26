@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   aboutCount,
   badWord,
+  badWordReason,
   CHILDREN_SHOWN,
   emptyLine,
   filedBelow,
@@ -454,5 +455,38 @@ describe('tag words as shown (wordText, pathText)', () => {
     expect(wordText('a\u202Eb')).toBe('a[U+202E]b');
     expect(pathText(['cars', 'a\u202Eb\u200Dc'])).toBe('/cars/a[U+202E]b[U+200D]c');
     expect(pathText(['cars', 'tesla'])).toBe('/cars/tesla');
+  });
+});
+
+describe("a refused word's reason: parseLink's detail, in the person's words (sdk-v2 59bb9fb)", () => {
+  it('names each reason the default fold can reach, and never calls a capital or a space a symbol', async () => {
+    const { parseLink } = await import('@efs/sdk/links');
+    const { loadTranslator } = await import('../../ui/i18n.ts');
+    const { t } = await loadTranslator('en');
+    const reason = (link: string) => {
+      const parsed = parseLink(link);
+      if (parsed.status !== 'INVALID' || parsed.rule !== 'bad-word') return parsed.status;
+      const id = badWordReason(parsed.detail);
+      return id ? t(id) : `unnamed: ${parsed.detail}`;
+    };
+    // The fold changes only an all-ASCII word, so a capital or a space left beside other text
+    // is "unfolded", never forbidden-ascii.
+    const unfolded = "a capital letter or a space, in a word that isn't all plain letters";
+    expect(reason('École%20Normale')).toBe(unfolded);
+    expect(reason('école%20normale')).toBe(unfolded);
+    expect(reason('Straße')).toBe(unfolded);
+    // Punctuation and symbols other than - _ and . (~ included), whatever else the word holds.
+    const symbol = 'a symbol other than - _ or .';
+    for (const link of ['c%2B%2B', 'q%26a', "don't", 'ab~c', 'caf%C3%A9+'])
+      expect(reason(link)).toBe(symbol);
+    expect(reason('inc.')).toBe('it ends with a dot');
+    expect(reason('-x')).toBe('it starts with a hyphen');
+    // What the fold makes of an all-ASCII word is a word: no reason at all.
+    expect(reason('Cars%20Tesla')).toBe('OK');
+  });
+  it('a detail the list does not name has no words (shown as given)', () => {
+    expect(badWordReason('constructor')).toBeUndefined();
+    expect(badWordReason('code-12')).toBeUndefined();
+    expect(badWordReason(undefined)).toBeUndefined();
   });
 });
