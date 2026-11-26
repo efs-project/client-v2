@@ -3,6 +3,7 @@
 // prints what to add to a wallet and a link to an editable file.
 //
 //   pnpm dev           start (foreground; Ctrl-C stops both)
+//   pnpm demo          the same, with a small demo dataset seeded on the chain (demo.ts)
 //   pnpm dev:status    this worktree's instance, if any
 //   pnpm dev:stop      stop this worktree's instance
 //   pnpm dev:reset     stop it and forget its state (the next start is a fresh chain anyway)
@@ -18,6 +19,7 @@ import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'no
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { type DemoLinks, seedDemo } from './demo.ts';
 import { devIdentity } from './identity.ts';
 import { isSameProcess, processFacts } from './ownership.ts';
 
@@ -148,7 +150,7 @@ function devConfig(
   };
 }
 
-async function start(): Promise<void> {
+async function start(demo = false): Promise<void> {
   const already = running();
   if (already) {
     console.log(`Already running: ${already.uiUrl} (pnpm dev:status, pnpm dev:stop)`);
@@ -244,13 +246,29 @@ async function start(): Promise<void> {
     await chain.stop().catch((error: unknown) => console.error('the chain did not stop', error));
     await server.close().catch(() => undefined);
     if (readState()?.pid === process.pid) rmSync(STATE_FILE, { force: true });
-    process.exit(0);
+    // A failure on the way (the demo's seed) has set exitCode already.
+    process.exit();
   };
   // Ctrl-C, dev:stop, and a closed terminal all stop the chain with the app. Vite installs its
   // own SIGTERM handler, which exits before the chain is stopped; this process owns shutdown.
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.removeAllListeners(signal);
     process.on(signal, () => void shutdown());
+  }
+
+  let links: DemoLinks | undefined;
+  if (demo) {
+    console.log('Seeding the demo: folders, files, two addresses, tags and a label…');
+    try {
+      links = await seedDemo(chain, (l) => `${uiUrl}#/r/${NETWORK_ID}/${l}`);
+    } catch (error) {
+      console.error(
+        'The demo could not be seeded:',
+        error instanceof Error ? error.message : error,
+      );
+      process.exitCode = 1;
+      await shutdown();
+    }
   }
 
   const readme = chain.seed.files.find((f) => f.name === 'readme.txt');
@@ -278,10 +296,34 @@ The chain is fresh on every start. If your wallet then shows stale nonces or act
 clear it for this network (MetaMask: Settings > Advanced > Clear activity tab data).
 
 pnpm dev:status | pnpm dev:stop | pnpm dev:reset    Ctrl-C stops both.`);
+  if (links) console.log(demoText(uiUrl, links));
+}
+
+/** What the demo seeded, and where to click. */
+function demoText(uiUrl: string, links: DemoLinks): string {
+  return `
+Demo data is in. Connect as the account above: that's Alice (the default view's author).
+Bob is ${links.bob}.
+
+Try it:
+  1. The root, with Guides/, Photos/ and Notes/:   ${uiUrl}
+  2. A folder (its README in the Overview):        ${links.folder}
+  3. A tag, photos/sunsets ("Sunset photos"):      ${links.tag}
+     Alice's and Bob's photos; switch to Unfiltered to see Carol's stray tag on
+     getting-started.txt, which Alice said "not this" to ("1 of 2 say it applies")
+  4. A word's page, sunsets (two places use it):  ${links.word}
+  5. Bob's address (Alice's welcome.txt is there): ${links.address}
+     Alice's entry says "yours"; open it without a wallet and it says whose it is.
+  An image, checked against the chain:            ${links.image}`;
 }
 
 const command = process.argv[2] ?? 'start';
-const commands: Record<string, () => Promise<unknown>> = { start, status, stop, reset };
+const commands: Record<string, () => Promise<unknown>> = {
+  start: () => start(process.argv.includes('--demo')),
+  status,
+  stop,
+  reset,
+};
 const run = commands[command];
 if (!run) {
   console.error(`Unknown command ${command}. Use: start, status, stop, reset.`);

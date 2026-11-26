@@ -18,6 +18,7 @@
   },
   "scripts": {
     "dev": "node tools/dev/dev.ts start",
+    "demo": "node tools/dev/dev.ts start --demo",
     "dev:status": "node tools/dev/dev.ts status",
     "dev:stop": "node tools/dev/dev.ts stop",
     "dev:reset": "node tools/dev/dev.ts reset",
