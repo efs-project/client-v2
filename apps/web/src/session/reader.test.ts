@@ -13,7 +13,7 @@ function network(deployment = 'deployments/testnet.json'): EffectiveNetwork {
       id: 'testnet',
       label: 'Testnet',
       chainId: 31337,
-      core: '0xfed9404ae31e9645ae52bee0dfac7ae2b97243ef',
+      core: '0xe942147e5e9112c64ced569e8f5fa18b20073429',
       deployment,
       release: 'deployments/testnet-release.json',
       rpcs: [],

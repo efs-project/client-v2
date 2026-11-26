@@ -3,6 +3,7 @@ import type { SequenceProgress } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
 import en from '../ui/messages/en.json' with { type: 'json' };
 import {
+  feeScheduleCopy,
   isFault,
   SAVE_MESSAGE,
   saveAction,
@@ -60,6 +61,29 @@ const R = {
     revert: { selector: '0x94b0e1fa', error: 'E_INDEX_CALL' },
   },
   overCap: { code: 'OVER_TX_GAS_CAP', retry: 'after-replan' },
+  // sdk-v2 4043ce7 (src/actions/send.ts): what a part the SDK can't split further stops with.
+  overCapSplit: {
+    code: 'OVER_TX_GAS_CAP',
+    retry: 'after-replan',
+    gas: { estimate: 41_000_000n, cap: 16_777_216n, suggestedParts: 3 },
+  },
+  // sdk-v2 4043ce7 (src/actions/send.ts insufficientFunds): a single send names its gas limit;
+  // a batch doesn't.
+  funds: { code: 'INSUFFICIENT_FUNDS', retry: 'after-reconcile', funds: { gasLimit: 1_152_000n } },
+  fundsBatch: { code: 'INSUFFICIENT_FUNDS', retry: 'after-reconcile' },
+  // sdk-v2 4043ce7 (src/actions/schedule.ts): the document's schedule, and the chain's (null: one
+  // the SDK doesn't know).
+  feeSchedule: {
+    code: 'UNSUPPORTED_PROFILE',
+    retry: 'never',
+    feeSchedule: { document: 'prague', chain: 'amsterdam', freshSlotGas: 110_020n },
+  },
+  feeScheduleUnknown: {
+    code: 'UNSUPPORTED_PROFILE',
+    retry: 'never',
+    feeSchedule: { document: 'prague', chain: null, freshSlotGas: 54_321n },
+  },
+  unsupportedProfile: { code: 'UNSUPPORTED_PROFILE', retry: 'never' },
   limit: { code: 'LIMIT_EXCEEDED', retry: 'after-replan' },
   journalTransient: { code: 'JOURNAL_UNAVAILABLE', retry: 'transient' },
   journalReconcile: { code: 'JOURNAL_UNAVAILABLE', retry: 'after-reconcile' },
@@ -166,10 +190,87 @@ describe('saveOutcome', () => {
   });
 
   it('decides by code before retry: a gas-cap refusal is "too large", not "stale"', () => {
-    expect(saveOutcome(p({ reason: reason(R.overCap) }))).toEqual({ kind: 'too-large' });
+    expect(saveOutcome(p({ reason: reason(R.overCap) }))).toEqual({
+      kind: 'too-large',
+      committed: 0,
+      total: 1,
+    });
     expect(
       saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 3, reason: reason(R.overCap) })),
-    ).toEqual({ kind: 'too-large' });
+    ).toEqual({ kind: 'too-large', committed: 1, total: 3 });
+  });
+
+  it('a part too large for one transaction says how many it needs, never "failed"', () => {
+    const none = saveOutcome(p({ total: 2, reason: reason(R.overCapSplit) }));
+    expect(none).toEqual({ kind: 'too-large', committed: 0, total: 2, parts: 3 });
+    expect(saveMessage(none)).toBe('save.tooLargeSplit');
+    expect(saveValues(none, String, String)).toMatchObject({ parts: 3 });
+    // Earlier parts are on chain: never "nothing was saved".
+    const some = saveOutcome(
+      p({ state: 'PARTIAL', committed: 2, total: 5, reason: reason(R.overCapSplit) }),
+    );
+    expect(saveMessage(some)).toBe('save.tooLargeSplitPart');
+    expect(saveValues(some, String, String)).toEqual({ committed: 2, total: 5, part: 3, parts: 3 });
+    // Recorded by an older SDK (no count): the old words, and partly saved stays partly saved.
+    expect(saveMessage(saveOutcome(p({ reason: reason(R.overCap) })))).toBe('save.tooLarge');
+    expect(
+      saveMessage(
+        saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 3, reason: reason(R.overCap) })),
+      ),
+    ).toBe('save.partialStuck');
+    for (const id of ['save.tooLargeSplit', 'save.tooLargeSplitPart'] as const) {
+      expect(en[id]).not.toMatch(/fail/i);
+      expect(en[id]).toContain('too large for one transaction');
+    }
+    expect(saveAction(none)).toBeUndefined();
+  });
+
+  it('a wallet short of funds names the gas limit, never a cost, and waits while in flight', () => {
+    const one = saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.funds) }));
+    expect(one).toEqual({ kind: 'funds', gasLimit: 1_152_000n });
+    expect(saveMessage(one)).toBe('save.funds');
+    expect(saveValues(one, String, String)).toEqual({ gasLimit: 1_152_000 });
+    // A batch: the wallet set each call's gas, so there's no limit to name.
+    const batch = saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.fundsBatch) }));
+    expect(batch).toEqual({ kind: 'funds' });
+    expect(saveMessage(batch)).toBe('save.fundsNoLimit');
+    expect(saveValues(batch, String, String)).toEqual({});
+    // Nothing to press: it can go again only once reconcile proves it never went out (EXPIRED).
+    expect(saveAction(one)).toBeUndefined();
+    for (const id of ['save.funds', 'save.fundsNoLimit'] as const) {
+      expect(en[id]).toContain('a save is charged only the gas it uses');
+      expect(en[id]).not.toMatch(/costs?\b|fail/i);
+    }
+  });
+
+  it("a fee schedule that is not the chain's names both, and nothing was sent", () => {
+    const known = saveOutcome(p({ reason: reason(R.feeSchedule) }));
+    expect(known).toEqual({ kind: 'fee-schedule', document: 'prague', chain: 'amsterdam' });
+    expect(saveMessage(known)).toBe('save.feeSchedule');
+    expect(saveValues(known, String, String)).toEqual({ document: 'prague', chain: 'amsterdam' });
+    expect(feeScheduleCopy({ document: 'prague', chain: 'amsterdam' })).toEqual({
+      id: 'save.feeSchedule',
+      values: { document: 'prague', chain: 'amsterdam' },
+    });
+    const unknown = saveOutcome(p({ reason: reason(R.feeScheduleUnknown) }));
+    expect(unknown).toEqual({ kind: 'fee-schedule', document: 'prague', chain: null });
+    expect(saveMessage(unknown)).toBe('save.feeScheduleUnknown');
+    expect(saveValues(unknown, String, String)).toEqual({ document: 'prague' });
+    expect(saveAction(known)).toBeUndefined();
+    // Without the schedules, or with parts on chain: not named (never "nothing was sent" then).
+    expect(saveOutcome(p({ reason: reason(R.unsupportedProfile) }))).toEqual({
+      kind: 'not-sent',
+      code: 'UNSUPPORTED_PROFILE',
+      canRetry: false,
+    });
+    expect(
+      saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason(R.feeSchedule) })),
+    ).toEqual({ kind: 'partial', committed: 1, total: 2, canContinue: false });
+    for (const id of ['save.feeSchedule', 'save.feeScheduleUnknown'] as const) {
+      expect(en[id]).toContain('{$document}');
+      expect(en[id]).toContain('Nothing was sent.');
+    }
+    expect(en['save.feeSchedule']).toContain('{$chain}');
   });
 
   it('a part declined mid-save is "You declined part k", with Continue (retry is "never")', () => {
