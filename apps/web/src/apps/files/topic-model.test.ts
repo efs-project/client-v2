@@ -1,6 +1,7 @@
 import type {
   BroaderResult,
   LookupPage,
+  MergedPage,
   PlaceCountRow,
   SynonymsResult,
   TopicPage,
@@ -14,15 +15,18 @@ import {
   emptyLine,
   filedBelow,
   fromBroader,
+  fromMergedPage,
   fromPlacesPage,
   fromSynonyms,
   fromTopicPage,
+  isMergedCursor,
   pathText,
   rowWho,
   sections,
   shownPlaces,
   type TopicListState,
   topicKindOpts,
+  viaLine,
 } from './topic-model.ts';
 
 const PLACE = `0x${'aa'.repeat(32)}`;
@@ -377,5 +381,69 @@ describe('the kind filter: the SDK filters, and the page says what it left out',
     // Finished with things left out: "nothing is tagged here" would be false.
     expect(emptyLine(both)).toBeUndefined();
     expect(emptyLine(fromTopicPage(page([], { finished: true })))).toBe('none');
+  });
+});
+
+describe('"Include tags that mean the same": a merged page, where each row came from, and its limits', () => {
+  const merged = (o: Partial<Extract<MergedPage, { status: 'PRESENT' }>>): MergedPage =>
+    ({
+      kind: 'efs.mergedTopicPage',
+      status: 'PRESENT',
+      view: 'everyone',
+      place: PLACE,
+      rows: [],
+      finished: true,
+      lists: [{ place: PLACE, how: 'self', hops: 0 }],
+      missing: [],
+      complete: true,
+      coverage: 'COMPLETE',
+      synonyms: { limited: false, complete: true },
+      dedup: { state: 'COMPLETE', dropped: 0 },
+      counts: { filtered: 0 },
+      ...o,
+    }) as unknown as MergedPage;
+
+  it("keeps the merge's lists, counts the ones it couldn't read, and says when a bound cut the set", () => {
+    const s = fromMergedPage(
+      merged({
+        missing: [{ place: BELOW, how: 'same', hops: 1, status: 'UNKNOWN' }] as never,
+        synonyms: { limited: true, complete: false },
+        finished: false,
+        next: { v: 1, kind: 'efs.mergedCursor' } as never,
+      }),
+    );
+    expect(s.phase === 'page' && s.merged).toEqual({
+      lists: [{ place: PLACE, how: 'self', hops: 0 }],
+      missing: 1,
+      limited: true,
+    });
+    expect(s.phase === 'page' && s.next && isMergedCursor(s.next)).toBe(true);
+    // A tag's own cursor carries no kind: never mistaken for a merged one.
+    expect(
+      isMergedCursor({ v: 1, query: '0x', next: '0x', seen: [], bounded: false } as never),
+    ).toBe(false);
+  });
+
+  it('says where a row came from: nothing for the tag itself, "same as" a joined tag, "same word" for a swap', () => {
+    const asked = ['cars', 'tesla'];
+    expect(
+      viaLine({ place: PLACE as `0x${string}`, how: 'self', hops: 0 }, asked, asked),
+    ).toBeUndefined();
+    expect(
+      viaLine({ place: BELOW as `0x${string}`, how: 'same', hops: 1 }, asked, ['autos', 'tesla']),
+    ).toEqual({
+      kind: 'same',
+      path: '/autos/tesla',
+    });
+    expect(
+      viaLine({ place: BELOW as `0x${string}`, how: 'swap', hops: 1 }, asked, ['cars', 'tsla']),
+    ).toEqual({
+      kind: 'word',
+      word: 'tsla',
+    });
+    // Words not read: nothing is claimed.
+    expect(
+      viaLine({ place: BELOW as `0x${string}`, how: 'same', hops: 1 }, asked, null),
+    ).toBeUndefined();
   });
 });

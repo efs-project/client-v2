@@ -15,6 +15,9 @@ import type {
   BroaderResult,
   Joined,
   LookupPage,
+  MergedCursor,
+  MergedList,
+  MergedPage,
   PlaceCountRow,
   Related,
   SynonymsResult,
@@ -77,7 +80,17 @@ export type TopicListState =
       readonly place: string;
       readonly rows: readonly TopicRow[];
       readonly finished: boolean;
-      readonly next?: TopicCursor;
+      readonly next?: TopicCursor | MergedCursor;
+      /**
+       * "Include tags that mean the same" (topicItemsMerged): the merge's lists, how many of them
+       * couldn't be read (always said), and whether a bound cut the synonym set ("there may be
+       * more"). Absent for a tag's own list.
+       */
+      readonly merged?: {
+        readonly lists: readonly MergedList[];
+        readonly missing: number;
+        readonly limited: boolean;
+      };
       /** Past the cursor's memory, repeats may slip through: said, never hidden. */
       readonly dedupBounded: boolean;
       /** Things the kind filter left out, over every page read (counts.filtered). */
@@ -100,6 +113,60 @@ export type TopicListState =
     };
 
 type Page = Extract<TopicListState, { phase: 'page' }>;
+
+/**
+ * The list after a merged page (topicItemsMerged): as fromTopicPage, with the merge's lists, the
+ * count it couldn't read (the latest page's, which names every refused list) and its limit.
+ */
+export function fromMergedPage(page: MergedPage, before?: Page): TopicListState {
+  if (page.status === 'PRESENT') {
+    return {
+      phase: 'page',
+      place: page.place,
+      rows: before ? [...before.rows, ...page.rows] : page.rows,
+      finished: page.finished,
+      ...(page.next && !page.finished ? { next: page.next } : {}),
+      merged: {
+        lists: page.lists,
+        missing: page.missing.length,
+        limited: page.synonyms.limited,
+      },
+      dedupBounded: (before?.dedupBounded ?? false) || page.dedup.state === 'BOUNDED',
+      filtered: (before?.filtered ?? 0) + (page.counts.filtered ?? 0),
+      more: 'idle',
+    };
+  }
+  if (page.status === 'UNKNOWN') {
+    return before ? { ...before, more: 'failed' } : { phase: 'unknown', reason: page.reason };
+  }
+  return { phase: 'invalid', reason: page.reason };
+}
+
+/** A merged listing's cursor (a tag's own list has its own, which carries no kind). */
+export const isMergedCursor = (c: TopicCursor | MergedCursor): c is MergedCursor =>
+  'kind' in c && c.kind === 'efs.mergedCursor';
+
+/**
+ * Where a merged row came from, as the row says it: nothing for the tag's own list; "same as
+ * /autos" for a tag the Lens says is the same; for a word swap, the word it swapped in ("same
+ * word: car"), found by comparing the list's words with the tag's.
+ */
+export function viaLine(
+  via: MergedList,
+  asked: readonly string[],
+  words: readonly string[] | null | undefined,
+):
+  | { readonly kind: 'same'; readonly path: string }
+  | { readonly kind: 'word'; readonly word: string }
+  | undefined {
+  if (via.how === 'self') return undefined;
+  if (!words) return undefined;
+  if (via.how === 'swap' && words.length === asked.length) {
+    const swapped = words.find((w, i) => w !== asked[i]);
+    if (swapped !== undefined) return { kind: 'word', word: swapped };
+  }
+  return { kind: 'same', path: pathText(words) };
+}
 
 /** The list after a page: the first page, or `before` with the next page's rows appended. */
 export function fromTopicPage(page: TopicPage, before?: Page): TopicListState {
