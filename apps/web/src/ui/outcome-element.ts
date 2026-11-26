@@ -6,9 +6,15 @@
 // that forgets the floor (`reset`, given by the host only there) and reads again.
 
 import { EfsElement, html, nothing } from './element.ts';
-import type { Translator } from './i18n.ts';
+import type { MessageId, Translator } from './i18n.ts';
 import { appIcon } from './icons.ts';
-import { describeOutcome, type OutcomeKind, outcomeActions, type Tone } from './outcome.ts';
+import {
+  describeOutcome,
+  type OutcomeKind,
+  outcomeActions,
+  shownMessage,
+  type Tone,
+} from './outcome.ts';
 import type { AppIcon } from './wa/icon-ids.ts';
 
 export const RETRY_EVENT = 'efs-retry';
@@ -25,6 +31,7 @@ export class EfsOutcome extends EfsElement {
     kind: { attribute: false },
     code: { attribute: false },
     reason: { attribute: false },
+    unknownMessage: { attribute: false },
     reset: { attribute: false },
     translator: { attribute: false },
     retryable: { type: Boolean },
@@ -34,6 +41,11 @@ export class EfsOutcome extends EfsElement {
   declare code: string;
   /** The result's reason code, when it has one (`result.reason?.code`). */
   declare reason: string | undefined;
+  /**
+   * The surface's own words for a plain UNKNOWN ("Other names for this tag can't be read right
+   * now"), in place of the generic copy. Never over BEHIND's, which says what is actually wrong.
+   */
+  declare unknownMessage: MessageId | undefined;
   /** Forgets the read floor: given only on a local test chain (shell/read-floor.ts). */
   declare reset: (() => void) | undefined;
   declare translator: Translator;
@@ -72,7 +84,7 @@ export class EfsOutcome extends EfsElement {
           >`,
     );
     const retry = buttons.length > 0 ? buttons : nothing;
-    const body = html`<span class="efs-outcome-message">${t(view.message)}</span>
+    const body = html`<span class="efs-outcome-message">${t(shownMessage(view, this.unknownMessage))}</span>
       <code class="efs-outcome-code" translate="no" dir="ltr">${view.code}</code>${
         view.reason
           ? html` <code class="efs-outcome-reason" translate="no" dir="ltr">${view.reason}</code>`

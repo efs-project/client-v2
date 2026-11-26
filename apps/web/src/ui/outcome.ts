@@ -94,6 +94,16 @@ export function describeOutcome(kind: OutcomeKind, code: string, reason?: string
   return { ...view, code, ...(reason ? { reason } : {}) };
 }
 
+/**
+ * The words shown: a surface's own copy for a plain UNKNOWN ("Other names for this tag can't be
+ * read right now"), else the table's. Never over BEHIND, which says what is actually wrong.
+ */
+export function shownMessage(view: OutcomeView, unknownMessage?: MessageId): MessageId {
+  return unknownMessage && view.code === 'UNKNOWN' && view.message !== BEHIND.message
+    ? unknownMessage
+    : view.message;
+}
+
 export type OutcomeAction = 'retry' | 'startOver';
 
 /**
