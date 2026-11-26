@@ -225,13 +225,17 @@ export class EfsSavesBanner extends EfsElement {
       outcome.kind === 'confirming' ||
       outcome.kind === 'checking' ||
       outcome.kind === 'wallet-lost' ||
-      outcome.kind === 'undone-checking';
-    // A reorg or a lost wallet connection is worth a warning while it settles.
-    const calm = outcome.kind !== 'undone-checking' && outcome.kind !== 'wallet-lost';
+      outcome.kind === 'undone-checking' ||
+      outcome.kind === 'funds';
+    // A reorg, a lost wallet connection or a wallet short of funds is worth a warning while it
+    // settles, with the warning's icon.
+    const calm =
+      outcome.kind !== 'undone-checking' &&
+      outcome.kind !== 'wallet-lost' &&
+      outcome.kind !== 'funds';
     const variant = done || (settling && calm) ? 'success' : 'warning';
-    const message = standing
-      ? t(heldMessage(standing, 'network' in this.network && onLocalChain(this.network.network)))
-      : describeSave(p, this.network, t);
+    const local = 'network' in this.network && onLocalChain(this.network.network);
+    const message = standing ? t(heldMessage(standing, local)) : describeSave(p, this.network, t);
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).
     const canStop = !done && !settling && outcome.kind !== 'abandoned';
@@ -243,7 +247,7 @@ export class EfsSavesBanner extends EfsElement {
       data-sequence=${p.sequenceId}
     >
       <span slot="icon"
-        >${appIcon(done || settling ? 'circle-check' : 'triangle-exclamation')}</span
+        >${appIcon(variant === 'success' ? 'circle-check' : 'triangle-exclamation')}</span
       >
       <div class="wa-split wa-gap-s efs-save-row">
         <p class="efs-save-message">${message}</p>
@@ -274,6 +278,11 @@ export class EfsSavesBanner extends EfsElement {
           }
         </div>
       </div>
+      ${
+        outcome.kind === 'funds' && local
+          ? html`<p class="efs-save-wait">${t('save.fundsWaitLocal')}</p>`
+          : nothing
+      }
       ${approving ? html`<p role="status">${t('saves.approvePart', approving)}</p>` : nothing}
       ${
         notice?.kind === 'confirm-abandon'

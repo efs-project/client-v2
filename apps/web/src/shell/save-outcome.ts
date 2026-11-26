@@ -65,7 +65,29 @@ export type SaveOutcome =
       readonly account?: string;
       readonly chainId?: number;
     }
-  | { readonly kind: 'too-large' }
+  /**
+   * Too large for one transaction (OVER_TX_GAS_CAP), after the SDK split what it can: what's left
+   * is one file's content or one statement. `parts`: how many transactions it needs
+   * (`reason.gas.suggestedParts`; absent on a save recorded by an older SDK). Never "failed".
+   */
+  | {
+      readonly kind: 'too-large';
+      readonly committed: number;
+      readonly total: number;
+      readonly parts?: number;
+    }
+  /**
+   * The wallet can't cover the transaction's gas limit (INSUFFICIENT_FUNDS, sdk-v2 4043ce7). The
+   * refusal comes after signing, so the save stays in flight until reconcile proves it never went
+   * out; then it is EXPIRED and Send again resumes it. `gasLimit` is set for a single send, never
+   * for a batch. A save is charged only the gas it uses: never say it costs `gasLimit`.
+   */
+  | { readonly kind: 'funds'; readonly gasLimit?: bigint }
+  /**
+   * The deployment document's fee schedule isn't this chain's (UNSUPPORTED_PROFILE with
+   * `reason.feeSchedule`). Nothing was sent. `chain` is null for a schedule the SDK doesn't know.
+   */
+  | { readonly kind: 'fee-schedule'; readonly document: string; readonly chain: string | null }
   | { readonly kind: 'busy' }
   /** This browser won't keep the save journal (e.g. some private modes): saving is off here. */
   | { readonly kind: 'no-journal' }
@@ -115,7 +137,11 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
         ? { kind: 'undone-checking' }
         : code === 'WALLET_DISCONNECTED' || code === 'WALLET_CHAIN_DISCONNECTED'
           ? { kind: 'wallet-lost' }
-          : { kind: 'checking' };
+          : code === 'INSUFFICIENT_FUNDS'
+            ? reason?.funds
+              ? { kind: 'funds', gasLimit: reason.funds.gasLimit }
+              : { kind: 'funds' }
+            : { kind: 'checking' };
     case 'ABANDONED':
       return { kind: 'abandoned' };
     case 'PARTIAL':
@@ -141,8 +167,20 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
             : { kind: 'refused' };
         case 'BUSY':
           return { kind: 'busy' };
-        case 'OVER_TX_GAS_CAP':
-          return { kind: 'too-large' };
+        case 'OVER_TX_GAS_CAP': {
+          const parts = reason?.gas?.suggestedParts;
+          return parts === undefined
+            ? { kind: 'too-large', committed: p.committed, total: p.total }
+            : { kind: 'too-large', committed: p.committed, total: p.total, parts };
+        }
+        case 'UNSUPPORTED_PROFILE': {
+          // Named only when nothing of the save is on chain; a partial save is said as stuck.
+          const fee = reason?.feeSchedule;
+          if (fee && !partial) {
+            return { kind: 'fee-schedule', document: fee.document, chain: fee.chain };
+          }
+          return otherwise(p, code, reason?.retry);
+        }
         case 'ALREADY_ATTEMPTED': {
           const twin = reason?.twin;
           return twin
@@ -165,19 +203,32 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
             ? { kind: 'partial', committed: p.committed, total: p.total, canContinue: true }
             : { kind: 'not-through' };
         default:
-          return partial
-            ? {
-                kind: 'partial',
-                committed: p.committed,
-                total: p.total,
-                canContinue: sameAgain(reason?.retry),
-              }
-            : { kind: 'not-sent', code, canRetry: sameAgain(reason?.retry) };
+          return otherwise(p, code, reason?.retry);
       }
     }
     default:
       return { kind: 'not-sent', code: String(p.state), canRetry: false };
   }
+}
+
+/** A code this version doesn't name: partial saves continue, others retry, as `retry` says. */
+function otherwise(p: SequenceProgress, code: string, retry: string | undefined): SaveOutcome {
+  return p.state === 'PARTIAL'
+    ? { kind: 'partial', committed: p.committed, total: p.total, canContinue: sameAgain(retry) }
+    : { kind: 'not-sent', code, canRetry: sameAgain(retry) };
+}
+
+/** The copy that names both fee schedules (a send refused, or a plan that never was). */
+export function feeScheduleCopy(fee: {
+  readonly document: string;
+  readonly chain: string | null;
+}): {
+  readonly id: MessageId;
+  readonly values: Record<string, string>;
+} {
+  return fee.chain === null
+    ? { id: 'save.feeScheduleUnknown', values: { document: fee.document } }
+    : { id: 'save.feeSchedule', values: { document: fee.document, chain: fee.chain } };
 }
 
 /**
@@ -219,6 +270,8 @@ export const SAVE_MESSAGE: Readonly<Record<SaveOutcome['kind'], MessageId>> = {
   stale: 'save.stale',
   'wallet-mismatch': 'save.walletMismatch',
   'too-large': 'save.tooLarge',
+  funds: 'save.funds',
+  'fee-schedule': 'save.feeSchedule',
   busy: 'save.busy',
   'no-journal': 'save.noJournal',
   abandoned: 'save.abandoned',
@@ -234,6 +287,13 @@ export function saveMessage(o: SaveOutcome): MessageId {
   if (o.kind === 'stale' && o.error) return 'save.refusedByLedger';
   if (o.kind === 'wallet-mismatch' && o.account) return 'save.walletMismatchTo';
   if (o.kind === 'expired' && o.committed > 0) return 'save.expiredPart';
+  if (o.kind === 'too-large') {
+    if (o.committed > 0)
+      return o.parts === undefined ? 'save.partialStuck' : 'save.tooLargeSplitPart';
+    return o.parts === undefined ? 'save.tooLarge' : 'save.tooLargeSplit';
+  }
+  if (o.kind === 'funds' && o.gasLimit === undefined) return 'save.fundsNoLimit';
+  if (o.kind === 'fee-schedule') return feeScheduleCopy(o).id;
   return SAVE_MESSAGE[o.kind];
 }
 
@@ -252,6 +312,18 @@ export function saveValues(
       return { committed: o.committed, total: o.total, part: o.committed + 1 };
     case 'stale':
       return o.error ? { error: o.error } : {};
+    case 'too-large':
+      return {
+        committed: o.committed,
+        total: o.total,
+        part: o.committed + 1,
+        ...(o.parts === undefined ? {} : { parts: o.parts }),
+      };
+    case 'funds':
+      // A gas limit, in gas (never a price): it fits a double exactly.
+      return o.gasLimit === undefined ? {} : { gasLimit: Number(o.gasLimit) };
+    case 'fee-schedule':
+      return feeScheduleCopy(o).values;
     case 'wallet-mismatch':
       return o.account
         ? {

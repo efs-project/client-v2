@@ -19,7 +19,7 @@
 // - A save refused because the person's own version moved (E_CAS) is never re-planned into a
 //   send silently: they see that the file changed, and choose.
 
-import type { Efs, Hex, Lens } from '@efs/sdk';
+import type { Efs, Hex, Lens, Reason } from '@efs/sdk';
 import type { EfsWriter, SequenceOpts, SequenceProgress } from '@efs/sdk/actions';
 import type {
   CreateFileReview,
@@ -43,6 +43,7 @@ import {
   twinStanding,
 } from '../../shell/save-hold.ts';
 import {
+  feeScheduleCopy,
   type SaveOutcome,
   saveMessage,
   saveOutcome,
@@ -109,7 +110,11 @@ type Phase =
   | { readonly phase: 'reordered'; readonly head: RevisionRef }
   /** The person's own version moved (another tab or device) while they edited another's. */
   | { readonly phase: 'own-changed'; readonly plan: Planned; readonly writer: EfsWriter }
-  | { readonly phase: 'plan-failed'; readonly message: MessageId }
+  | {
+      readonly phase: 'plan-failed';
+      readonly message: MessageId;
+      readonly values?: Record<string, string>;
+    }
   /** A new file the planner refused (the person's own entry already has that name). */
   | {
       readonly phase: 'refused';
@@ -137,6 +142,18 @@ const loadEdit = async () => (await import('@efs/sdk/files')).planEditFile;
 const signedBy = (writer: EfsWriter, author: string | undefined): boolean =>
   author !== undefined && writer.principal.toLowerCase() === author.toLowerCase();
 const loadCreate = async () => (await import('@efs/sdk/files')).planCreateFile;
+
+/**
+ * A plan that didn't come back PLANNED for a reason this editor doesn't name. A deployment whose fee
+ * schedule isn't the chain's (UNSUPPORTED_PROFILE, sdk-v2 1054c2c) names both; anything else is
+ * "couldn't check the file".
+ */
+function planUnknown(result: object): Extract<Phase, { phase: 'plan-failed' }> {
+  const fee = 'reason' in result ? (result.reason as Reason | undefined)?.feeSchedule : undefined;
+  if (!fee) return { phase: 'plan-failed', message: 'files.edit.unknown' };
+  const copy = feeScheduleCopy(fee);
+  return { phase: 'plan-failed', message: copy.id, values: copy.values };
+}
 const loadCheckName = async () => (await import('@efs/sdk')).checkName;
 
 /** Why a new send waits: a re-read after a throw, a save to finish or stop, or one in flight. */
@@ -487,7 +504,7 @@ export class EfsFileEditor extends EfsElement {
           this.#phase.set({ phase: 'plan-failed', message: 'files.edit.tooLarge' });
           return;
         default:
-          this.#phase.set({ phase: 'plan-failed', message: 'files.edit.unknown' });
+          this.#phase.set(planUnknown(result));
       }
     } catch (error) {
       if (signal.aborted) return;
@@ -542,7 +559,7 @@ export class EfsFileEditor extends EfsElement {
         this.#phase.set({ phase: 'plan-failed', message: 'files.edit.tooLarge' });
         return;
       default:
-        this.#phase.set({ phase: 'plan-failed', message: 'files.edit.unknown' });
+        this.#phase.set(planUnknown(result));
     }
   }
 
@@ -1003,7 +1020,7 @@ export class EfsFileEditor extends EfsElement {
       case 'plan-failed':
         return html`<wa-callout variant="danger" size="small"
           ><span slot="icon">${appIcon('circle-exclamation')}</span>
-          <p role="alert">${t(s.message)}</p></wa-callout
+          <p role="alert">${t(s.message, s.values)}</p></wa-callout
         >`;
       case 'refused':
         return html`<wa-callout variant="danger" size="small" class="efs-new-refused"

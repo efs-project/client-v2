@@ -84,7 +84,7 @@ function gatesOf(t: RpcTranscript): Gate[] {
       owner:
         m.label === 'rpc eth_sendTransaction'
           ? "the page (a dev account's RPC send)"
-          : /^(mine|automine)\b/.test(m.label)
+          : /^(mine|automine|setBalance|advance)\b/.test(m.label)
             ? 'the test (chain control)'
             : 'the test (a Node-side actor)',
     });
@@ -123,6 +123,8 @@ export interface TestChain {
   readonly ids: Readonly<Record<string, string>>;
   /** Every wallet request the page made, in order (all page loads). */
   readonly walletCalls: readonly string[];
+  /** The gas limit each eth_sendTransaction the page made asked for (undefined: none set). */
+  readonly sendGas: readonly (bigint | undefined)[];
   /** Live chain controls; undefined when replaying (the transcript already holds their effect). */
   readonly control:
     | {
@@ -136,6 +138,10 @@ export interface TestChain {
          */
         lagBefore(tx: string): Promise<void>;
         catchUp(): void;
+        /** `account`'s balance, in wei (anvil_setBalance). Marked, like a head move. */
+        setBalance(account: string, wei: bigint): Promise<void>;
+        /** The chain's clock jumps `seconds` (evm_increaseTime): the next block is that much later. Marked. */
+        advance(seconds: number): Promise<void>;
       }
     | undefined;
   /** The next eth_sendTransaction is broadcast, but the page gets "connection lost" instead. */
@@ -299,6 +305,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     }
   };
   const calls: string[] = [];
+  const sendGas: (bigint | undefined)[] = [];
   const steps: string[] = [];
   /** Failures of the test's own chain or wallet plumbing: any one fails the test in finish(). */
   const harnessErrors: unknown[] = [];
@@ -349,6 +356,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         throw new Error('a lagging endpoint is live only: replay serves recorded heads');
       },
       catchUp: () => undefined,
+      setBalance: async (account, wei) => replay.mark(`setBalance ${account} ${wei}`),
+      advance: async (seconds) => replay.mark(`advance ${seconds}`),
     };
     const gates = gatesOf(transcript);
     finish = async () => {
@@ -488,6 +497,12 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       catchUp: () => {
         lagAt = undefined;
       },
+      setBalance: async (account, wei) => {
+        await rpc('anvil_setBalance', [account, `0x${wei.toString(16)}`]);
+      },
+      advance: async (seconds) => {
+        await rpc('evm_increaseTime', [seconds]);
+      },
     };
     const toAnvil: FetchLike = (url, init) => fetch(url, init as RequestInit);
     const base = anvilWallet(rpc, account, drop);
@@ -564,6 +579,14 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       },
       lagBefore: async (tx) => controlOn?.lagBefore(tx),
       catchUp: () => controlOn?.catchUp(),
+      setBalance: async (account, wei) => {
+        await controlOn?.setBalance(account, wei);
+        mark(`setBalance ${account} ${wei}`);
+      },
+      advance: async (seconds) => {
+        await controlOn?.advance(seconds);
+        mark(`advance ${seconds}`);
+      },
     };
     finish = async () => {
       try {
@@ -601,6 +624,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     deployment,
     ids,
     walletCalls: calls,
+    sendGas,
     control: control
       ? (() => {
           const c = control;
@@ -610,6 +634,9 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
             // Its receipt read is named inside; the rest is synchronous.
             lagBefore: (tx: string) => c.lagBefore(tx),
             catchUp: () => c.catchUp(),
+            setBalance: (account: string, wei: bigint) =>
+              within(`control.setBalance(${account})`, c.setBalance(account, wei)),
+            advance: (seconds: number) => within(`control.advance(${seconds})`, c.advance(seconds)),
           };
         })()
       : undefined,
@@ -721,6 +748,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       });
       await page.exposeFunction('__efsTestWallet', async (r: WalletRequest) => {
         calls.push(r.method);
+        if (r.method === 'eth_sendTransaction') {
+          const gas = (r.params as readonly { gas?: string }[] | undefined)?.[0]?.gas;
+          sendGas.push(gas === undefined ? undefined : BigInt(gas));
+        }
         try {
           if (r.method === 'eth_sendTransaction' && hold) {
             const held = hold;

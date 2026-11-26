@@ -11,15 +11,18 @@ import {
   editAndReview,
   editor,
   expect,
+  openFile,
   openReview,
   preview,
   reviewDialog,
+  SEEDED,
   save,
   sendRequests,
   sendsStarted,
   start,
 } from './edit-support.ts';
 import { press } from './press.ts';
+import { serveConfig, serveDeployment } from './support.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -355,6 +358,101 @@ test('the file changed under another author: told, then "save over the new versi
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(1);
     await expect(preview(page)).toBeVisible();
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a wallet short of funds: the gas limit is named, never a cost; funded and proven unsent, Send again saves it once', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-insufficient-funds',
+    "The editing account holds 1 wei (anvil_setBalance, marked). Send: anvil refuses the signed transaction for insufficient funds. The SDK names it (INSUFFICIENT_FUNDS, sdk-v2 4043ce7: in flight until reconcile proves it never went out) and, after its 60 s settle wait (the page clock skips it), the banner says the wallet needs enough to cover the gas limit the send asked for, never that the save costs it. Nothing went out. Then funds are added and the chain passes the plan's deadline and finalizes past it: the banner proves it never went out (EXPIRED), and Send again sends it once: Saved · confirming. Two wallet requests, one broadcast.",
+  );
+  try {
+    await page.clock.install();
+    await start(page, chain);
+    await chain.control?.setBalance(chain.ids.account as string, 1n);
+    chain.step('the editing account holds 1 wei');
+    await editAndConnect(page, chain, 'Not enough for gas.\n');
+    const review = await openReview(page, chain);
+    await press(review.locator('wa-button.efs-review-send'));
+    chain.step('Send: refused for insufficient funds, after signing (AMBIGUOUS)');
+    await expect.poll(() => sendRequests(chain).length).toBe(1);
+    // The refusal came after signing, so the SDK checks the ledger every second for up to its
+    // settle time (60 s) before it answers IN_FLIGHT; until then the review says only this.
+    await expect(review).toContainText('Approve in your wallet, then wait for the network');
+    await chain.idle(300);
+    await page.clock.fastForward(61_000);
+    chain.step('After 61 s: the settle wait ends; the save is IN_FLIGHT, INSUFFICIENT_FUNDS');
+    const funds = save(page, 'funds');
+    await expect(funds).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    const gas = chain.sendGas[0];
+    expect(gas, 'the send asked for a gas limit').toBeDefined();
+    // The limit the send asked for, as the person reads it (MF2 isolates the number).
+    const limit = Number(gas).toLocaleString('en-US');
+    await expect(funds).toContainText(
+      new RegExp(
+        `Your wallet needs enough to cover the gas limit of \\W*${limit}\\W*; a save is charged only the gas it uses\\.`,
+      ),
+    );
+    await expect(funds).not.toContainText(/Saved|costs?\b|fail/i);
+    // In flight until reconcile proves it never went out: nothing to press, and no Stop.
+    await expect(funds.locator('wa-button')).toHaveCount(0);
+    // An endpoint that isn't on this computer: no test-chain wait line.
+    await expect(funds.locator('.efs-save-wait')).toHaveCount(0);
+    if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'nothing went out').toHaveLength(0);
+    // The person adds funds. Reconcile proves it never went out once a finalized block is past the
+    // plan's deadline (its block time + 900 s): the chain's clock jumps, then 66 blocks.
+    await chain.control?.setBalance(chain.ids.account as string, 10n ** 19n);
+    await chain.control?.advance(901);
+    await chain.control?.mine(66);
+    chain.step('Funds added; the chain passes the deadline and finalizes past it');
+    await page.clock.fastForward(5_000);
+    chain.step("After 5 s: the banner's check proves it never went out (EXPIRED)");
+    const expired = save(page, 'expired');
+    await expect(expired).toContainText("This save didn't go through in time. Nothing was saved.");
+    await press(expired.locator('wa-button.efs-save-continue', { hasText: 'Send again' }));
+    chain.step('Send again: resume plans the part afresh and sends it');
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    expect(sendRequests(chain)).toHaveLength(2);
+    if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'one went out, once').toHaveLength(1);
+    await chain.idle(500);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a deployment priced for another fee schedule: nothing is planned or sent, and both schedules are named', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-fee-schedule',
+    "The page is served the fixture's deployment document with its fee schedule changed to amsterdam; the fixture chain prices storage as prague. Review: the SDK's fee-schedule check (sdk-v2 1054c2c) measures the chain and refuses to plan (UNSUPPORTED_PROFILE, feeSchedule { document: amsterdam, chain: prague }). The editor names both and says nothing was sent. No wallet request to send.",
+  );
+  try {
+    const doc = JSON.parse(chain.deployment) as { chain: { feeSchedule: string } };
+    expect(doc.chain.feeSchedule, "the fixture's own schedule").toBe('prague');
+    doc.chain.feeSchedule = 'amsterdam';
+    await chain.attach(page);
+    await serveConfig(page);
+    await serveDeployment(page, `${JSON.stringify(doc, null, 2)}\n`);
+    await openFile(page, chain);
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
+    chain.step('Open docs/readme.txt, served a document priced for amsterdam');
+    await editAndConnect(page, chain, 'Priced for another chain.\n');
+    const reviewButton = page.locator('wa-button.efs-edit-review-button');
+    await press(reviewButton);
+    chain.step('Review: the fee-schedule check refuses to plan');
+    await expect(editor(page).locator('[role="alert"]')).toContainText(
+      /This app's deployment was set up for the \W*amsterdam\W* fee schedule, but this network uses \W*prague\W*\. Nothing was sent\./,
+    );
+    // Nothing was planned, so there is no review to open.
+    await expect(reviewDialog(page)).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(500);
   } finally {
     await chain.finish();
   }

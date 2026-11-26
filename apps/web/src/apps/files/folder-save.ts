@@ -25,9 +25,11 @@ import {
   twinStanding,
 } from '../../shell/save-hold.ts';
 import {
+  feeScheduleCopy,
   type SaveOutcome,
   saveMessage,
   saveOutcome,
+  saveValues,
   type Twin,
   thrownOutcome,
 } from '../../shell/save-outcome.ts';
@@ -254,7 +256,13 @@ type Phase =
         readonly author?: string;
       }[];
     }
-  | { readonly phase: 'plan-failed'; readonly request: FolderRequest; readonly code: string }
+  | {
+      readonly phase: 'plan-failed';
+      readonly request: FolderRequest;
+      readonly code: string;
+      /** UNSUPPORTED_PROFILE: the deployment's fee schedule and the chain's, said by name. */
+      readonly feeSchedule?: { readonly document: string; readonly chain: string | null };
+    }
   | {
       readonly phase: 'review' | 'sending';
       readonly request: FolderRequest;
@@ -575,10 +583,12 @@ export class EfsFolderSave extends EfsElement {
           ),
         });
       else {
+        const fee = plan.status === 'TOO_LARGE' ? undefined : plan.reason.feeSchedule;
         this.#phase.set({
           phase: 'plan-failed',
           request,
           code: plan.status === 'TOO_LARGE' ? 'TOO_LARGE' : plan.reason.code,
+          ...(fee ? { feeSchedule: { document: fee.document, chain: fee.chain } } : {}),
         });
       }
     } catch (error) {
@@ -1779,7 +1789,9 @@ export class EfsFolderSave extends EfsElement {
                 ? t('files.upload.tooLarge')
                 : badLocator
                   ? t('files.link.invalid')
-                  : t('files.save.planFailed', { code: s.code });
+                  : s.feeSchedule
+                    ? t(feeScheduleCopy(s.feeSchedule).id, feeScheduleCopy(s.feeSchedule).values)
+                    : t('files.save.planFailed', { code: s.code });
           // Too large for the chain, or an address the SDK refused: link it instead, or fix it.
           const relink =
             ask.kind === 'upload' && s.request.kind === 'createFile' && (tooLarge || badLocator)
@@ -1886,9 +1898,7 @@ export class EfsFolderSave extends EfsElement {
                         : held
                           ? heldMessage(held, this.#onLocalChain())
                           : saveMessage(sent.outcome),
-                      sent.outcome.kind === 'wallet-mismatch' && sent.outcome.account
-                        ? { account: shortAccount(sent.outcome.account), chain: '' }
-                        : {},
+                      saveValues(sent.outcome, shortAccount, () => ''),
                     )}</p>
                     ${
                       (held === 'waiting' || held === 'unlisted') &&
