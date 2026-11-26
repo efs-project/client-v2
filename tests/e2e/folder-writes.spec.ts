@@ -1249,7 +1249,7 @@ test('64 entries selected: Move them all, then Remove them all; every part is se
     const parts = async () => {
       const text = (await prompts.textContent()) ?? '';
       if (/One approval/.test(text)) return 1;
-      const n = Number(/(\d+)\s*approvals/.exec(text.replace(/[⁦-⁩]/g, ''))?.[1]);
+      const n = Number(/(\d+)\s*approvals/.exec(text.replace(/[\u2066-\u2069]/g, ''))?.[1]);
       expect(n, text).toBeGreaterThan(1);
       return n;
     };

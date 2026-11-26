@@ -21,7 +21,8 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, keyed, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { visibleText } from '../../ui/visible-text.ts';
+import { tRich } from '../../ui/rich.ts';
+import { visible, wordParts } from '../../ui/visible-text.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import type { EditDoneDetail } from './editor.ts';
 import { placeLens } from './folder-model.ts';
@@ -32,7 +33,7 @@ import { readerNotice } from './notice.ts';
 import { type ObjectKind, type ObjectKindState, readerOf, readLens } from './object-kind.ts';
 import { type Content, type PreviewReads, type PreviewState, runPreview } from './preview-model.ts';
 import type { LinkState } from './target.ts';
-import { pathText, wordText } from './topic-model.ts';
+import { pathParts, wordShown } from './topic-model.ts';
 import { authorLabel, shortId } from './who.ts';
 
 /**
@@ -537,8 +538,8 @@ export class EfsFilesPreview extends EfsElement {
       <span slot="icon">${appIcon('tag')}</span>
       <div class="wa-stack wa-gap-xs">
         <p role="status">
-          ${t(tagged.deny ? 'files.preview.deniedTag' : 'files.preview.tagged', {
-            path: pathText(tagged.words),
+          ${tRich(t, tagged.deny ? 'files.preview.deniedTag' : 'files.preview.tagged', {
+            path: pathParts(tagged.words),
           })}
         </p>
         <div class="wa-cluster wa-gap-xs">
@@ -560,7 +561,7 @@ export class EfsFilesPreview extends EfsElement {
                 console.error(error);
               }
             }}
-            >${t('files.preview.wordPage', { word: wordText(word) })}</wa-button
+            >${tRich(t, 'files.preview.wordPage', { word: wordShown(word) })}</wa-button
           >
         </div>
       </div>
@@ -1052,7 +1053,7 @@ export class EfsFilesPreview extends EfsElement {
           link.rule === 'bad-word' && link.word !== undefined
             ? html`<p>
                 ${t('files.preview.badWordNamed')}
-                <bdi translate="no" class="efs-bad-word">${visibleText(link.word)}</bdi>
+                <bdi translate="no" class="efs-bad-word">${visible(wordParts(link.word), t)}</bdi>
                 ${badWordReason(link.detail, t)}
               </p>`
             : link.rule === 'bad-word'
@@ -1128,7 +1129,7 @@ function badWordReason(detail: string | undefined, t: Translator['t']) {
   const id = detail ? BAD_WORD_REASONS[detail] : undefined;
   if (id) return html`<span>(${t(id)})</span>`;
   return detail
-    ? html`<span>(<code translate="no" dir="ltr">${visibleText(detail)}</code>)</span>`
+    ? html`<span>(<code translate="no" dir="ltr">${visible(wordParts(detail), t)}</code>)</span>`
     : nothing;
 }
 

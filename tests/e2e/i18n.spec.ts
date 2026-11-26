@@ -67,6 +67,6 @@ test.describe('ar-XB pseudo-locale', () => {
     expect(nav.x).toBeGreaterThanOrEqual(main.x + main.width - 1);
     await openAbout(page);
     const texts = await visibleTexts(page);
-    expect(texts.filter((t) => !t.includes('‮'))).toEqual([]);
+    expect(texts.filter((t) => !t.includes('\u202E'))).toEqual([]);
   });
 });

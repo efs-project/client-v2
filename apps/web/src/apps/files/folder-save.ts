@@ -36,7 +36,8 @@ import { EfsElement, html, live, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { pressedOnce } from '../../ui/press-once.ts';
-import { labelText } from '../../ui/visible-text.ts';
+import { tRich } from '../../ui/rich.ts';
+import { labelParts, type VisibleParts } from '../../ui/visible-text.ts';
 import { approvalsLine } from './approvals.ts';
 import { attachNotice } from './attach-notice.ts';
 import type { PickerSelection } from './folder-picker.ts';
@@ -65,7 +66,7 @@ import {
 } from './link-model.ts';
 import type { NavStep } from './navigation.ts';
 import type { TagPick } from './tag-picker.ts';
-import { pathText } from './topic-model.ts';
+import { pathParts } from './topic-model.ts';
 import { authorLabel } from './who.ts';
 
 export const FOLDER_SAVED_EVENT = 'efs-folder-saved';
@@ -921,11 +922,13 @@ export class EfsFolderSave extends EfsElement {
   #tagReview(ask: Extract<FolderAsk, { kind: 'tag' }>, r: TagReview) {
     const t = this.host.translator.t.bind(this.host.translator);
     const name = ask.names.join(', ');
-    const path = r.place.kind === 'topic' ? pathText(r.place.words) : shortAccount(r.place.address);
+    // The words as shown (pills for hidden code points); an address as its short form.
+    const path: VisibleParts =
+      r.place.kind === 'topic' ? pathParts(r.place.words) : [shortAccount(r.place.address)];
     const stance = tagStance(r);
     const parent =
       r.place.kind === 'topic' && r.place.words.length > 1
-        ? pathText(r.place.words.slice(0, -1))
+        ? pathParts(r.place.words.slice(0, -1))
         : undefined;
     const line =
       stance === 'tag'
@@ -933,13 +936,16 @@ export class EfsFolderSave extends EfsElement {
         : stance === 'deny'
           ? 'files.tag.reviewDeny'
           : 'files.tag.reviewUntag';
-    return html`<p class="efs-tag-says">${t(line, { name, path })}</p>
+    return html`<p class="efs-tag-says">${tRich(t, line, { name, path })}</p>
       ${
         r.newTopics.length > 0
           ? html`<p class="efs-tag-creates">
-              ${t('files.tag.creates', {
+              ${tRich(t, 'files.tag.creates', {
                 count: r.newTopics.length,
-                paths: r.newTopics.map((x) => pathText(x.words)).join(', '),
+                paths: r.newTopics.flatMap((x, n) => [
+                  ...(n > 0 ? [', '] : []),
+                  ...pathParts(x.words),
+                ]),
               })}
             </p>`
           : nothing
@@ -949,17 +955,17 @@ export class EfsFolderSave extends EfsElement {
           ? html`<p class="efs-tag-reach">
               ${
                 parent
-                  ? t('files.tag.denyReach', { name, path, parent })
-                  : t('files.tag.denyReachRoot', { name, path })
+                  ? tRich(t, 'files.tag.denyReach', { name, path, parent })
+                  : tRich(t, 'files.tag.denyReachRoot', { name, path })
               }
             </p>`
           : nothing
       }
       ${
         stance === 'untag'
-          ? html`<p class="efs-tag-untag">${t('files.tag.untagNote', { name, path })}</p>`
+          ? html`<p class="efs-tag-untag">${tRich(t, 'files.tag.untagNote', { name, path })}</p>`
           : html`<p class="efs-tag-public">
-              ${t(stance === 'deny' ? 'files.tag.publicDeny' : 'files.tag.public', { name, path })}
+              ${tRich(t, stance === 'deny' ? 'files.tag.publicDeny' : 'files.tag.public', { name, path })}
             </p>`
       }`;
   }
@@ -1585,11 +1591,12 @@ export class EfsFolderSave extends EfsElement {
           // A link between tags: what it says (or that yours goes), and that others decide.
           const same = r.purpose === 'same';
           const args = {
-            tag: pathText(r.subject.kind === 'topic' ? r.subject.words : []),
-            other: pathText(r.other?.words ?? []),
+            tag: pathParts(r.subject.kind === 'topic' ? r.subject.words : []),
+            other: pathParts(r.other?.words ?? []),
           };
           return html`<p class="efs-label-says">
-              ${t(
+              ${tRich(
+                t,
                 r.remove
                   ? same
                     ? 'files.join.sameRemoveReview'
@@ -1606,12 +1613,12 @@ export class EfsFolderSave extends EfsElement {
         }
         // A tag's name: what it says (or that it goes), and that names are public.
         if (ask.kind !== 'label') return nothing;
-        const args = { tag: ask.tag, lang: ask.langName };
+        const args = { tag: pathParts(ask.place), lang: ask.langName };
         return html`<p class="efs-label-says">
             ${
               r.text === undefined
-                ? t('files.label.reviewRemove', args)
-                : t('files.label.review', { ...args, name: labelText(r.text) })
+                ? tRich(t, 'files.label.reviewRemove', args)
+                : tRich(t, 'files.label.review', { ...args, name: labelParts(r.text) })
             }
           </p>
           <p class="efs-quiet efs-label-public">${t('files.label.public')}</p>`;

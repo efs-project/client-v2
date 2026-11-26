@@ -7,6 +7,8 @@ import { isMarkup, type Model, parseMessage, stringifyMessage, validate } from '
 
 const DIR = fileURLToPath(new URL('../../apps/web/src/ui/messages/', import.meta.url));
 const SOURCE = 'en';
+/** The bidi controls a catalogue file never holds raw (they're written as \\u escapes). */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/gu;
 // The contract: variables, :number/:integer/:string, and .match selection. No markup,
 // attributes or other functions until a reviewed change widens it.
 const ALLOWED_FUNCTIONS = new Set(['number', 'integer', 'string']);
@@ -29,6 +31,9 @@ function check(locale: string, id: string, source: string): Set<string> {
     throw new Error(`${locale}:${id}: ${String(error)}`);
   }
   const { functions, variables } = validate(message, (type) => errors.push(type));
+  // Private-use code points are the rich-message placeholders (ui/rich.ts): a translation must
+  // never hold one, or it could stand in for an argument.
+  if (/[\uE000-\uF8FF]/u.test(source)) errors.push('private-use character');
   for (const fn of functions) if (!ALLOWED_FUNCTIONS.has(fn)) errors.push(`function :${fn}`);
   for (const pattern of patterns(message)) {
     for (const part of pattern) {
@@ -105,7 +110,7 @@ const PSEUDO: Record<string, (text: string) => string> = {
     return `⟦${accented}${'·'.repeat(Math.ceil(text.length * 0.3))}⟧`;
   },
   // Right-to-left override, so mirroring bugs are visible without a translation.
-  'ar-XB': (text) => `‮${text}‬`,
+  'ar-XB': (text) => `\u202E${text}\u202C`,
 };
 
 function pseudoLocalize(source: string, transform: (text: string) => string): string {
@@ -128,7 +133,9 @@ let drift = false;
 for (const [locale, transform] of Object.entries(PSEUDO)) {
   const generated: Catalog = {};
   for (const [id, text] of Object.entries(source)) generated[id] = pseudoLocalize(text, transform);
-  const serialized = `${JSON.stringify(generated, null, 2)}\n`;
+  // Bidi controls are written as \u escapes, never raw: a raw one in a tracked file is the
+  // Trojan Source shape (tools/checks/source-rules.test.ts refuses it).
+  const serialized = `${JSON.stringify(generated, null, 2).replace(BIDI_CONTROLS, (c) => `\\u${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`)}\n`;
   const path = `${DIR}${locale}.json`;
   if (write) {
     writeFileSync(path, serialized);

@@ -517,6 +517,7 @@
   "files.preview.badWordLink": "This link names a tag with a word the network doesn't accept (for example a capital letter in a word with accents). Check the tag's spelling.",
   "files.preview.badWordNamed": "This link names a tag with a word the network doesn't accept:",
   "files.preview.tagged": "Tagged {$path}.",
+  "ui.hiddenChar": "hidden character {$code}",
   "files.preview.deniedTag": "You said this isn't {$path}.",
   "files.preview.openTag": "Open the tag",
   "files.preview.wordPage": "The word page for {$word}",

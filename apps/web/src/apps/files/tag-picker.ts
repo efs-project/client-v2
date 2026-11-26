@@ -19,7 +19,9 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { aboutCount, badWord, pathText, wordText } from './topic-model.ts';
+import { tRich } from '../../ui/rich.ts';
+import { visible } from '../../ui/visible-text.ts';
+import { aboutCount, badWord, pathParts, wordShown } from './topic-model.ts';
 
 const loadTags = async () => import('@efs/sdk/tags');
 
@@ -250,7 +252,7 @@ export class EfsTagPicker extends EfsElement {
       ${
         refused
           ? html`<p class="efs-tag-refused" role="alert">
-              ${t('files.topic.badWord', { word: wordText(refused.word), code: refused.code })}
+              ${tRich(t, 'files.topic.badWord', { word: wordShown(refused.word), code: refused.code })}
               <span class="efs-quiet" translate="no">${refused.rule}</span>
             </p>`
           : nothing
@@ -258,36 +260,36 @@ export class EfsTagPicker extends EfsElement {
       ${
         unstable !== undefined
           ? html`<p class="efs-tag-unstable" role="alert">
-              ${t('files.tag.unstable', { word: wordText(unstable) })}
+              ${tRich(t, 'files.tag.unstable', { word: wordShown(unstable) })}
             </p>`
           : nothing
       }
       ${
         folded
           ? html`<p class="efs-tag-folded" role="status">
-              ${t('files.tag.savedAs', { path: pathText(folded) })}
+              ${tRich(t, 'files.tag.savedAs', { path: pathParts(folded) })}
             </p>`
           : nothing
       }
       ${
         isNew
-          ? html`<p class="efs-tag-new" role="status">${t('files.tag.new', { path: pathText(words) })}</p>`
+          ? html`<p class="efs-tag-new" role="status">${tRich(t, 'files.tag.new', { path: pathParts(words) })}</p>`
           : nothing
       }
       ${
         s.phase === 'reading'
           ? html`<p class="wa-cluster wa-gap-xs efs-quiet" role="status">
-              <wa-spinner></wa-spinner>${t('files.tag.looking', { word: wordText(s.word) })}
+              <wa-spinner></wa-spinner>${tRich(t, 'files.tag.looking', { word: wordShown(s.word) })}
             </p>`
           : s.phase === 'shown' && s.rows.length > 0
             ? html`<div class="wa-stack wa-gap-2xs efs-tag-suggestions">
-                <p class="efs-quiet">${t('files.tag.placesUsing', { word: wordText(s.word) })}</p>
+                <p class="efs-quiet">${tRich(t, 'files.tag.placesUsing', { word: wordShown(s.word) })}</p>
                 <ul class="efs-entries" role="list">
                   ${s.rows.map(
                     (r) => html`<li class="efs-entry efs-tag-suggestion">
                       <button type="button" class="efs-entry-open" @click=${() => this.#choose(r.words)}>
                         ${appIcon('tag')}
-                        <span class="efs-entry-name" translate="no" dir="auto">${pathText(r.words)}</span>
+                        <span class="efs-entry-name" translate="no" dir="auto">${visible(pathParts(r.words), t)}</span>
                       </button>
                       <span class="efs-entry-meta efs-quiet">
                         ${t('files.tag.aboutEveryone', { count: Number(r.about) })}

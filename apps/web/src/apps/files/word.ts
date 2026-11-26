@@ -23,6 +23,8 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { tRich } from '../../ui/rich.ts';
+import { plainVisible, visible } from '../../ui/visible-text.ts';
 import { shortId } from './editor.ts';
 import { type NameRead, nameOf, readFileNames } from './names.ts';
 import type { FolderNav } from './navigation.ts';
@@ -45,12 +47,12 @@ import {
   fromPlacesPage,
   fromTopicPage,
   type PlacesState,
-  pathText,
+  pathParts,
   sections,
   type TopicKindFilter,
   type TopicListState,
   topicKindOpts,
-  wordText,
+  wordShown,
 } from './topic-model.ts';
 import { curatorsOf, listText } from './who.ts';
 
@@ -326,8 +328,9 @@ export class EfsFilesWord extends EfsElement {
   #group(row: PlaceCountRow, place: PlaceLink, t: Translator['t']) {
     const group = this.#groups.get().get(row.topic.toLowerCase());
     const words = group?.words;
-    const path = words ? pathText(words) : shortId(row.topic);
-    const heading = words?.length === 1 ? t('files.word.justTheWord', { path }) : path;
+    const path = words ? pathParts(words) : [shortId(row.topic)];
+    const heading =
+      words?.length === 1 ? tRich(t, 'files.word.justTheWord', { path }) : visible(path, t);
     const list = group?.list;
     let items: unknown = nothing;
     if (!list || list.phase === 'loading') {
@@ -357,7 +360,7 @@ export class EfsFilesWord extends EfsElement {
             ? html`<wa-button
                 size="s"
                 class="efs-word-open"
-                aria-label=${t('files.word.open', { path })}
+                aria-label=${t('files.word.open', { path: plainVisible(path) })}
                 @click=${() => this.#open(place, words)}
                 >${t('files.word.openShort')}</wa-button
               >`
@@ -396,10 +399,10 @@ export class EfsFilesWord extends EfsElement {
       <p class="wa-cluster wa-gap-2xs efs-quiet efs-topic-mark" data-mark="tag">
         ${appIcon('tag')} <span>${t('files.topic.mark')}</span>
       </p>
-      <h3 class="efs-topic-title">${t('files.word.title', { word: wordText(word) })}</h3>
+      <h3 class="efs-topic-title">${tRich(t, 'files.word.title', { word: wordShown(word) })}</h3>
       ${
         word.endsWith('.eth')
-          ? html`<p class="efs-quiet efs-topic-not-address">${t('files.topic.notAddress', { word: wordText(word) })}</p>`
+          ? html`<p class="efs-quiet efs-topic-not-address">${tRich(t, 'files.topic.notAddress', { word: wordShown(word) })}</p>`
           : nothing
       }
       ${

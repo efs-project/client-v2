@@ -34,7 +34,8 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { labelText } from '../../ui/visible-text.ts';
+import { tRich } from '../../ui/rich.ts';
+import { labelParts, type VisibleParts, visible, wordParts } from '../../ui/visible-text.ts';
 import type { EfsFolderSave } from './folder-save.ts';
 import {
   languageName,
@@ -65,6 +66,7 @@ import {
   isMergedCursor,
   type JoinRow,
   type PlacesState,
+  pathParts,
   pathText,
   rowWho,
   type SynonymsState,
@@ -76,7 +78,7 @@ import {
   type TopicListState,
   topicKindOpts,
   viaLine,
-  wordText,
+  wordShown,
 } from './topic-model.ts';
 import { authorLabel, curatorsOf, listText, shortId } from './who.ts';
 
@@ -602,7 +604,9 @@ export class EfsFilesTopic extends EfsElement {
       <h4 class="efs-topic-heading">${t('files.topic.children')}</h4>
       <ul class="efs-entries" role="list">
         ${shown.map((row) => {
-          const label = row.word ? pathText([...place.segments, row.word]) : shortId(row.topic);
+          const label = row.word
+            ? visible(pathParts([...place.segments, row.word]), t)
+            : shortId(row.topic);
           return html`<li class="efs-entry efs-topic-child">
             ${
               row.word
@@ -731,7 +735,8 @@ export class EfsFilesTopic extends EfsElement {
 
   /** A tag's link, as a row: opens that tag's own page (nothing is merged into this one). */
   #synonymLink(words: readonly string[] | null, id: string) {
-    const label = words ? pathText(words) : shortId(id);
+    const t = this.host.translator.t.bind(this.host.translator);
+    const label = words ? visible(pathParts(words), t) : shortId(id);
     if (!words) {
       return html`<span class="efs-entry-open">
         ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="ltr">${label}</span>
@@ -971,7 +976,7 @@ export class EfsFilesTopic extends EfsElement {
         : html`<span class="efs-topic-filed"
             >${
               below
-                ? t('files.topic.filedAt', { path: pathText(below) })
+                ? tRich(t, 'files.topic.filedAt', { path: pathParts(below) })
                 : t('files.topic.filedBelow')
             }</span
           >`;
@@ -1144,13 +1149,16 @@ export class EfsFilesTopic extends EfsElement {
   }
 
   /** The tag's path as shown: each segment's label (topicName) where the Lens gives one. */
-  #shownPath(words: readonly string[]): string {
+  #shownPath(words: readonly string[]): VisibleParts {
     const named = this.#segments.get();
-    if (!named || named.length !== words.length) return pathText(words);
-    // A word is escaped as words are (wordText); a label (its display name, "Sunset photos") gets
-    // the lighter labelText: only controls, bidi controls and noncharacters are shown, since a
-    // label's spaces, joiners and marks are its own. It stays inside the message's bidi isolate.
-    return `/${named.map((x) => (x.source === 'none' ? wordText(x.name) : labelText(x.name))).join('/')}`;
+    if (!named || named.length !== words.length) return pathParts(words);
+    // A word is shown as words are (wordParts); a label (its display name, "Sunset photos") by
+    // the lighter labelParts, since a label's spaces, joiners and marks are its own. Each stays
+    // inside the message's bidi isolate.
+    return named.flatMap((x) => [
+      '/',
+      ...(x.source === 'none' ? wordParts(x.name) : labelParts(x.name)),
+    ]);
   }
 
   #header(place: PlaceLink, t: Translator['t']) {
@@ -1165,9 +1173,9 @@ export class EfsFilesTopic extends EfsElement {
       <h3 class="efs-topic-title">
         ${
           isTopic
-            ? t('files.topic.title', {
+            ? tRich(t, 'files.topic.title', {
                 // A Lens the link brought (not the reader's) never relabels the title: its words.
-                path: place.lens ? pathText(place.segments) : this.#shownPath(place.segments),
+                path: place.lens ? pathParts(place.segments) : this.#shownPath(place.segments),
               })
             : t('files.home.title', { address: shownAddress })
         }
@@ -1176,7 +1184,7 @@ export class EfsFilesTopic extends EfsElement {
         // A label shown in place of a word: the words stay beside it (they're what the link holds).
         isTopic && this.#segments.get()?.some((x) => x.source !== 'none')
           ? html`<p class="efs-quiet efs-topic-words" translate="no" dir=${place.lens ? 'auto' : 'ltr'}>
-              ${place.lens ? this.#shownPath(place.segments) : pathText(place.segments)}
+              ${visible(place.lens ? this.#shownPath(place.segments) : pathParts(place.segments), t)}
             </p>`
           : nothing
       }
@@ -1184,7 +1192,7 @@ export class EfsFilesTopic extends EfsElement {
         isTopic && place.segments.length === 1
           ? html`<div>
               <wa-button size="s" appearance="plain" class="efs-word-back" @click=${() => this.plain?.set(undefined)}
-                >${t('files.word.back', { word: wordText(place.segments[0] ?? '') })}</wa-button
+                >${tRich(t, 'files.word.back', { word: wordShown(place.segments[0] ?? '') })}</wa-button
               >
             </div>`
           : nothing
@@ -1192,7 +1200,7 @@ export class EfsFilesTopic extends EfsElement {
       ${
         isTopic && place.segments.length === 1 && place.segments[0]?.endsWith('.eth')
           ? html`<p class="efs-quiet efs-topic-not-address">
-              ${t('files.topic.notAddress', { word: wordText(place.segments[0] ?? '') })}
+              ${tRich(t, 'files.topic.notAddress', { word: wordShown(place.segments[0] ?? '') })}
             </p>`
           : nothing
       }
@@ -1236,8 +1244,8 @@ export class EfsFilesTopic extends EfsElement {
       ${
         mine
           ? html`<span class="efs-quiet efs-topic-mine"
-              >${t('files.label.mine', {
-                name: labelText(mine),
+              >${tRich(t, 'files.label.mine', {
+                name: labelParts(mine),
                 lang: languageName(this.#lang(), this.host.translator.locale),
               })}</span
             >`
@@ -1292,8 +1300,8 @@ export class EfsFilesTopic extends EfsElement {
     return html`<span class="efs-topic-via" data-how=${via.how}
       >${
         line.kind === 'word'
-          ? t('files.merged.viaWord', { word: line.word })
-          : t('files.merged.viaSame', { path: line.path })
+          ? tRich(t, 'files.merged.viaWord', { word: wordShown(line.word) })
+          : tRich(t, 'files.merged.viaSame', { path: line.path })
       }</span
     >`;
   }
