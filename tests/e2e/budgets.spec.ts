@@ -4,6 +4,7 @@
 
 import { link } from '@efs/sdk';
 import { expect, test } from '@playwright/test';
+import { testChain } from './chain.ts';
 import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './support.ts';
 
 /**
@@ -11,6 +12,8 @@ import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './s
  * next 100 ms (samples in docs/design/shell.md, "Time budgets"). Re-measure, don't bump.
  */
 const BUDGET_MS = { booted: 900, previewVerified: 4300 };
+/** The same budgets for the tag, word and address views: their first list in place of the file. */
+const VIEW_BUDGET_MS = { booted: BUDGET_MS.booted, listed: BUDGET_MS.previewVerified };
 
 test('startup and Preview stay within their budgets @chromium-only', async ({ page }, info) => {
   const cdp = await page.context().newCDPSession(page);
@@ -38,4 +41,85 @@ test('startup and Preview stay within their budgets @chromium-only', async ({ pa
   expect(measured.previewVerified).toBeLessThan(
     BUDGET_MS.previewVerified || Number.POSITIVE_INFINITY,
   );
+});
+
+/**
+ * The tag, word and address views, each loaded fresh as a guest with the CPU slowed 4×: the shell
+ * within the same 900 ms, and each view's first list (its rows, or an honest empty or unknown:
+ * efs:topic-listed, efs:word-listed, efs:listing-listed) within the Preview's 4.3 s. Recorded
+ * chain answers (its own transcript), so only the client's work is timed.
+ */
+test('a tag, a word page and an address view stay within their budgets @chromium-only', async ({
+  page,
+}, info) => {
+  const chain = await testChain(
+    'client-budget-views',
+    'c.txt tagged /photos/sunsets and /sunsets by anvil #0; note.txt at anvil #0’s address.',
+  );
+  try {
+    await chain.actAs?.(0, async ({ files, root, lens, writer, efs, account, save }) => {
+      const tags = await import('@efs/sdk/tags');
+      const made = (await save(
+        await files.planCreateFile(efs, writer, {
+          folder: root,
+          name: 'c.txt',
+          content: new TextEncoder().encode('c\n'),
+          lens,
+        }),
+      )) as { file: { subject: `0x${string}` } };
+      const target = { kind: 'file', subject: made.file.subject } as const;
+      for (const topic of [['photos', 'sunsets'], ['sunsets']]) {
+        await save(await tags.planTag(efs, writer, { topic, targets: [target] }));
+      }
+      await save(
+        await files.planCreateFile(efs, writer, {
+          folder: { kind: 'home', address: account as `0x${string}` },
+          name: 'note.txt',
+          content: new TextEncoder().encode('note\n'),
+          lens,
+        }),
+      );
+      return { account0: account };
+    });
+    const zero = chain.ids.account0 as string;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    await chain.attach(page);
+    await serveConfig(page);
+    await serveDeployment(page, chain.deployment);
+    const views = [
+      { view: 'tag', route: '#/r/testnet/photos/sunsets', mark: 'efs:topic-listed' },
+      { view: 'word', route: '#/r/testnet/sunsets', mark: 'efs:word-listed' },
+      { view: 'address', route: `#/r/testnet/${zero}`, mark: 'efs:listing-listed' },
+    ];
+    const measured: Record<string, { booted: number; listed: number }> = {};
+    for (const { view, route, mark } of views) {
+      // A query string of its own: a full page load, so every mark starts again.
+      await page.goto(`./?view=${view}${route}`);
+      await booted(page);
+      await page.waitForFunction((m) => performance.getEntriesByName(m, 'mark').length > 0, mark);
+      measured[view] = await page.evaluate(
+        (m) => ({
+          booted: performance.getEntriesByName('efs:booted')[0]?.startTime ?? Number.NaN,
+          listed: performance.getEntriesByName(m)[0]?.startTime ?? Number.NaN,
+        }),
+        mark,
+      );
+      // Let this view's reads finish before the next load, so a replay meets the same calls.
+      await expect(page.locator('[data-reading]')).toHaveCount(0);
+      await chain.idle(500);
+      chain.step(`The ${view} view, loaded fresh`);
+    }
+    await info.attach('budgets-views.json', {
+      body: JSON.stringify({ cpuSlowdown: 4, measured, budget: VIEW_BUDGET_MS }, null, 2),
+      contentType: 'application/json',
+    });
+    console.log(`budgets (views): ${JSON.stringify(measured)}`);
+    for (const { view } of views) {
+      expect(measured[view]?.booted, `${view}: booted`).toBeLessThan(VIEW_BUDGET_MS.booted);
+      expect(measured[view]?.listed, `${view}: listed`).toBeLessThan(VIEW_BUDGET_MS.listed);
+    }
+  } finally {
+    await chain.finish();
+  }
 });

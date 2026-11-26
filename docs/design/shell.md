@@ -225,6 +225,16 @@ The budgets are 2.5× CI's median, rounded up to the next 100 ms (PM, 2026-11-25
 
 CI runners vary about twofold between runs: the last two rows are main with a docs change and main with slice G, which measure the same locally (480–730 ms before G, 480–510 ms after), yet CI put them at 1,143 ms and 2,458 ms. An Apple-silicon laptop measures about 130 ms and 500 ms, so set budgets from CI, never from a laptop. If a run trips a budget with no code change behind it, re-measure and record the new samples here rather than raising the number to make it pass.
 
+**The tag, word and address views** have the same two budgets (`client-budget-views`, its own recorded transcript): each loaded fresh as a guest, the shell within **900 ms** and the view's first list within **4.3 s**. A view's end point is its first rows, or an honest empty or unknown state, marked once per page load (`platform/marks.ts`): `efs:topic-listed` (a tag), `efs:word-listed` (a word's places) and `efs:listing-listed` (an address's entries, or any listing). Their numbers are attached as `budgets-views.json` and logged as `budgets (views): {…}`. Laptop samples, 4× slowed (CI's will be added as they come in; set nothing from these):
+
+| View | booted | listed |
+|---|---|---|
+| Tag (`/photos/sunsets`) | 127–135 | 505–536 |
+| Word (`sunsets`) | 73–76 | 349–367 |
+| Address | 74–76 | 434–483 |
+
+At 320 px the three views are checked in all three browsers (`tags.spec.ts`, `client-views-320`): the page never scrolls sideways, and nothing in the Entries pane reaches past the screen's right edge, which also catches a long path or address that a pane would otherwise clip.
+
 ## Startup budget
 
 Lit, Signals and Web Awesome are now startup code, a deliberate change from C0 (whose startup set was 13,615 B brotli). The 250 KiB budget is now a failing gate in `tools/build/check-graph.ts`, and counts the icon sprite as well as everything `index.html` loads.

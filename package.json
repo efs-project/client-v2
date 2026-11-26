@@ -33,7 +33,7 @@
     "build:repro": "node tools/build/repro.ts",
     "test:e2e": "playwright test",
     "test:e2e:live": "EFS_CHAIN=live playwright test tests/e2e/edit tests/e2e/media tests/e2e/folders tests/e2e/folder-writes tests/e2e/a11y-files tests/e2e/tags --project=chromium",
-    "transcripts:record": "EFS_CHAIN=record playwright test tests/e2e/edit tests/e2e/media tests/e2e/folders tests/e2e/folder-writes tests/e2e/a11y-files tests/e2e/tags --project=chromium --workers=1",
+    "transcripts:record": "EFS_CHAIN=record playwright test tests/e2e/edit tests/e2e/media tests/e2e/folders tests/e2e/folder-writes tests/e2e/a11y-files tests/e2e/tags tests/e2e/budgets --project=chromium --workers=1",
     "preview:static": "node tools/serve/static-serve.ts --dir apps/web/dist",
     "icons": "node tools/build/icons.ts --write"
   },

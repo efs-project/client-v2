@@ -14,6 +14,7 @@
 import type { Efs } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
 import type { PlaceCountRow, TopicRow, TopicView } from '@efs/sdk/tags';
+import { markOnce } from '../../platform/marks.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
@@ -142,6 +143,8 @@ export class EfsFilesWord extends EfsElement {
       if (signal.aborted) return;
       const places = fromPlacesPage(page);
       this.#places.set(places);
+      // The word's places are on screen (or honestly not): the budget's end point.
+      markOnce('efs:word-listed');
       if (places.phase === 'page') {
         await this.#readGroups(efs, place, view, reader, places.rows, signal);
         await this.#readNames(efs, place, view, reader, signal);
@@ -150,6 +153,7 @@ export class EfsFilesWord extends EfsElement {
       if (signal.aborted) return;
       console.error(error);
       this.#places.set({ phase: 'unknown' });
+      markOnce('efs:word-listed');
     } finally {
       if (this.#run === run) delete this.dataset.reading;
     }

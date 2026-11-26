@@ -24,6 +24,7 @@ import type {
   TopicRow,
   TopicView,
 } from '@efs/sdk/tags';
+import { markOnce } from '../../platform/marks.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
@@ -373,6 +374,8 @@ export class EfsFilesTopic extends EfsElement {
       );
       const next = fromTopicPage(page);
       this.#state.set(next);
+      // A tag's first rows (or an honest empty or unknown) are on screen: the budget's end point.
+      if (place.status === 'topic') markOnce('efs:topic-listed');
       // One after the other, so the reads keep one order (replays depend on it).
       await this.#readPaths(efs, next, signal);
       if (place.status === 'topic' && !signal.aborted)

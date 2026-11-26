@@ -595,3 +595,69 @@ test('Name this tag: your name in your language, said public in the review; the 
     await chain.finish();
   }
 });
+
+/**
+ * Whether anything in the Entries pane runs past the right edge: the page scrolling sideways, or
+ * an element (a long path, an address) wider than the screen inside a pane that clips it.
+ */
+const sideways = (page: Page) =>
+  page.evaluate(() => {
+    const scroll = Math.max(0, document.documentElement.scrollWidth - innerWidth);
+    const past = [
+      ...document.querySelectorAll('efs-files-topic *, efs-files-word *, efs-files-listing *'),
+    ]
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.right > innerWidth + 0.5;
+      })
+      .slice(0, 5)
+      .map((el) => `${el.tagName.toLowerCase()}${el.className ? `.${el.className}` : ''}`);
+    return { scroll, past };
+  });
+
+test('320 px: a tag, a word page and an address view fit with no sideways scroll', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-views-320',
+    'c.txt tagged /photos/sunsets and /sunsets by anvil #0; note.txt at anvil #0’s address.',
+  );
+  try {
+    await taggedFile(chain, 0, 'c.txt', [['photos', 'sunsets'], ['sunsets']]);
+    await chain.actAs?.(0, async ({ files, lens, writer, efs, account, save }) => {
+      await save(
+        await files.planCreateFile(efs, writer, {
+          folder: { kind: 'home', address: account as `0x${string}` },
+          name: 'a-rather-long-note-name-for-a-narrow-screen.txt',
+          content: new TextEncoder().encode('note\n'),
+          lens,
+        }),
+      );
+      return { account0: account };
+    });
+    const zero = chain.ids.account0 as string;
+    await page.setViewportSize({ width: 320, height: 640 });
+
+    await open(page, chain, './#/r/testnet/photos/sunsets');
+    await page.getByRole('tab', { name: 'Entries' }).click();
+    await expect(section(page, 'public').or(section(page, 'lens'))).toHaveCount(1);
+    await settled(page);
+    expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
+    chain.step('The tag /photos/sunsets at 320 px: nothing runs past the edge');
+
+    await go(page, '#/r/testnet/sunsets');
+    await expect(page.locator('efs-files-word .efs-word-group').first()).toBeVisible();
+    await settled(page);
+    expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
+    chain.step('The word page sunsets at 320 px');
+
+    await go(page, `#/r/testnet/${zero}`);
+    await expect(row(page, 'a-rather-long-note-name-for-a-narrow-screen.txt')).toBeVisible();
+    await settled(page);
+    await chain.idle(500);
+    expect(await sideways(page)).toEqual({ scroll: 0, past: [] });
+    chain.step("anvil #0's address at 320 px: its full address and a long name fit");
+  } finally {
+    await chain.finish();
+  }
+});

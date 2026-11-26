@@ -61,6 +61,7 @@ import { authorLabel } from './who.ts';
  */
 const UPLOAD_MAX_MB = 50;
 
+import { markOnce } from '../../platform/marks.ts';
 import { type FolderNav, parentKey, sameParent, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import type { ObjectKindState } from './object-kind.ts';
@@ -422,12 +423,16 @@ export class EfsFilesListing extends EfsElement {
         ),
       )
       .then((s) => {
-        if (s && !run.signal.aborted) this.#state.set(s);
+        if (!s || run.signal.aborted) return;
+        this.#state.set(s);
+        // The first rows (or an honest empty or unknown) are on screen: the budget's end point.
+        markOnce('efs:listing-listed');
       })
       .catch((error: unknown) => {
         if (run.signal.aborted) return;
         console.error(error);
         this.#state.set({ phase: 'load-failed' });
+        markOnce('efs:listing-listed');
       });
   }
 
