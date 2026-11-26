@@ -523,14 +523,12 @@ export class EfsFilesListing extends EfsElement {
       : nothing;
     // Block on someone else's entry, for the place's owner only: a block is the owner's own entry
     // at that name, which hides the other one for anyone whose view puts the owner first (the
-    // address's or folder's owner, cleaning up what others put there).
+    // address's or folder's owner, cleaning up what others put there). Any row, "other" and invalid
+    // included: a block masks the name's place, never reading what the entry points at (the SDK
+    // plans it from the Lens's heads there), and junk is what an owner most wants gone.
     const owner = folder.owner;
     const block =
-      writable &&
-      owner !== undefined &&
-      this.#isMine(owner) &&
-      !this.#isMine(row.author) &&
-      row.kind !== 'invalid'
+      writable && owner !== undefined && this.#isMine(owner) && !this.#isMine(row.author)
         ? html`<wa-button
             size="s"
             appearance="plain"
