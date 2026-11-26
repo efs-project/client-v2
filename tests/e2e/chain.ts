@@ -114,6 +114,16 @@ export interface TestChain {
   /** Transactions the wallet actually broadcast (sent, not refused). */
   readonly broadcasts: readonly string[];
   /**
+   * Every eth_sendTransaction the page sent over the RPC (a dev account's save: the local chain
+   * signs it), in all modes. Each is a head move, marked in record and replay alike.
+   */
+  readonly rpcSends: readonly number[];
+  /**
+   * Seeds `pnpm demo`'s dataset (tools/dev/demo.ts) from Node; its links join `ids` as
+   * `demo.<name>` (folder, tag, word, address, image, satoshi, hal). Marked in replay.
+   */
+  readonly seedDemo: () => Promise<void>;
+  /**
    * Resolves once no RPC request is in flight and none has started for `ms`. Use it with the
    * page clock paused: then the SDK can only continue through answers already in flight (its
    * timers can't fire), so "idle" means its current step is done, not merely quiet for a while.
@@ -212,6 +222,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   const broadcasts: string[] = [];
   let editAs: TestChain['editAs'];
   let actAs: TestChain['actAs'];
+  let seedDemo: TestChain['seedDemo'] = async () => {};
+  /** Called after the page's RPC eth_sendTransaction is answered: the head moved. */
+  let markRpcSend: () => void = () => {};
+  const rpcSends: number[] = [];
 
   let answerRpc: (body: unknown) => Promise<unknown>;
   let askWallet: (r: WalletRequest) => Promise<unknown>;
@@ -231,6 +245,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     askWallet = (r) => replay.provider.request(r as never);
     // Head moves the page didn't make: the recorded mark, served in its place.
     editAs = async (index) => replay.mark(`editAs #${index}`);
+    seedDemo = async () => replay.mark('seedDemo');
+    markRpcSend = () => replay.mark('rpc eth_sendTransaction');
     actAs = async (index) => replay.mark(`actAs #${index}`);
     control = {
       automine: async (on) => replay.mark(`automine ${on}`),
@@ -350,6 +366,13 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     askWallet = (r) => (recorder?.provider ?? base).request(r as never);
     // Head moves the page didn't make, marked where they happen (replay serves them in place).
     const mark = (label: string) => recorder?.mark(label);
+    markRpcSend = () => mark('rpc eth_sendTransaction');
+    seedDemo = async () => {
+      const { seedDemo: seed } = await import('../../tools/dev/demo.ts');
+      const links = await seed(chain as never, (l) => l);
+      for (const [key, value] of Object.entries(links)) ids[`demo.${key}`] = value;
+      mark('seedDemo');
+    };
     const actOn = actAs;
     const editOn = editAs;
     const controlOn = control;
@@ -424,6 +447,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     editAs,
     actAs,
     broadcasts,
+    rpcSends,
+    seedDemo: () => seedDemo(),
     async idle(ms = 300) {
       for (;;) {
         const quiet = Date.now() - lastRpc;
@@ -450,7 +475,16 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         try {
           let json: unknown;
           try {
-            json = await answerRpc(JSON.parse(route.request().postData() ?? 'null'));
+            const body = JSON.parse(route.request().postData() ?? 'null') as unknown;
+            json = await answerRpc(body);
+            // A dev account's save goes over the RPC (the chain signs it): count it and mark the
+            // head move, in record and replay alike.
+            const items = (Array.isArray(body) ? body : [body]) as { method?: string }[];
+            for (const it of items) {
+              if (it?.method !== 'eth_sendTransaction') continue;
+              rpcSends.push(rpcSends.length + 1);
+              markRpcSend();
+            }
           } catch (error) {
             // The harness itself failed (anvil down, a broken transcript): fail the test.
             harnessErrors.push(error);

@@ -15,11 +15,31 @@ To point a deployment at a network, replace `efs.config.json` beside `index.html
 
 `pnpm install && pnpm demo` starts this checkout's own EFS chain (needs `anvil`, Foundry 1.8.3) and the app, and fills the chain with a small demo: folders with READMEs, text files and an image, files at two addresses, tags by three people and a tag's name. It prints the links below. To act, click Connect and choose **EFS dev accounts**, then pick any persona (Satoshi Nakamoto, Hal Finney, Wei Dai…): no wallet or keys needed, the local chain signs for them, and "Switch persona" in the wallet panel changes who you are. (They exist only on the local test chain; a network you add your own wallet to works too.) Then try:
 
-1. **The root**: Guides/, Photos/ and Notes/. Open Guides/ to see its README in the Overview, then a file in the Preview, checked against the chain.
-2. **Edit a file** (as Satoshi Nakamoto): Edit → Review and save → approve once, then "Saved".
-3. **A tag, `photos/sunsets`**, named "Sunset photos": Satoshi's photo under the people you trust, Hal's under everyone else. Switch to Unfiltered to see Wei Dai's stray tag, which Satoshi said "not this" to.
-4. **A word's page, `sunsets`**: every place that uses the word, the plain tag first.
-5. **Hal's address**: his own entries, and the note Satoshi left there, labelled with Satoshi's name ("yours" when you're Satoshi).
+1. **The root** (any persona, or none): Guides/, Photos/ and Notes/. Open Guides/ to see its README in the Overview, then a file in the Preview, checked against the chain.
+2. **Folders and files** (as Satoshi Nakamoto, in Notes/, which is his):
+   - New folder `drafts`, then Review and Send: one approval, and it's listed.
+   - New text file `plan.txt`: write a line, then Review and save. It reads "Saved · confirming", then "Saved" about a minute later.
+   - Rename it to `plan-v2.txt`.
+   - Remove it: the listing says you removed it, with Restore.
+   - Restore it: it's back.
+3. **A tag from the Preview** (as Satoshi): open `todo.txt` and choose Tag.
+   - Type `My Notes`; the picker says "Saved as /my_notes". Review, then Send.
+   - Open the word page `my_notes` (type it after `#/r/dev/` in the address bar), then its plain tag: todo.txt is "tagged by you". Remove my tag takes it back.
+4. **A file at an address** (as Satoshi): open Hal's address (the link printed above). New text file `hello-hal.txt` and save it: it's listed there as yours. As Hal, it reads as Satoshi's.
+5. **Kind filters** (any persona): with what they leave out counted.
+   - In Notes/, Kind → Folders shows `drafts`, and the files are counted as hidden by the filter.
+   - On the tag `photos/sunsets`, Kind → Folders shows nothing, and its files are counted, never "nothing tagged".
+6. **Whose curation applies** (Satoshi, then Hal), on `photos/sunsets`:
+   - Under the title: "Names, synonyms and hidden tags from: you".
+   - Switch persona to Hal Finney: "you, Satoshi Nakamoto". The tag is still called "Sunset photos", Satoshi's name for it: he's the chain's default curator, as the persona chooser says.
+
+More to try:
+- **Edit a file** (as Satoshi): Edit, then Review and save, approved once.
+- **Unfiltered**, on `photos/sunsets`: Wei Dai's stray tag, which Satoshi said "not this" to.
+- **The word page `sunsets`**: every place that uses the word, the plain tag first.
+- **Hal's address**: his own entries, and the note Satoshi left there, labelled with Satoshi's name ("yours" when you're Satoshi).
+
+`tests/e2e/mvp-tour.spec.ts` walks steps 2–6 in this order, from the root (replayed in three browsers, and on a live chain in CI).
 
 `pnpm dev` is the same without the demo data. `pnpm dev:stop` stops either.
 

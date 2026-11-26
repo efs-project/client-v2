@@ -332,7 +332,11 @@ Try it:
   4. A word's page, sunsets (two places use it):  ${links.word}
   5. Hal's address (Satoshi's welcome.txt is there): ${links.address}
      As Satoshi it says "yours"; as anyone else, "Satoshi Nakamoto · 0xf39F…2266's".
-  An image, checked against the chain:            ${links.image}`;
+  An image, checked against the chain:            ${links.image}
+
+The whole MVP tour, step by step with the persona for each (folders and files, a tag
+from the Preview, a file at Hal's address, kind filters, whose curation applies):
+README.md, "Try it".`;
 }
 
 const command = process.argv[2] ?? 'start';
