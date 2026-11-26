@@ -49,3 +49,17 @@ export function uploadMediaType(
     ? { mediaType: check.mediaType, from }
     : { mediaType: '', from: 'unknown', refused: check.reason };
 }
+
+/**
+ * A file too large to read here (it can only be linked): its type as the device reports it, if
+ * the chain's grammar admits it, else "" (unknown). Never from its bytes, which aren't read.
+ */
+export function declaredMediaType(
+  browserType: string,
+  normalize: (input: string) => MediaTypeCheck,
+): string {
+  const claimed = browserType.trim();
+  if (claimed === '' || /^application\/octet-stream/i.test(claimed)) return '';
+  const check = normalize(claimed);
+  return check.ok ? check.mediaType : '';
+}

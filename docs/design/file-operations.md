@@ -159,6 +159,16 @@ It's named a kind filter until topic views bring a filter by Type id (SDK dev, 2
   - the banner says "Saved · confirming", then "Saved";
   - the new file opens in the Preview once its object link exists.
 
+### Link a file stored elsewhere (PM working default D13, option A)
+
+For a file larger than the chain stores (about 1 MB), or by choice: **"Store it elsewhere and link it"** saves only the file's fingerprint and where its bytes are (planCreateFile's external content, files-external/1), in one approval at any size. No EFS servers, no keys, and no uploading on the person's behalf (pinning services, option B, are out of scope).
+- **Where it's offered:** in Upload's naming step, beside Review; after a plan that says the file is too large for the chain; and alone for a file over 50 MB (too large to read here as an upload: its bytes are read once, to fingerprint, and its type is as the device reports it).
+- **The person puts the file somewhere first** (IPFS, Arweave or a web address), then pastes its address. The app fingerprints the picked file on this device (WebCrypto SHA-256 and its exact length, up to 1 GB, read whole); it uploads and fetches nothing (`link-model.ts`).
+- **The address is checked as typed:** this feature's schemes (ipfs://, ar:// or https://) and plain ASCII with no spaces here, then the SDK's `checkLocator` for whether it could ever be read (a well-formed CID or Arweave id, no path escape, no credentials in a URL); Review stays off until both pass. Whether a reader's policy fetches it (https off by default, no gateway) is each reader's, so it doesn't block a link. The planner refuses an unreadable address again (MISUSE) before anything is signed: "The network doesn't accept this address", with "Change the address".
+- **The review says plainly:** "The bytes stay where you put them. The chain keeps only their fingerprint. If that host loses them, the file reads as unavailable, never as different bytes." It shows the address, the fingerprint and size, and the type. For a web address it adds that readers' apps fetch those only once the reader allows that site.
+- **Reading one:** the Preview verifies by the fingerprint, as for every file. Copies whose bytes differ are rejected ("don't match the published fingerprint"), never shown; none at all reads as unavailable; copies all larger than the app opens (50 MB) say so.
+- **Gateways (PM working default D14):** the client ships no default gateway, nor does the SDK (sdk-v2 141729a): an ipfs:// or ar:// read with none answers POLICY_BLOCKED (rule "no-gateway"). When a file stored on IPFS or Arweave is opened and the network has none of that kind turned on, the Preview says what it is ("This file is stored on Arweave. You have no Arweave gateway set up…") and offers **"Use public gateways"**, naming them (ipfs.io, dweb.link, trustless-gateway.link; arweave.net, ar-io.net) and saying they see your IP address and which file you read, or **"Add my own gateway"** (Settings). The choice is saved into the network's own list, a per-browser setting shown and changeable in Settings; nothing is turned on without the person's click (`platform/settings/public-gateways.ts`, the host's `usePublicGateways`).
+
 ## Create a folder
 
 - **New folder** opens a name dialog, then a review of `planCreateFolder({ folder, name })`, then Send.

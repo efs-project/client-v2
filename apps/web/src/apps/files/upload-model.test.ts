@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { uploadMediaType } from './upload-model.ts';
+import { declaredMediaType, uploadMediaType } from './upload-model.ts';
 
 // The SDK's check, as far as these cases need it: lowercase the type, refuse a bad grammar.
 const normalize = (input: string) =>
@@ -40,5 +40,18 @@ describe('uploadMediaType: from the bytes, never from the name alone', () => {
       refused: 'a bad type name',
     });
     expect(uploadMediaType(text('x'), 'TEXT/Markdown', normalize).mediaType).toBe('text/markdown');
+  });
+});
+
+describe('a file too large to read here: its type as the device reports it', () => {
+  const normalize = (input: string) =>
+    /^[a-z]+\/[a-z0-9.+-]+$/i.test(input)
+      ? ({ ok: true, mediaType: input.toLowerCase() } as const)
+      : ({ ok: false, code: 1, reason: 'grammar' } as const);
+  it('keeps what the grammar admits; drops octet-stream, nothing, and what it refuses', () => {
+    expect(declaredMediaType('video/MP4', normalize)).toBe('video/mp4');
+    expect(declaredMediaType('', normalize)).toBe('');
+    expect(declaredMediaType('application/octet-stream', normalize)).toBe('');
+    expect(declaredMediaType('not a type', normalize)).toBe('');
   });
 });

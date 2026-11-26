@@ -2,9 +2,15 @@
 // preview-model.ts; this element only renders its states and the reader session's.
 
 import type { Efs, Lens } from '@efs/sdk';
+import type { OpenedFile } from '@efs/sdk/files';
 import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
+import {
+  type GatewayKind,
+  hasGateway,
+  publicGatewayHosts,
+} from '../../platform/settings/public-gateways.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { draftKey } from '../../shell/drafts.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
@@ -109,6 +115,8 @@ export class EfsFilesPreview extends EfsElement {
   /** After a save this view won't show: whose version it shows instead. */
   #notInView = state<string | undefined>(undefined);
   /** The person's own text, brought back by the banner's "Review changes". */
+  /** "Use public gateways" in flight, or failed (cleared when it saves). */
+  #gatewayChoice = state<'saving' | 'failed' | undefined>(undefined);
   #draftText = state<string | undefined>(undefined);
   /** The editor is open because the person came back to an unsaved edit of this file. */
   #resumed = false;
@@ -780,6 +788,15 @@ export class EfsFilesPreview extends EfsElement {
           ></efs-outcome>
           ${this.#facts(open, t)}
           ${this.#viewNotices(t)}
+          ${verified ? nothing : this.#gatewayOffer(open.file, t)}
+          ${
+            // Every copy found was larger than this app reads: said as that, not as "unavailable".
+            !verified &&
+            bytes.attempts.length > 0 &&
+            bytes.attempts.every((a) => a.outcome === 'TOO_LARGE')
+              ? html`<p class="efs-quiet efs-preview-too-large">${t('files.preview.tooLargeToOpen')}</p>`
+              : nothing
+          }
           ${
             verified
               ? this.#editing.get() && this.#editable(content)
@@ -888,6 +905,56 @@ export class EfsFilesPreview extends EfsElement {
           }`;
       }
     }
+  }
+
+  /**
+   * A file stored on IPFS or Arweave that can't be read because no gateway of that kind is set up
+   * (the client ships none, D14): what it is, "Use public gateways" (named, with what they see),
+   * and "Add my own gateway". Nothing is turned on without the person's click.
+   */
+  #gatewayOffer(file: OpenedFile, t: Translator['t']) {
+    const kind: GatewayKind | undefined = file.locations.some((l) => l.scheme === 'ipfs')
+      ? 'ipfs'
+      : file.locations.some((l) => l.scheme === 'ar')
+        ? 'arweave'
+        : undefined;
+    const now = this.host.network.get();
+    if (!kind || !('network' in now)) return nothing;
+    const list = kind === 'ipfs' ? now.network.ipfsGateways : now.network.arweaveGateways;
+    if (hasGateway(list)) return nothing;
+    const state = this.#gatewayChoice.get();
+    return html`<div class="wa-stack wa-gap-xs efs-gateway-offer" data-kind=${kind}>
+      <p>${t(kind === 'ipfs' ? 'files.gateway.onIpfs' : 'files.gateway.onArweave')}</p>
+      <div class="wa-cluster wa-gap-xs">
+        <wa-button
+          size="s"
+          variant="brand"
+          class="efs-gateway-public"
+          ?loading=${state === 'saving'}
+          @click=${async () => {
+            this.#gatewayChoice.set('saving');
+            const result = await this.host.usePublicGateways(kind);
+            this.#gatewayChoice.set(result === 'SAVED' ? undefined : 'failed');
+          }}
+          >${t('files.gateway.usePublic')}</wa-button
+        >
+        <wa-button
+          size="s"
+          appearance="outlined"
+          class="efs-gateway-own"
+          @click=${() => openSettings(this, 'network')}
+          ><span slot="start">${appIcon('gear')}</span>${t('files.gateway.addOwn')}</wa-button
+        >
+      </div>
+      <p class="efs-quiet efs-gateway-note">
+        ${t('files.gateway.publicNote', { hosts: publicGatewayHosts(kind).join(', ') })}
+      </p>
+      ${
+        state === 'failed'
+          ? html`<p class="efs-folder-name-error" role="alert">${t('files.gateway.failed')}</p>`
+          : nothing
+      }
+    </div>`;
   }
 
   /**
