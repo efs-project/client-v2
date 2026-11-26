@@ -23,7 +23,17 @@ export type LinkState =
    * a folder at all; only the read says). The app opens what the names lead to by its own link.
    */
   | { readonly status: 'path'; readonly link: PathLink; readonly canonical: string }
-  | { readonly status: 'invalid'; readonly rule: string }
+  /**
+   * Not a link: `rule` says why. For a tag word the grammar refuses (`bad-word`), `word` is that
+   * segment as the link spelled it (decoded, not folded: it may hold the characters that broke
+   * the rule, so show it with visibleText) and `detail` the reason.
+   */
+  | {
+      readonly status: 'invalid';
+      readonly rule: string;
+      readonly word?: string;
+      readonly detail?: string;
+    }
   /**
    * A tag (a topic: a path of words, `cars/tesla`), folded by the SDK's interim fold (sdk-v2
    * e229ea3: an all-ASCII word is trimmed, spaces become `_`, A–Z become a–z; any other word stays
@@ -47,7 +57,14 @@ export type LinkState =
 export function linkState(location: AppLocation): LinkState {
   if (location.kind !== 'realm' || location.link === '') return { status: 'none' };
   const parsed = parseLink(location.link);
-  if (parsed.status === 'INVALID') return { status: 'invalid', rule: parsed.rule };
+  if (parsed.status === 'INVALID') {
+    return {
+      status: 'invalid',
+      rule: parsed.rule,
+      ...(parsed.word === undefined ? {} : { word: parsed.word }),
+      ...(parsed.detail === undefined ? {} : { detail: parsed.detail }),
+    };
+  }
   const { target, canonical } = parsed;
   if (target.kind === 'topic') {
     return {
