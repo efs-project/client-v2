@@ -72,6 +72,17 @@ An edit survives moving around the app. Open another file, another app or Settin
 - **An edit the editor can't show is still reachable.** If the file can't be opened as editable text when the person comes back (gone, no longer text, too large, or unreadable right now), the Preview says "You have an unsaved edit of this file…" with "Discard my unsaved edit", so the leave prompt never sticks with no way to clear it. A later read that gets the text reopens the editor on the edit.
 - **Not yet:** a marker on files with unsaved edits in the file list. That waits for folder listing, which is held.
 
+## Dev accounts on the local test chain
+
+`pnpm dev` and `pnpm demo` offer **EFS dev accounts** in the ordinary wallet picker, beside any installed wallet: twenty personas in v1's order (Satoshi Nakamoto, Hal Finney, … James Carnley; `tools/dev/personas.ts`), each a test account on this computer's anvil. It's the modern shape of a "burner" without its stale-key problems: no keys in the browser and no wallet library, just a dependency-free EIP-1193 provider (`platform/wallet/dev-accounts.ts`) that forwards a send to the dev chain with `from` set to the persona, and lets the chain sign. Anvil unlocks the first ten; the dev tool impersonates and funds the other ten at start, and checks each unlocked address against its persona.
+
+- **Only a local test chain:** the generated `efs.config.json` lists the network's `devAccounts` (names and addresses). The client keeps them only for a network whose RPCs are all on this computer, and offers them only while every RPC in effect still is (`devAccountsOf`). A hosted config can never offer them. The provider and its chooser load when the person clicks Connect, never at startup.
+- **Labelled everywhere:** the chooser and the wallet panel say "Dev account: local test chain only"; the header shows the persona's name.
+- **Choosing and switching:** connecting asks which persona (the provider's own prompt, `shell/dev-accounts-ui.ts`); "Switch persona" in the wallet panel asks again (`wallet_requestPermissions`, then `accountsChanged`), an identity change under every existing rule: holds by signer, "you first" reading again, whose labels. Batches are refused (4200), so saves go part by part.
+- **Per tab:** each tab's persona is its own, kept across a reload in `sessionStorage` (the one storage key outside the settings record and the save journal, written only when the person picks one, and on a local test chain only), so two tabs can be two people side by side.
+- **Names beside addresses:** on that network, authors read "Satoshi Nakamoto · 0xf39F…2266" wherever the app names one (`authorLabel` with the host's `names`).
+- **Tests:** `tests/e2e/dev-accounts.spec.ts` connects with the dev accounts on a local-RPC config, saves as Satoshi, switches to Adam Back and saves as him, checking whose labels and own-entry actions follow the switch. The harness answers the local RPC origin from its own chain (anvil, then the transcript).
+
 ## Testing
 
 `tests/e2e/edit.spec.ts` and `tests/e2e/edit-failures.spec.ts` drive the real UI and SDK through the whole flow, in three modes (`tests/e2e/chain.ts`):

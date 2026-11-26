@@ -11,17 +11,22 @@ export const shortId = (id: string): string =>
 
 /**
  * `principal` as the app shows it. `contracts`: addresses that may act here as contracts (an
- * address view passes its own), so a contract's principal reads as its address too.
+ * address view passes its own), so a contract's principal reads as its address too. `names`:
+ * names by lowercase address, shown beside it (the local test chain's dev accounts only:
+ * "Satoshi Nakamoto · 0xf39F…2266").
  */
 export function authorLabel(
   efs: Efs | undefined,
   principal: string,
   contracts?: readonly string[],
+  names?: ReadonlyMap<string, string>,
 ): string {
   if (!efs) return shortId(principal);
   const d = efs.lens.displayOf(
     principal as never,
     contracts ? { contracts: contracts as readonly Address[] } : undefined,
   );
-  return d.kind === 'principal' ? shortId(d.id) : shortAccount(d.address);
+  if (d.kind === 'principal') return shortId(d.id);
+  const name = names?.get(d.address.toLowerCase());
+  return name ? `${name} · ${shortAccount(d.address)}` : shortAccount(d.address);
 }

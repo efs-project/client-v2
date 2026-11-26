@@ -842,7 +842,7 @@ export class EfsFolderSave extends EfsElement {
 
   /** Another author, as the review names them: "0x1234…cdef" (in full in the title). */
   #who(author: string): string {
-    return authorLabel(this.efs, author);
+    return authorLabel(this.efs, author, undefined, this.host.names.get());
   }
 
   #picking(ask: Extract<FolderAsk, { kind: 'move' }>) {
@@ -854,6 +854,7 @@ export class EfsFolderSave extends EfsElement {
         .efs=${this.efs}
         .reader=${reader}
         .translator=${this.host.translator}
+        .names=${this.host.names.get()}
         .start=${ask.start}
         .source=${ask.entries[0]?.entry.folder}
         .moving=${ask.entries.flatMap((e) => (e.moving ? [e.moving] : []))}

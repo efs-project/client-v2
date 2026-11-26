@@ -4,20 +4,22 @@
 // them. Nothing here builds an action or computes an id: the links printed come from the SDK too.
 //
 // Who:
-// - Alice, anvil #0: the deployment's default view (its seed author), and the account to connect.
-// - Bob, anvil #1, and Carol, anvil #2: other people, so rows and tags say whose they are.
+// - Satoshi Nakamoto (anvil #0): the deployment's default view (its seed author).
+// - Hal Finney (#1) and Wei Dai (#3): other people, so rows and tags say whose they are. Any of
+//   the dev accounts can be connected ("EFS dev accounts" in the wallet picker).
 //
 // What:
 // - The shared root: Guides/ (README.md, getting-started.txt, faq.md), Photos/ (README.md,
-//   sunset.png) and Notes/ (todo.txt, ideas.txt), by Alice.
-// - Two addresses: Alice's (profile.txt) and Bob's (about.txt, music/playlist.txt and
-//   photos/evening.png by Bob, and welcome.txt that Alice left there: "yours" to Alice,
-//   "0xf39F…'s" to anyone else).
-// - Tags: photos/sunsets (a nested path) by Alice (sunset.png) and Bob (sunset.png and his
-//   evening.png, a row from someone outside Alice's view); guides and notes/todo by Alice; the
-//   one-word tag sunsets by Bob, so the word page lists two places. Carol tags getting-started.txt
-//   at photos/sunsets, and Alice says "not this" there (Unfiltered shows "1 of 2 say it applies").
-// - A label: Alice names photos/sunsets "Sunset photos" in English.
+//   sunset.png) and Notes/ (todo.txt, ideas.txt), by Satoshi.
+// - Two addresses: Satoshi's (profile.txt) and Hal's (about.txt, music/playlist.txt and
+//   photos/evening.png by Hal, and welcome.txt that Satoshi left there: "yours" to Satoshi,
+//   "Satoshi Nakamoto · 0xf39F…'s" to anyone else).
+// - Tags: photos/sunsets (a nested path) by Satoshi (sunset.png) and Hal (sunset.png and his
+//   evening.png, a row from someone outside Satoshi's view); guides and notes/todo by Satoshi;
+//   the one-word tag sunsets by Hal, so the word page lists two places. Wei Dai tags
+//   getting-started.txt at photos/sunsets, and Satoshi says "not this" there (Unfiltered shows
+//   "1 of 2 say it applies").
+// - A label: Satoshi names photos/sunsets "Sunset photos" in English.
 
 import { crc32, deflateSync } from 'node:zlib';
 
@@ -33,8 +35,8 @@ export interface DemoLinks {
   readonly word: string;
   readonly address: string;
   readonly image: string;
-  readonly alice: string;
-  readonly bob: string;
+  readonly satoshi: string;
+  readonly hal: string;
 }
 
 type Planned = { readonly status: string; readonly parts?: unknown; readonly review?: unknown };
@@ -252,50 +254,50 @@ export async function seedDemo(
     return { account, folder, file, tag, deny, label };
   };
 
-  const alice = await as(0);
-  const bob = await as(1);
-  const carol = await as(2);
+  const satoshi = await as(0);
+  const hal = await as(1);
+  const weiDai = await as(3);
   const home = (address: string) => ({ kind: 'home', address }) as import('@efs/sdk/files').HomeRef;
 
-  // The shared root, by Alice.
-  const guides = await alice.folder(rootFolder, 'Guides');
-  await alice.file(guides, 'README.md', text(GUIDES_README));
-  const started = await alice.file(guides, 'getting-started.txt', text(GETTING_STARTED));
-  const faq = await alice.file(guides, 'faq.md', text(FAQ));
-  const photos = await alice.folder(rootFolder, 'Photos');
-  await alice.file(photos, 'README.md', text(PHOTOS_README));
-  const sunset = await alice.file(photos, 'sunset.png', sunsetPng(), 'image/png');
-  const notes = await alice.folder(rootFolder, 'Notes');
-  const todo = await alice.file(notes, 'todo.txt', text('- Try the demo\n- Tag something\n'));
-  await alice.file(notes, 'ideas.txt', text('A playlist tagged by mood.\n'));
+  // The shared root, by Satoshi.
+  const guides = await satoshi.folder(rootFolder, 'Guides');
+  await satoshi.file(guides, 'README.md', text(GUIDES_README));
+  const started = await satoshi.file(guides, 'getting-started.txt', text(GETTING_STARTED));
+  const faq = await satoshi.file(guides, 'faq.md', text(FAQ));
+  const photos = await satoshi.folder(rootFolder, 'Photos');
+  await satoshi.file(photos, 'README.md', text(PHOTOS_README));
+  const sunset = await satoshi.file(photos, 'sunset.png', sunsetPng(), 'image/png');
+  const notes = await satoshi.folder(rootFolder, 'Notes');
+  const todo = await satoshi.file(notes, 'todo.txt', text('- Try the demo\n- Tag something\n'));
+  await satoshi.file(notes, 'ideas.txt', text('A playlist tagged by mood.\n'));
 
-  // Two addresses: Alice's, and Bob's with Alice's welcome note in it.
-  await alice.file(home(alice.account), 'profile.txt', text('Alice. Writes the guides.\n'));
-  await bob.file(home(bob.account), 'about.txt', text('Bob. Mostly music.\n'));
-  const music = await bob.folder(home(bob.account), 'music');
-  await bob.file(music, 'playlist.txt', text('1. Evening\n2. Tide\n3. Lanterns\n'));
-  const bobPhotos = await bob.folder(home(bob.account), 'photos');
-  const evening = await bob.file(bobPhotos, 'evening.png', sunsetPng(0.25), 'image/png');
-  await alice.file(home(bob.account), 'welcome.txt', text('Welcome, Bob! (Alice)\n'));
+  // Two addresses: Satoshi's, and Hal's with Satoshi's welcome note in it.
+  await satoshi.file(home(satoshi.account), 'profile.txt', text('Satoshi. Writes the guides.\n'));
+  await hal.file(home(hal.account), 'about.txt', text('Hal. Mostly music.\n'));
+  const music = await hal.folder(home(hal.account), 'music');
+  await hal.file(music, 'playlist.txt', text('1. Evening\n2. Tide\n3. Lanterns\n'));
+  const halPhotos = await hal.folder(home(hal.account), 'photos');
+  const evening = await hal.file(halPhotos, 'evening.png', sunsetPng(0.25), 'image/png');
+  await satoshi.file(home(hal.account), 'welcome.txt', text('Welcome, Hal! (Satoshi)\n'));
 
   // Tags: a nested path by two people, plain tags, a stray tag and its "not this", a label.
-  await alice.tag(['photos', 'sunsets'], [sunset]);
-  await alice.tag(['guides'], [started, faq]);
-  await alice.tag(['notes', 'todo'], [todo]);
-  await bob.tag(['photos', 'sunsets'], [sunset, evening]);
-  await bob.tag(['sunsets'], [sunset]);
-  await carol.tag(['photos', 'sunsets'], [started]);
-  await alice.deny(['photos', 'sunsets'], started);
-  await alice.label(['photos', 'sunsets'], 'en', 'Sunset photos');
+  await satoshi.tag(['photos', 'sunsets'], [sunset]);
+  await satoshi.tag(['guides'], [started, faq]);
+  await satoshi.tag(['notes', 'todo'], [todo]);
+  await hal.tag(['photos', 'sunsets'], [sunset, evening]);
+  await hal.tag(['sunsets'], [sunset]);
+  await weiDai.tag(['photos', 'sunsets'], [started]);
+  await satoshi.deny(['photos', 'sunsets'], started);
+  await satoshi.label(['photos', 'sunsets'], 'en', 'Sunset photos');
 
   const route = (target: Parameters<typeof link>[0]) => uiRoute(link(target));
   return {
     folder: route({ kind: 'object', subject: guides.directory as never }),
     tag: route({ kind: 'topic', segments: ['photos', 'sunsets'], words: ['photos', 'sunsets'] }),
     word: route({ kind: 'topic', segments: ['sunsets'], words: ['sunsets'] }),
-    address: route({ kind: 'home', address: bob.account as never, names: [] }),
+    address: route({ kind: 'home', address: hal.account as never, names: [] }),
     image: route({ kind: 'object', subject: sunset.subject as never }),
-    alice: alice.account,
-    bob: bob.account,
+    satoshi: satoshi.account,
+    hal: hal.account,
   };
 }

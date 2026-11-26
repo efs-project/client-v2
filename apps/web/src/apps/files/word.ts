@@ -298,7 +298,7 @@ export class EfsFilesWord extends EfsElement {
         }
       </button>
       <span class="efs-entry-meta efs-quiet">
-        <span class="efs-topic-who">${whoLine(t, efs, row, me, undefined)}</span>
+        <span class="efs-topic-who">${whoLine(t, efs, row, me, undefined, undefined, this.host.names.get())}</span>
         ${
           row.decider.kind === 'public'
             ? html`<span class="efs-word-public">${t('files.word.fromEveryone')}</span>`

@@ -640,7 +640,7 @@ export class EfsFileEditor extends EfsElement {
     return a.status === 'READY' &&
       this.efs.lens.principalOf(a.account as never).toLowerCase() === author.toLowerCase()
       ? shortAccount(a.account)
-      : authorLabel(this.efs, author);
+      : authorLabel(this.efs, author, undefined, this.host.names.get());
   }
 
   #chainName(id: number, t: Translator['t']): string {
@@ -726,7 +726,7 @@ export class EfsFileEditor extends EfsElement {
             : html`<wa-callout variant="warning" class="efs-review-not-visible">
                 <span slot="icon">${appIcon('triangle-exclamation')}</span>
                 <p>
-                  ${t('review.notVisible', { author: authorLabel(this.efs, author) })}
+                  ${t('review.notVisible', { author: authorLabel(this.efs, author, undefined, this.host.names.get()) })}
                 </p>
               </wa-callout>`
         }

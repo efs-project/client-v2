@@ -93,6 +93,8 @@ export function whoLine(
   owner: string | undefined,
   /** An address view's own address: its contract principal (a Safe's home) reads as it too. */
   contracts?: readonly string[],
+  /** Names beside addresses (the local test chain's dev accounts). */
+  names?: ReadonlyMap<string, string>,
 ): string {
   const who = rowWho(row, me, owner);
   if (!who) return '';
@@ -100,7 +102,9 @@ export function whoLine(
     case 'you':
       return t('files.topic.taggedByYou');
     case 'author':
-      return t('files.topic.taggedBy', { author: authorLabel(efs, who.author, contracts) });
+      return t('files.topic.taggedBy', {
+        author: authorLabel(efs, who.author, contracts, names),
+      });
     case 'public':
       return who.yes === undefined ? '' : t('files.topic.yes', { count: Number(who.yes) });
     case 'raw':
@@ -640,7 +644,9 @@ export class EfsFilesTopic extends EfsElement {
       efs && reader && efs.lens.principalOf(reader as never).toLowerCase() === author.toLowerCase();
     return mine
       ? t('files.synonyms.saidByYou')
-      : t('files.synonyms.saidBy', { who: authorLabel(efs, author) });
+      : t('files.synonyms.saidBy', {
+          who: authorLabel(efs, author, undefined, this.host.names.get()),
+        });
   }
 
   /** A tag's link, as a row: opens that tag's own page (nothing is merged into this one). */
@@ -913,7 +919,7 @@ export class EfsFilesTopic extends EfsElement {
       </button>
       ${this.#removeMine(row, s, place, me, t, id)}
       <span class="efs-entry-meta efs-quiet">
-        <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined)}</span>
+        <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined, this.host.names.get())}</span>
         ${filed}
       </span>
     </li>`;

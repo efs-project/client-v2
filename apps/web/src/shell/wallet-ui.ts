@@ -10,7 +10,12 @@ import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
 import type { NetworkState } from './network-state.ts';
 import { sharedGatewayNotice } from './shared-gateway.ts';
-import { type SwitchOutcome, shortAccount, type WalletSession } from './wallet-state.ts';
+import {
+  DEV_WALLET_RDNS,
+  type SwitchOutcome,
+  shortAccount,
+  type WalletSession,
+} from './wallet-state.ts';
 
 const SWITCH_MESSAGE: Readonly<Record<Exclude<SwitchOutcome, 'SWITCHED'>, MessageId>> = {
   REFUSED: 'wallet.switch.refused',
@@ -99,6 +104,14 @@ export class EfsWallet extends EfsElement {
     return option.name || t('wallet.browserWallet');
   }
 
+  /** The dev account's persona name, when connected with the dev wallet. */
+  #persona(s: Extract<ReturnType<WalletSession['state']['get']>, { status: 'CONNECTED' }>) {
+    if (s.option.rdns !== DEV_WALLET_RDNS) return undefined;
+    const n = this.network;
+    const accounts = 'network' in n ? n.network.definition.devAccounts : undefined;
+    return accounts?.find((a) => a.address === s.account.toLowerCase())?.name;
+  }
+
   #button(t: Translator['t']) {
     const s = this.wallet.state.get();
     if (s.status === 'CONNECTED') {
@@ -113,7 +126,11 @@ export class EfsWallet extends EfsElement {
         @click=${() => this.#open()}
       >
         <span slot="start">${appIcon(wrong ? 'triangle-exclamation' : 'wallet')}</span>
-        <span translate="no" dir="ltr" class="efs-wallet-account">${shortAccount(s.account)}</span>
+        ${
+          this.#persona(s)
+            ? html`<span translate="no" class="efs-wallet-persona">${this.#persona(s)}</span>`
+            : html`<span translate="no" dir="ltr" class="efs-wallet-account">${shortAccount(s.account)}</span>`
+        }
         ${wrong ? html`<span class="wa-visually-hidden">${t('wallet.wrongNetworkShort')}</span>` : nothing}
       </wa-button>`;
     }
@@ -186,12 +203,39 @@ export class EfsWallet extends EfsElement {
       case 'CONNECTED': {
         const wanted = this.#wanted();
         const notice = this.#switchNotice.get();
-        return html`<dl class="efs-facts">
+        const persona = this.#persona(s);
+        return html`${
+          s.option.rdns === DEV_WALLET_RDNS
+            ? html`<wa-callout variant="warning" size="small" class="efs-dev-wallet-label">
+                <span slot="icon">${appIcon('triangle-exclamation')}</span>
+                <p>${t('devAccounts.label')}</p>
+              </wa-callout>`
+            : nothing
+        }<dl class="efs-facts">
+            ${
+              persona
+                ? html`<dt>${t('devAccounts.persona')}</dt>
+                    <dd translate="no" class="efs-wallet-persona-name">${persona}</dd>`
+                : nothing
+            }
             <dt>${t('wallet.account')}</dt>
             <dd><code translate="no" dir="ltr" class="efs-hash">${s.account}</code></dd>
             <dt>${t('wallet.wallet')}</dt>
             <dd translate="no">${this.#name(s.option, t)}</dd>
           </dl>
+          ${
+            s.option.rdns === DEV_WALLET_RDNS
+              ? html`<div>
+                  <wa-button
+                    size="s"
+                    variant="brand"
+                    class="efs-wallet-switch-persona"
+                    @click=${() => void this.wallet.switchPersona()}
+                    >${t('devAccounts.switch')}</wa-button
+                  >
+                </div>`
+              : nothing
+          }
           ${
             wanted && wanted.chainId !== s.chainId
               ? html`<wa-callout variant="warning">

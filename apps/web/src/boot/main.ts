@@ -10,9 +10,10 @@ import { hostingOf } from '../platform/hosting.ts';
 import { negotiateLocale } from '../platform/locale.ts';
 import { createScope } from '../platform/scope.ts';
 import { loadOperatorConfig } from '../platform/settings/config.ts';
-import { DEFAULT_SETTINGS } from '../platform/settings/model.ts';
+import { DEFAULT_SETTINGS, devAccountsOf } from '../platform/settings/model.ts';
 import { memorySettingsStore, openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
+import { chooseDevAccount } from '../shell/dev-accounts-ui.ts';
 import { createDraftStore } from '../shell/drafts.ts';
 import { createOsState } from '../shell/os-state.ts';
 import { createReaderSession } from '../shell/reader-state.ts';
@@ -24,6 +25,9 @@ import { computed } from '../state/signals.ts';
 import { AVAILABLE_LOCALES, loadTranslator, PSEUDO_LOCALES, SOURCE_LOCALE } from '../ui/i18n.ts';
 import { registerIconLibraries, watchIconSprite } from '../ui/wa/define.ts';
 import { parseRoute } from './route.ts';
+
+/** sessionStorage key for this tab's dev persona (local test chain only). */
+const DEV_PERSONA_KEY = 'efs-dev-persona';
 
 const root = document.documentElement;
 
@@ -123,8 +127,38 @@ async function boot(): Promise<void> {
   const shell = document.createElement('efs-shell') as EfsShell;
   shell.os = os;
   shell.reader = reader;
-  // Touches no wallet until the person clicks Connect.
-  const wallet = createWalletSession(scope);
+  // Touches no wallet until the person clicks Connect. On a local test chain whose config names
+  // dev accounts, Connect also offers "EFS dev accounts" (loaded then, never at startup).
+  const wallet = createWalletSession(scope, {
+    devSetup: () => {
+      const now = os.network.get();
+      if (!('network' in now)) return undefined;
+      const dev = devAccountsOf(now.network);
+      return dev ? { ...dev, chainId: now.network.definition.chainId } : undefined;
+    },
+    // The chooser is inert markup (startup): a lazy chunk of its own would split startup's shared
+    // modules into a second chunk, and WebKit then can't recover a failed app chunk by reloading.
+    chooseDevAccount: (accounts, current) => chooseDevAccount(translator, accounts, current),
+    // The persona this tab chose (a local test chain only): per tab, kept across a reload, so
+    // two tabs can act as two people. The one storage key outside settings and the save journal,
+    // written only when the person picks a dev account; a blocked storage just asks again.
+    devPersona: {
+      get: () => {
+        try {
+          return sessionStorage.getItem(DEV_PERSONA_KEY) ?? undefined;
+        } catch {
+          return undefined;
+        }
+      },
+      set: (address) => {
+        try {
+          sessionStorage.setItem(DEV_PERSONA_KEY, address);
+        } catch {
+          // Not kept: the next connect in this tab asks again.
+        }
+      },
+    },
+  });
   shell.wallet = wallet;
   // Write code loads only when the person saves, or (wallet-free) when this browser has a save
   // to settle from an earlier visit.
