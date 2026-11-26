@@ -46,9 +46,11 @@ test('the MVP tour: folders and files, a tag from the Preview, an address, kind 
     }, hash);
   /** No tag list or word page is reading: what it shows is what it read. */
   const settled = () =>
-    expect(page.locator('efs-files-topic[data-reading], efs-files-word[data-reading]')).toHaveCount(
-      0,
-    );
+    expect(
+      page.locator(
+        'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-tag-picker[data-reading]',
+      ),
+    ).toHaveCount(0);
   /** Saves so far: one dev-account eth_sendTransaction each. */
   let saves = 0;
   const saved = async (what: string) => {
@@ -136,6 +138,8 @@ test('the MVP tour: folders and files, a tag from the Preview, an address, kind 
     const tagDialog = page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
     await tagDialog.locator('wa-input.efs-tag-path input').fill('My Notes');
     await expect(tagDialog.locator('.efs-tag-folded')).toContainText(/Saved as\W+\/my_notes/);
+    // The picker's lookup of the word is done before Review (it is debounced).
+    await settled();
     await tagDialog.locator('wa-button.efs-tag-review').click();
     await expect(tagDialog.locator('.efs-tag-says')).toContainText(/\/my_notes/);
     await tagDialog.locator('wa-button.efs-folder-send').click();

@@ -113,8 +113,7 @@ export class EfsTagPicker extends EfsElement {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.#controller?.abort();
-    if (this.#timer) clearTimeout(this.#timer);
+    this.#cancelLookUp();
   }
 
   /** The person's choice changed: say so, and look the last word up (debounced). */
@@ -147,17 +146,36 @@ export class EfsTagPicker extends EfsElement {
     const last = valid ? words.at(-1) : undefined;
     const now = this.#suggestions.get();
     if (last === undefined) {
+      // Nothing to look up now: a lookup still waiting for the last word would only be stale.
+      this.#cancelLookUp();
       this.#suggestions.set({ phase: 'idle' });
       return;
     }
     if (now.phase !== 'idle' && now.word === last) return;
     if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = setTimeout(() => void this.#lookUp(last), 300);
+    // Looking up (data-reading) from now until the read is done: tests wait for it, as they do
+    // for a tag list or a word page.
+    this.toggleAttribute('data-reading', true);
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      void this.#lookUp(last);
+    }, 300);
+  }
+
+  /** Drops a lookup still waiting or reading: its word is no longer the one typed. */
+  #cancelLookUp(): void {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = undefined;
+    this.#controller?.abort();
+    this.toggleAttribute('data-reading', false);
   }
 
   async #lookUp(word: string): Promise<void> {
     const efs = this.efs;
-    if (!efs) return;
+    if (!efs) {
+      this.toggleAttribute('data-reading', false);
+      return;
+    }
     this.#controller?.abort();
     const controller = new AbortController();
     this.#controller = controller;
@@ -189,6 +207,11 @@ export class EfsTagPicker extends EfsElement {
       if (controller.signal.aborted) return;
       console.error(error);
       this.#suggestions.set({ phase: 'unavailable', word });
+    } finally {
+      // Done, unless a newer word is already waiting or being read.
+      if (this.#controller === controller && this.#timer === undefined) {
+        this.toggleAttribute('data-reading', false);
+      }
     }
   }
 

@@ -39,7 +39,7 @@ async function open(page: Page, chain: TestChain, route: string): Promise<void> 
 const settled = (page: Page) =>
   expect(
     page.locator(
-      'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-file-tags[data-reading]',
+      'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-file-tags[data-reading], efs-files-tag-picker[data-reading]',
     ),
   ).toHaveCount(0);
 
@@ -220,6 +220,8 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     await expect(topic(page).locator('.efs-topic-title')).toHaveText(
       /Everything tagged\W+\/cars\/tesla/,
     );
+    // Its reads finish before the next link, so the recording holds all of them.
+    await settled(page);
     chain.step('Cars/Tesla: folded to cars/tesla, and the address bar shows the canonical link');
 
     // A word the grammar refuses even after the fold (a capital in a word with other letters).
@@ -499,6 +501,9 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
 
     // "Not this" is a different act: its review says what it hides, and where it doesn't reach.
     await path.fill('notes/todo');
+    // The picker's lookup of the typed word is done before Review (it is debounced): every run
+    // reads the same, whatever its speed.
+    await settled(page);
     await d.locator('wa-radio-group.efs-tag-stance wa-radio[value="deny"]').click();
     await d.locator('wa-button.efs-tag-review').click();
     await expect(d.locator('.efs-tag-says')).toContainText(/Say\W+0x.+is not\W+\/notes\/todo/);
@@ -510,6 +515,7 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
 
     await preview(page).locator('wa-button.efs-preview-tag').click();
     await path.fill('notes/todo');
+    await settled(page);
     await d.locator('wa-button.efs-tag-review').click();
     await expect(d.locator('.efs-tag-says')).toContainText(/Tag\W+0x.+\/notes\/todo/);
     await expect(d.locator('.efs-tag-creates')).toContainText(
@@ -727,6 +733,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await expect(d.locator('.efs-folder-name-error')).toContainText("can't be joined to itself");
     await expect(d.locator('wa-button.efs-join-review')).toHaveAttribute('disabled', '');
     await d.locator('wa-input.efs-tag-path input').fill('auto/tesla');
+    await settled(page);
     await d.locator('wa-button.efs-join-review').click();
     await expect(d.locator('.efs-label-says')).toContainText(
       /\/cars\/tesla\W+is the same as\W+\/auto\/tesla/,
@@ -746,6 +753,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
 
     await topic(page).locator('wa-button.efs-topic-under').click();
     await d.locator('wa-input.efs-tag-path input').fill('vehicles');
+    await settled(page);
     await d.locator('wa-button.efs-join-review').click();
     await expect(d.locator('.efs-label-says')).toContainText(
       /\/cars\/tesla\W+is under\W+\/vehicles/,
