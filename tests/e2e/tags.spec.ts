@@ -32,6 +32,15 @@ async function open(page: Page, chain: TestChain, route: string): Promise<void> 
   await booted(page);
 }
 
+/**
+ * Waits until no tag list or word page is reading (`data-reading`): its rows, paths, children
+ * and names. Each step then starts from the same reads in every browser, so replays match.
+ */
+const settled = (page: Page) =>
+  expect(page.locator('efs-files-topic[data-reading], efs-files-word[data-reading]')).toHaveCount(
+    0,
+  );
+
 /** Goes to `hash` in the same page (a link followed in the app). */
 const go = (page: Page, hash: string) =>
   page.evaluate((h) => {
@@ -86,6 +95,9 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await expect(section(page, 'lens')).toHaveCount(1);
     // Authors show as their checksummed address (displayOf), never the padded principal.
     await expect(section(page, 'lens')).toContainText(/tagged by\W+0xf39F…2266/);
+    // Each file by its name (fileNames: its creator's entry at the root), never an invented one.
+    await expect(section(page, 'lens').locator('.efs-entry-name')).toHaveText('a.txt');
+    await expect(section(page, 'public').locator('.efs-entry-name')).toHaveText('b.txt');
     await expect(section(page, 'public')).toHaveCount(1);
     await expect(section(page, 'public')).toContainText(/1 person says it applies/);
     await expect(section(page, 'public')).toContainText(/filed at\W+\/cars\/tesla\/model_y/);
@@ -106,25 +118,31 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step('cars/tesla: Everyone, the Lens row named, the public row labelled and filed below');
 
+    await settled(page);
     await radio(page, 'scope', 'here').click();
     await expect(section(page, 'public')).toHaveCount(0);
     await expect(section(page, 'lens')).toHaveCount(1);
     chain.step('Only here: the row filed below leaves');
 
+    await settled(page);
     await radio(page, 'scope', 'below').click();
+    await settled(page);
     await radio(page, 'view', 'mine').click();
     await expect(section(page, 'lens')).toHaveCount(1);
     await expect(section(page, 'public')).toHaveCount(0);
     chain.step('People I trust: the Lens row only');
 
+    await settled(page);
     await radio(page, 'view', 'raw').click();
     await expect(section(page, 'raw')).toHaveCount(2);
     await expect(section(page, 'raw').first()).toContainText(/1 of 1 say it applies/);
     chain.step('Unfiltered: every row, with its counts');
 
     // A public-tier row opens behind the media gate; the list stays beside it.
+    await settled(page);
     await radio(page, 'view', 'everyone').click();
     await expect(section(page, 'public')).toHaveCount(1);
+    await settled(page);
     await section(page, 'public').locator('button.efs-entry-open').click();
     await expect.poll(() => new URL(page.url()).hash).toContain('/~efs/o/');
     await expect(topic(page)).toBeVisible();
@@ -137,20 +155,28 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     chain.step("Open the public row: gated; Show preview reads it; the tag's list stays");
 
     // A row from the Lens opens straight away.
+    await settled(page);
     await section(page, 'lens').locator('button.efs-entry-open').click();
     await expect(preview(page).locator('.efs-preview-text')).toContainText('a.txt');
     await expect(preview(page).locator('.efs-preview-gated')).toHaveCount(0);
     chain.step('Open the Lens row: no gate');
 
     // A child opens its own tag.
+    await settled(page);
     await go(page, '#/r/testnet/cars/tesla');
     await expect(child).toHaveCount(1);
+    await settled(page);
     await child.locator('button.efs-entry-open').click();
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars/tesla/model_y');
+    // Its own list (the parent's also had one public row): the title says which tag is shown.
+    await expect(topic(page).locator('.efs-topic-title')).toHaveText(
+      /Everything tagged\W+\/cars\/tesla\/model_y/,
+    );
     await expect(section(page, 'public')).toHaveCount(1);
     chain.step('Tags under this one: model_y opens its own tag');
 
     // The bar's first word opens its word's page; the plain tag opens from there, and back.
+    await settled(page);
     await crumbs(page).nth(1).click();
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars');
     const word = page.locator('efs-files-word');
@@ -161,9 +187,11 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await expect(plainGroup).toContainText(/\/cars\W+\(just the word\)/);
     await expect(plainGroup).toContainText(/about\W+2\W+tagged things/);
     await expect(plainGroup.locator('.efs-topic-row')).toHaveCount(2);
+    await settled(page);
     await plainGroup.locator('wa-button.efs-word-open').click();
     await expect(topic(page).locator('.efs-topic-title')).toHaveText(/Everything tagged\W+\/cars/);
     await expect(section(page, 'public')).toHaveCount(1);
+    await settled(page);
     await topic(page).locator('wa-button.efs-word-back').click();
     await expect(plainGroup).toBeVisible();
     await chain.idle(500);
@@ -224,10 +252,14 @@ test('a word page groups every place that uses the word, the plain tag first, ne
     // The plain tag first; each place its own group, each with its own items.
     await expect(groups.first()).toHaveAttribute('data-root', 'yes');
     await expect(groups.first()).toContainText(/\/tesla\W+\(just the word\)/);
-    for (const path of ['/cars/tesla', '/companies/tesla']) {
+    for (const [path, file] of [
+      ['/cars/tesla', 'c.txt'],
+      ['/companies/tesla', 'k.txt'],
+    ] as const) {
       const g = groups.filter({ hasText: path });
       await expect(g).toHaveCount(1);
       await expect(g.locator('.efs-topic-row')).toHaveCount(1);
+      await expect(g.locator('.efs-topic-row .efs-entry-name')).toHaveText(file);
     }
     await expect(word.locator('.efs-topic-section')).toHaveCount(0);
     const axe = await new AxeBuilder({ page })
@@ -237,6 +269,7 @@ test('a word page groups every place that uses the word, the plain tag first, ne
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step('tesla: three groups, the plain tag first, no mixed list');
 
+    await settled(page);
     await groups.filter({ hasText: '/companies/tesla' }).locator('wa-button.efs-word-open').click();
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/companies/tesla');
     await expect(section(page, 'lens')).toHaveCount(1);
@@ -294,6 +327,7 @@ test("an address lists what's attached to it, the address first: its own rows un
     chain.step("The address: its own row unlabelled, #0's named");
 
     // Names under the address are looked up (openPath); nothing is named photos there.
+    await settled(page);
     await go(page, `#/r/testnet/${five}/photos/cat.jpg`);
     await expect(preview(page).locator('.efs-preview-no-path')).toContainText(
       /Nothing named\W+photos\W+is on this path/,
@@ -358,6 +392,7 @@ test("an address lists its own entries like a folder: yours first, the owner's u
     await expect(row(page, 'pet.txt').locator('wa-button.efs-entry-remove')).toHaveCount(0);
     chain.step("The address: its entries, yours first, the owner's unlabelled; read-only");
 
+    await settled(page);
     await row(page, 'docs').locator('button.efs-entry-open').click();
     await expect(row(page, 'note.txt')).toBeVisible();
     const crumbs = page.locator('wa-breadcrumb wa-breadcrumb-item');
@@ -366,6 +401,7 @@ test("an address lists its own entries like a folder: yours first, the owner's u
     await expect(crumbs.last()).toContainText('docs');
     chain.step('docs/ opens below the address: the bar starts at the address');
 
+    await settled(page);
     await go(page, `#/r/testnet/${five}/docs/note.txt`);
     await expect(preview(page).locator('.efs-preview-text')).toContainText('note.txt by #5');
     await expect.poll(() => new URL(page.url()).hash).toMatch(/~efs\/o\/0x[0-9a-f]{64}$/);
@@ -453,6 +489,8 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     const mine = section(page, 'lens');
     await expect(mine).toHaveCount(1);
     await expect(mine).toContainText('tagged by you');
+    await expect(mine.locator('.efs-entry-name')).toHaveText('note.txt');
+    await settled(page);
     await mine.locator('wa-button.efs-topic-untag').click();
     const untag = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
     await expect(untag.locator('.efs-tag-untag')).toContainText('Your tag goes');
