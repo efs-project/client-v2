@@ -7,7 +7,7 @@
 // front of anvil (chain.ts `control.lagBefore`), as the SDK's own integration test does with a
 // fetch wrapper. It is behind, never lying: every call but the head is served as usual.
 
-import { test } from '@playwright/test';
+import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import {
   editAndReview,
@@ -39,7 +39,7 @@ const LOCAL_CONFIG = {
 };
 
 /** Saves `text` as anvil #6 from the sharer's view, then the endpoint falls behind the save. */
-async function saveThenLag(page: import('@playwright/test').Page, chain: TestChain, text: string) {
+async function saveThenLag(page: Page, chain: TestChain, text: string) {
   const review = await editAndReview(page, chain, text, true);
   await press(review.locator('wa-button.efs-review-send'));
   await expect(save(page, 'confirming')).toContainText('Saved · confirming');
@@ -105,6 +105,88 @@ test('on a local test chain, BEHIND offers Start over, which forgets the floor a
     await expect(preview(page).locator('efs-outcome', { hasText: BEHIND })).toHaveCount(0);
     await expect(preview(page).locator('efs-outcome .efs-outcome-code')).toHaveText('VERIFIED');
   } finally {
+    chain.control?.catchUp();
+    await chain.finish();
+  }
+});
+
+/**
+ * Holds the first head read after the save's floor is raised (its genesis read, `eth_getBlockByNumber`
+ * "0x0", the save's last read before "Saved · confirming"): the Preview's refresh. Answered once
+ * `release` settles, through the harness's route, so with the lag on by then. `seen` counts every
+ * RPC request the page made, held or not.
+ */
+async function holdRefreshHead(page: Page, release: Promise<unknown>) {
+  const state = { armed: false, held: 0, seen: 0 };
+  await page.route(/^(https:\/\/rpc\.example\.net|http:\/\/127\.0\.0\.1:8545)\//, async (route) => {
+    state.seen++;
+    const body = route.request().postData() ?? '';
+    const head = body.includes('eth_getBlockByNumber');
+    if (head && body.includes('"0x0"')) state.armed = true;
+    else if (head && state.armed && state.held === 0 && body.includes('"latest"')) {
+      state.held++;
+      await release;
+    }
+    await route.fallback();
+  });
+  return state;
+}
+
+test('an endpoint that falls behind during the refresh after a save leaves it BEHIND until Try again', async ({
+  page,
+}) => {
+  // The save's own check comes every 12 s; this case waits for one after the catch-up.
+  test.setTimeout(60_000);
+  const text = 'Read after the refresh.\n';
+  const chain = await testChain('live-read-floor-refresh', 'live only');
+  let lagged = () => {};
+  const lagOn = new Promise<void>((resolve) => {
+    lagged = resolve;
+  });
+  try {
+    await start(page, chain, undefined, true);
+    const review = await editAndReview(page, chain, text, true);
+    const rpc = await holdRefreshHead(page, lagOn);
+    await press(review.locator('wa-button.efs-review-send'));
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    expect(sendRequests(chain)).toHaveLength(1);
+    // What CI run 45830906590 met by chance: the refresh's head read arrives after the lag.
+    await chain.control?.lagBefore(chain.broadcasts.at(-1) as string);
+    lagged();
+    expect(rpc.held, "the refresh's head read was held (if 0, the SDK's read order changed)").toBe(
+      1,
+    );
+    const outcome = preview(page).locator('efs-outcome');
+    await expect(outcome).toContainText(BEHIND, { timeout: 15_000 });
+    await expect(outcome.locator('.efs-outcome-code')).toHaveText('UNKNOWN');
+    await expect(outcome.locator('.efs-outcome-reason')).toHaveText('BEHIND');
+    // Never a version read from before the save; and BEHIND has no "Show my version".
+    await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
+    await expect(preview(page).locator('wa-button.efs-edit-show-mine')).toHaveCount(0);
+    // The endpoint catches up. The page's own next check comes and goes (the save's, every 12 s),
+    // and the save is still "Saved · confirming".
+    chain.control?.catchUp();
+    const before = rpc.seen;
+    await expect
+      .poll(() => rpc.seen, {
+        message: "the page's next check after the catch-up",
+        timeout: 20_000,
+      })
+      .toBeGreaterThan(before);
+    await chain.idle();
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    // The Preview doesn't leave BEHIND by itself: nothing reads it again until the person acts,
+    // and its notice says so ("Try again in a moment", with Try again).
+    await expect(outcome).toContainText(BEHIND);
+    await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
+    await press(outcome.locator('wa-button.efs-outcome-retry'));
+    // This view's version (the fixture's: its Lens doesn't include the person), then theirs.
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
+    await press(preview(page).locator('wa-button.efs-edit-show-mine'));
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(text);
+    await expect(preview(page).locator('.efs-viewing-mine')).toBeVisible();
+  } finally {
+    lagged();
     chain.control?.catchUp();
     await chain.finish();
   }
