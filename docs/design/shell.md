@@ -112,10 +112,12 @@ The client ↔ SDK routing contract (PM ledger, 2026-11-24; naming review §6):
 | Operator | `efs.config.json` beside `index.html` | static, public, validated input; never a backend |
 | User | IndexedDB `efs-client` / `settings` / `user` | `efs-settings/1`, revisioned |
 | Saves (slice C) | IndexedDB `efs-sdk-journal` (the SDK's write journal), created at the first real submission | the SDK's journal records; see `writes.md` |
+| Dev persona (named exception) | sessionStorage `efs-dev-persona`, this tab only | the dev account a tab chose on a local test chain (`writes.md`, "Dev accounts") |
 
 - **Writes are compare-and-set on `revision`.** A second tab gets `CONFLICT` instead of silently overwriting. Saves are announced on a BroadcastChannel so other tabs reload.
 - **Unknown fields survive.** A settings record from a newer schema is shown read-only and never overwritten, which keeps rollback to an older client safe.
 - **Guest visits write nothing.** Boot opens the database without creating it; e2e asserts no database, storage, cookie or worker exists after a visit that also opens Settings.
+- **One named exception: the dev persona** (PM, 2026-11-25, for James: "two tabs, two people"). Besides the settings record and the save journal, the client keeps exactly one other key: `efs-dev-persona` in sessionStorage, the dev account a tab picked, so a reload keeps it and each tab can act as a different persona. It is written only when the person picks a dev account, only on a local test chain (a network whose RPCs are all on this computer, `devAccountsOf`), and read and written in try/catch, so blocked storage just asks again. It never exists on a hosted or production config. Any other new storage still needs a decision of its own.
 - **Settings → About** replaces C0's diagnostics disclosure. The release manifest is fetched only when Settings opens, never at boot.
 - **The boot rule changes**, aligned with system-profiles ("NetworkBootstrap reads LocalSelectionState"):
   - *Before:* "Guest boot stays wallet-free, storage-free and network-free apart from its own static files."
