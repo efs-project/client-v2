@@ -424,6 +424,9 @@ test("an address lists its own entries like a folder: yours first, the owner's u
 
 const tagDialog = (page: Page) =>
   page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
+/** The dialog's own count of plans this opening made (`data-plans`): a second would mean a re-plan. */
+const plansOf = (page: Page, which: 'efs-preview-tag-dialog' | 'efs-topic-tag-dialog') =>
+  page.locator(`efs-files-folder-save.${which}`);
 
 test('Tag from the Preview: suggestions from the word, a new tag said new, the review names what it creates; then Remove my tag', async ({
   page,
@@ -492,6 +495,8 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await expect(save(page, 'confirming').or(save(page, 'saved'))).toHaveCount(1, {
       timeout: 20_000,
     });
+    // One plan for this opening: nothing planned it again after Send.
+    await expect(plansOf(page, 'efs-preview-tag-dialog')).toHaveAttribute('data-plans', '1');
     chain.step('Review: creates /notes and /notes/todo, public and permanent; Send');
 
     // The tag lists it as yours; Remove my tag takes it back.
@@ -509,6 +514,11 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await expect(untag).not.toHaveAttribute('open');
     await expect(topic(page).locator('.efs-topic-empty')).toBeVisible({ timeout: 20_000 });
     await chain.idle(500);
+    // Still one plan each, after everything settled: neither dialog planned again late.
+    await expect(plansOf(page, 'efs-topic-tag-dialog')).toHaveAttribute('data-plans', '1');
+    if ((await plansOf(page, 'efs-preview-tag-dialog').count()) > 0) {
+      await expect(plansOf(page, 'efs-preview-tag-dialog')).toHaveAttribute('data-plans', '1');
+    }
     chain.step('notes/todo lists it as yours; Remove my tag; the list reads again, empty');
   } finally {
     await chain.finish();

@@ -1383,3 +1383,49 @@ test("At your own address: writes need no notice; Block someone else's entry the
     await chain.finish();
   }
 });
+
+test('At your own address: Block works on a junk entry too, one that points at nothing with a file version ("other")', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-home-block-other',
+    "anvil #0 (in the default Lens) places junk.bin, a subject with no file version, at anvil #6's address (planOtherEntry); #6 (the wallet) blocks it.",
+  );
+  try {
+    await chain.actAs?.(6, async ({ account }) => ({ account6: account }));
+    const six = chain.ids.account6 as string;
+    await chain.actAs?.(0, async ({ efs, writer, lens, save: done }) => {
+      const { planOtherEntry } = await import('@efs/sdk/testing');
+      await done(
+        await planOtherEntry(efs, writer, {
+          folder: { kind: 'home', address: six as `0x${string}` },
+          name: 'junk.bin',
+          lens,
+        }),
+      );
+    });
+    await openRoot(page, chain);
+    await goTo(page, `#/r/testnet/${six}`);
+    const junk = row(page, 'junk.bin');
+    await expect(junk).toHaveAttribute('data-kind', 'other');
+    await expect(junk.locator('.efs-entry-whose')).toHaveText(/0x.+'s/);
+    await junk.locator('wa-button.efs-entry-block').click();
+    await expect(dialog(page)).toContainText(/Block\W+junk\.bin\W+by\W+0x.+here/);
+    await expect(dialog(page).locator('.efs-folder-after')).toContainText(
+      /nothing is called\W+junk\.bin\W+here/,
+    );
+    chain.step('Block junk.bin (an "other" row by #0) at your own address: planned like any entry');
+
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(junk).toHaveCount(0);
+    await expect(entries(page).locator('.efs-entries-removed')).toContainText(
+      /You blocked\W+junk\.bin\W+here/,
+    );
+    expect(sendRequests(chain)).toHaveLength(1);
+    await chain.idle(500);
+    chain.step('Send: junk.bin is gone for you; the notice offers Unblock');
+  } finally {
+    await chain.finish();
+  }
+});
