@@ -956,6 +956,17 @@ export class EfsFilesPreview extends EfsElement {
       }
       ${this.#unreachableDraft(s, t)}
       ${s ? this.#body(s, t) : html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${t('files.preview.opening')}</p>`}
+      ${
+        // Where this file is tagged, in the same Lens (read only when the section is opened).
+        link.target.kind === 'file' && efs
+          ? html`<efs-files-file-tags
+              .host=${this.host}
+              .efs=${efs}
+              .subject=${link.target.subject}
+              .lens=${this.#viewLens(efs, link)}
+            ></efs-files-file-tags>`
+          : nothing
+      }
     </div>`;
   }
 }

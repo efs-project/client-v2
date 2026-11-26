@@ -37,9 +37,11 @@ async function open(page: Page, chain: TestChain, route: string): Promise<void> 
  * and names. Each step then starts from the same reads in every browser, so replays match.
  */
 const settled = (page: Page) =>
-  expect(page.locator('efs-files-topic[data-reading], efs-files-word[data-reading]')).toHaveCount(
-    0,
-  );
+  expect(
+    page.locator(
+      'efs-files-topic[data-reading], efs-files-word[data-reading], efs-files-file-tags[data-reading]',
+    ),
+  ).toHaveCount(0);
 
 /** Goes to `hash` in the same page (a link followed in the app). */
 const go = (page: Page, hash: string) =>
@@ -159,6 +161,12 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
     await section(page, 'lens').locator('button.efs-entry-open').click();
     await expect(preview(page).locator('.efs-preview-text')).toContainText('a.txt');
     await expect(preview(page).locator('.efs-preview-gated')).toHaveCount(0);
+    // Its tags (lensTagsOf), read when the section opens: /cars/tesla, from the Lens.
+    await preview(page).locator('details.efs-file-tags summary').click();
+    const fileTag = preview(page).locator('[data-section="lens"] .efs-file-tag');
+    await expect(fileTag).toHaveCount(1);
+    await expect(fileTag).toContainText('/cars/tesla');
+    await expect(fileTag).toContainText(/tagged by\W+0xf39F…2266/);
     chain.step('Open the Lens row: no gate');
 
     // A child opens its own tag.

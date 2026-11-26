@@ -136,7 +136,11 @@ export type RowWho =
  * Who a row is from, as the list says it. `me`: the reader's principal, when connected. `owner`:
  * an address's own principal: its own rows carry no label (every other row does, yours too).
  */
-export function rowWho(row: TopicRow, me: string | undefined, owner?: string): RowWho | undefined {
+export function rowWho(
+  row: Pick<TopicRow, 'decider' | 'yes' | 'statements'>,
+  me: string | undefined,
+  owner?: string,
+): RowWho | undefined {
   const d = row.decider;
   if (d.kind === 'lens') {
     const author = d.author.toLowerCase();

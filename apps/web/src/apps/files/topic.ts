@@ -73,7 +73,7 @@ const loadChecksum = async () => (await import('@efs/sdk')).checksumAddress;
 export function whoLine(
   t: Translator['t'],
   efs: Efs | undefined,
-  row: TopicRow,
+  row: Pick<TopicRow, 'decider' | 'yes' | 'statements'>,
   me: string | undefined,
   owner: string | undefined,
   /** An address view's own address: its contract principal (a Safe's home) reads as it too. */
@@ -632,7 +632,7 @@ export class EfsFilesTopic extends EfsElement {
           >`;
     const id = shortId(row.thing);
     // Its name when the SDK found one (tagger, creator or Lens), else its short id: never "no name".
-    const name = nameOf(this.#names.get(), row.thing);
+    const name = nameOf(this.#names.get(), row);
     return html`<li class="efs-entry efs-topic-row" data-decider=${row.decider.kind}>
       <button
         type="button"
@@ -643,7 +643,12 @@ export class EfsFilesTopic extends EfsElement {
         ${appIcon('file')}
         ${
           name
-            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>`
+            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>${
+                // A name nobody you trust vouched for never stands alone: its id stays beside it.
+                row.decider.kind === 'lens'
+                  ? nothing
+                  : html` <span class="efs-quiet efs-entry-id" translate="no" dir="ltr">${id}</span>`
+              }`
             : html`<span class="efs-entry-name" translate="no" dir="ltr">${id}</span>`
         }
       </button>
@@ -767,15 +772,18 @@ export class EfsFilesTopic extends EfsElement {
       <h3 class="efs-topic-title">
         ${
           isTopic
-            ? t('files.topic.title', { path: this.#shownPath(place.segments) })
+            ? t('files.topic.title', {
+                // A Lens the link brought (not the reader's) never relabels the title: its words.
+                path: place.lens ? pathText(place.segments) : this.#shownPath(place.segments),
+              })
             : t('files.home.title', { address: shownAddress })
         }
       </h3>
       ${
         // A label shown in place of a word: the words stay beside it (they're what the link holds).
         isTopic && this.#segments.get()?.some((x) => x.source !== 'none')
-          ? html`<p class="efs-quiet efs-topic-words" translate="no" dir="ltr">
-              ${pathText(place.segments)}
+          ? html`<p class="efs-quiet efs-topic-words" translate="no" dir=${place.lens ? 'auto' : 'ltr'}>
+              ${place.lens ? this.#shownPath(place.segments) : pathText(place.segments)}
             </p>`
           : nothing
       }

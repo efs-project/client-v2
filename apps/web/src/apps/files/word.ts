@@ -273,7 +273,7 @@ export class EfsFilesWord extends EfsElement {
     const reader = readerOf(this.host);
     const me = efs && reader ? efs.lens.principalOf(reader as never) : undefined;
     const id = shortId(row.thing);
-    const name = nameOf(this.#names.get(), row.thing);
+    const name = nameOf(this.#names.get(), row);
     return html`<li class="efs-entry efs-topic-row" data-decider=${row.decider.kind}>
       <button
         type="button"
@@ -284,7 +284,12 @@ export class EfsFilesWord extends EfsElement {
         ${appIcon('file')}
         ${
           name
-            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>`
+            ? html`<span class="efs-entry-name" translate="no" dir="auto">${name}</span>${
+                // A name nobody you trust vouched for never stands alone: its id stays beside it.
+                row.decider.kind === 'lens'
+                  ? nothing
+                  : html` <span class="efs-quiet efs-entry-id" translate="no" dir="ltr">${id}</span>`
+              }`
             : html`<span class="efs-entry-name" translate="no" dir="ltr">${id}</span>`
         }
       </button>
