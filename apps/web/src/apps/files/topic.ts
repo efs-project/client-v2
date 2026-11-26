@@ -76,7 +76,7 @@ import {
   topicKindOpts,
   viaLine,
 } from './topic-model.ts';
-import { authorLabel, shortId } from './who.ts';
+import { authorLabel, curatorsOf, listText, shortId } from './who.ts';
 
 /** A tag or an address: the places this pane lists. */
 export type PlaceLink = Extract<LinkState, { status: 'topic' } | { status: 'home' }>;
@@ -1201,8 +1201,25 @@ export class EfsFilesTopic extends EfsElement {
             ? html`<p class="efs-quiet efs-topic-count">${t('files.topic.countUnknown')}</p>`
             : nothing
       }
+      ${place.status === 'topic' ? this.#curators(place, t) : nothing}
       ${place.status === 'topic' ? this.#naming(place, t) : nothing}
     </header>`;
+  }
+
+  /**
+   * Whose names, synonyms and hidden tags apply here: the Lens this page reads with, in order
+   * (PM D16). Unfiltered reads no Lens, so it says nothing there.
+   */
+  #curators(place: PlaceLink, t: Translator['t']) {
+    const efs = verifiedEfs(this.host.reader.get());
+    if (!efs || this.#view.get() === 'raw') return nothing;
+    const reader = readerOf(this.host);
+    const lens = this.#lens(efs, place, reader);
+    const who = curatorsOf(efs, lens, reader, this.host.names.get(), t('files.lens.you'));
+    return html`<p class="efs-quiet efs-lens-curators">
+      ${t('files.lens.curators')}
+      <span translate="no">${listText(this.host.translator.locale, who)}</span>
+    </p>`;
   }
 
   /** "Name this tag", with your name for it when you have one: only when you're connected. */

@@ -118,3 +118,78 @@ test('EFS dev accounts: pick a persona, save as it, switch persona (an identity 
     await chain.finish();
   }
 });
+
+test('whose names, synonyms and hidden tags apply: the default curator for a guest, then "you" first; the chooser says who curates', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-dev-curators',
+    'A tag page (/notes/todo) and a word page (notes) on a local dev config: as a guest, Satoshi Nakamoto (the default Lens); as Satoshi, you; as Adam Back, you, then Satoshi Nakamoto. The persona chooser marks Satoshi, and only Satoshi, as the default curator. At 320 px nothing scrolls sideways.',
+  );
+  const walletButton = page.locator('efs-wallet wa-button.efs-wallet-button');
+  const chooser = page.locator('wa-dialog.efs-dev-accounts');
+  const persona = (name: string) => chooser.locator('button.efs-entry-open', { hasText: name });
+  const tagLine = page.locator('efs-files-topic .efs-lens-curators');
+  try {
+    await seededRandom(page);
+    await chain.attach(page);
+    await serveConfig(page, DEV_CONFIG);
+    await serveDeployment(page, chain.deployment);
+    await page.goto('./#/r/testnet/notes/todo');
+    await booted(page);
+    await expect(tagLine).toHaveText(
+      /Names, synonyms and hidden tags from:\s+Satoshi Nakamoto\s*$/,
+    );
+    chain.step('A guest on /notes/todo: the default Lens, Satoshi Nakamoto');
+
+    await walletButton.click();
+    await page
+      .locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-option', {
+        hasText: 'EFS dev accounts',
+      })
+      .click();
+    await expect(chooser.locator('li.efs-dev-account', { hasText: SATOSHI.name })).toContainText(
+      "This chain's default curator: everyone sees what they name, join or hide.",
+    );
+    await expect(chooser.locator('.efs-dev-curator')).toHaveCount(1);
+    await persona(SATOSHI.name).click();
+    await expect(walletButton).toContainText(SATOSHI.name);
+    await page.keyboard.press('Escape');
+    await expect(tagLine).toHaveText(/from:\s+you\s*$/);
+    chain.step('Connect as Satoshi (the chooser marks the default curator): from you');
+
+    await walletButton.click();
+    await page.locator('wa-dialog.efs-wallet-dialog wa-button.efs-wallet-switch-persona').click();
+    await persona(ADAM.name).click();
+    await expect(walletButton).toContainText(ADAM.name);
+    await page.keyboard.press('Escape');
+    await expect(tagLine).toHaveText(/from:\s+you, Satoshi Nakamoto\s*$/);
+    chain.step('Switch to Adam Back: from you, Satoshi Nakamoto');
+
+    // Narrow first, then the word page: its reads are sized to the view, so it reads once, at 320.
+    await page.setViewportSize({ width: 320, height: 640 });
+    // The tag page reads again for the narrow view first; the word page opens once that's done.
+    await chain.idle(500);
+    await page.evaluate(() => {
+      location.hash = '#/r/testnet/notes';
+    });
+    const wordLine = page.locator('efs-files-word .efs-lens-curators');
+    await expect(wordLine).toHaveText(
+      /Names, synonyms and hidden tags from:\s+you, Satoshi Nakamoto\s*$/,
+    );
+    // Measured once the narrow layout has settled (the panes become tabs as it reflows).
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        { message: 'the word page at 320 px' },
+      )
+      .toBeLessThanOrEqual(0);
+    await chain.idle(500);
+    chain.step('The word page notes says the same; at 320 px it fits');
+  } finally {
+    await chain.finish();
+  }
+});

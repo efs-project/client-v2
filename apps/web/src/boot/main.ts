@@ -13,10 +13,10 @@ import { loadOperatorConfig } from '../platform/settings/config.ts';
 import { DEFAULT_SETTINGS, devAccountsOf } from '../platform/settings/model.ts';
 import { memorySettingsStore, openSettingsStore } from '../platform/settings/store.ts';
 import { registerShellElements } from '../shell/define.ts';
-import { chooseDevAccount } from '../shell/dev-accounts-ui.ts';
+import { chooseDevAccount, defaultCurators } from '../shell/dev-accounts-ui.ts';
 import { createDraftStore } from '../shell/drafts.ts';
 import { createOsState } from '../shell/os-state.ts';
-import { createReaderSession } from '../shell/reader-state.ts';
+import { createReaderSession, verifiedEfs } from '../shell/reader-state.ts';
 import { createSavesSession } from '../shell/saves-state.ts';
 import type { EfsShell } from '../shell/shell.ts';
 import { createWalletSession } from '../shell/wallet-state.ts';
@@ -138,7 +138,13 @@ async function boot(): Promise<void> {
     },
     // The chooser is inert markup (startup): a lazy chunk of its own would split startup's shared
     // modules into a second chunk, and WebKit then can't recover a failed app chunk by reloading.
-    chooseDevAccount: (accounts, current) => chooseDevAccount(translator, accounts, current),
+    chooseDevAccount: (accounts, current) =>
+      chooseDevAccount(
+        translator,
+        accounts,
+        current,
+        defaultCurators(verifiedEfs(reader.state.get())),
+      ),
     // The persona this tab chose (a local test chain only): per tab, kept across a reload, so
     // two tabs can act as two people. The one storage key outside settings and the save journal,
     // written only when the person picks a dev account; a blocked storage just asks again.

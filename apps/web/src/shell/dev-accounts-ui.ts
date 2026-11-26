@@ -3,16 +3,32 @@
 // a Web Awesome dialog into the page and resolves with the choice, or undefined when closed.
 // Startup code on purpose (small, inert until called): see boot/main.ts.
 
+import type { Efs } from '@efs/sdk';
 import type { DevAccount } from '../platform/settings/model.ts';
 import { html, nothing, render } from '../ui/element.ts';
 import type { Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
 import { shortAccount } from './wallet-state.ts';
 
+/**
+ * The accounts in this deployment's default Lens, lowercase (`defaultLensPrincipals`, never a
+ * position in the persona list): what they name, join or hide, everyone sees.
+ */
+export function defaultCurators(efs: Efs | undefined): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (!efs) return out;
+  for (const p of efs.lens.default.principals) {
+    const d = efs.lens.displayOf(p);
+    if (d.kind !== 'principal') out.add(d.address.toLowerCase());
+  }
+  return out;
+}
+
 export function chooseDevAccount(
   translator: Translator,
   accounts: readonly DevAccount[],
   current: string | undefined,
+  curators: ReadonlySet<string> = new Set(),
 ): Promise<DevAccount | undefined> {
   const t = translator.t.bind(translator);
   const host = document.createElement('div');
@@ -58,6 +74,11 @@ export function chooseDevAccount(
                 <span class="efs-entry-meta efs-quiet" translate="no" dir="ltr"
                   >${shortAccount(a.address)}${a.address === current ? html` · ${t('devAccounts.current')}` : nothing}</span
                 >
+                ${
+                  curators.has(a.address.toLowerCase())
+                    ? html`<p class="efs-quiet efs-dev-curator">${t('devAccounts.curator')}</p>`
+                    : nothing
+                }
               </li>`,
             )}
           </ul>

@@ -51,6 +51,7 @@ import {
   type TopicListState,
   topicKindOpts,
 } from './topic-model.ts';
+import { curatorsOf, listText } from './who.ts';
 
 const loadTags = async () => import('@efs/sdk/tags');
 
@@ -366,6 +367,22 @@ export class EfsFilesWord extends EfsElement {
     </section>`;
   }
 
+  /**
+   * Whose names, synonyms and hidden tags apply here: the Lens this page reads with, in order
+   * (PM D16). Unfiltered reads no Lens, so it says nothing there.
+   */
+  #curators(place: PlaceLink, t: Translator['t']) {
+    const efs = verifiedEfs(this.host.reader.get());
+    if (!efs || this.#view.get() === 'raw') return nothing;
+    const reader = readerOf(this.host);
+    const lens = tagLens(efs, place.lens, reader);
+    const who = curatorsOf(efs, lens, reader, this.host.names.get(), t('files.lens.you'));
+    return html`<p class="efs-quiet efs-lens-curators">
+      ${t('files.lens.curators')}
+      <span translate="no">${listText(this.host.translator.locale, who)}</span>
+    </p>`;
+  }
+
   override render() {
     const t = this.host.translator.t.bind(this.host.translator);
     const place = this.place.get();
@@ -391,6 +408,7 @@ export class EfsFilesWord extends EfsElement {
             </p>`
           : nothing
       }
+      ${this.#curators(place, t)}
     </header>`;
     if (notice)
       return html`<div class="wa-stack wa-gap-s efs-topic efs-word">${header} ${notice}</div>`;
