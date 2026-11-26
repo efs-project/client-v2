@@ -50,6 +50,7 @@ import {
   type TopicKindFilter,
   type TopicListState,
   topicKindOpts,
+  wordText,
 } from './topic-model.ts';
 import { curatorsOf, listText } from './who.ts';
 
@@ -395,10 +396,10 @@ export class EfsFilesWord extends EfsElement {
       <p class="wa-cluster wa-gap-2xs efs-quiet efs-topic-mark" data-mark="tag">
         ${appIcon('tag')} <span>${t('files.topic.mark')}</span>
       </p>
-      <h3 class="efs-topic-title">${t('files.word.title', { word })}</h3>
+      <h3 class="efs-topic-title">${t('files.word.title', { word: wordText(word) })}</h3>
       ${
         word.endsWith('.eth')
-          ? html`<p class="efs-quiet efs-topic-not-address">${t('files.topic.notAddress', { word })}</p>`
+          ? html`<p class="efs-quiet efs-topic-not-address">${t('files.topic.notAddress', { word: wordText(word) })}</p>`
           : nothing
       }
       ${

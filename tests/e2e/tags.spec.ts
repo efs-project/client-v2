@@ -245,6 +245,20 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     );
     chain.step('A, U+202E, b, U+200D, c: the characters shown as U+ codes, the sentence in order');
 
+    // A lowercase word holding a bidi override opens a word page today (the SDK's link grammar
+    // checks a subset of the word rules): every word from the link shows the override, never
+    // applies it, in the title and the location bar alike.
+    await go(page, '#/r/testnet/a%E2%80%AEb');
+    const wordTitle = page.locator('efs-files-word .efs-topic-title');
+    await expect(wordTitle).toContainText('a[U+202E]b');
+    expect((await wordTitle.textContent()) ?? '').not.toContain('\u202E');
+    const crumb = page.locator('efs-files-view wa-breadcrumb-item').last();
+    await expect(crumb).toHaveText('a[U+202E]b');
+    await settled(page);
+    chain.step(
+      'a, U+202E, b: a word page whose title and location bar show the override as a code',
+    );
+
     await go(page, '#/r/testnet/vitalik.eth');
     const word = page.locator('efs-files-word');
     await expect(word.locator('.efs-topic-not-address')).toContainText(

@@ -75,6 +75,7 @@ import {
   type TopicListState,
   topicKindOpts,
   viaLine,
+  wordText,
 } from './topic-model.ts';
 import { authorLabel, curatorsOf, listText, shortId } from './who.ts';
 
@@ -1144,9 +1145,11 @@ export class EfsFilesTopic extends EfsElement {
   /** The tag's path as shown: each segment's label (topicName) where the Lens gives one. */
   #shownPath(words: readonly string[]): string {
     const named = this.#segments.get();
-    return named && named.length === words.length
-      ? pathText(named.map((x) => x.name))
-      : pathText(words);
+    if (!named || named.length !== words.length) return pathText(words);
+    // A word is escaped as words are (wordText); a label (its display name, "Sunset photos") is
+    // not: the chain's text grammar already refuses controls and invisibles in labels, and
+    // spaces there are its own. It stays inside the message's own bidi isolate.
+    return `/${named.map((x) => (x.source === 'none' ? wordText(x.name) : x.name)).join('/')}`;
   }
 
   #header(place: PlaceLink, t: Translator['t']) {
@@ -1180,7 +1183,7 @@ export class EfsFilesTopic extends EfsElement {
         isTopic && place.segments.length === 1
           ? html`<div>
               <wa-button size="s" appearance="plain" class="efs-word-back" @click=${() => this.plain?.set(undefined)}
-                >${t('files.word.back', { word: place.segments[0] ?? '' })}</wa-button
+                >${t('files.word.back', { word: wordText(place.segments[0] ?? '') })}</wa-button
               >
             </div>`
           : nothing
@@ -1188,7 +1191,7 @@ export class EfsFilesTopic extends EfsElement {
       ${
         isTopic && place.segments.length === 1 && place.segments[0]?.endsWith('.eth')
           ? html`<p class="efs-quiet efs-topic-not-address">
-              ${t('files.topic.notAddress', { word: place.segments[0] })}
+              ${t('files.topic.notAddress', { word: wordText(place.segments[0] ?? '') })}
             </p>`
           : nothing
       }

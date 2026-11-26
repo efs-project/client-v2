@@ -27,6 +27,7 @@ import type {
   TopicRow,
   TopicView,
 } from '@efs/sdk/tags';
+import { visibleText } from '../../ui/visible-text.ts';
 
 /** The views, in the order the control offers them. Everyone is the default for tags (D11). */
 export const TOPIC_VIEWS: readonly TopicView[] = ['mine', 'everyone', 'raw'];
@@ -271,7 +272,16 @@ export function rowWho(
 
 /** A topic's path as shown: `/cars/tesla`. Each word is shown as stored (no fold here). */
 export function pathText(words: readonly string[]): string {
-  return `/${words.join('/')}`;
+  return `/${words.map(wordText).join('/')}`;
+}
+
+/**
+ * One tag word as shown: a word from a link or a typed path may hold what a word must not (a bidi
+ * override, an invisible character): those show as "[U+202E]" and the word is capped
+ * (ui/visible-text.ts). Every tag word displayed goes through this or pathText.
+ */
+export function wordText(word: string): string {
+  return visibleText(word);
 }
 
 /**

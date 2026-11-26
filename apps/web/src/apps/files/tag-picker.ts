@@ -19,7 +19,7 @@ import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
-import { aboutCount, badWord, pathText } from './topic-model.ts';
+import { aboutCount, badWord, pathText, wordText } from './topic-model.ts';
 
 const loadTags = async () => import('@efs/sdk/tags');
 
@@ -250,7 +250,7 @@ export class EfsTagPicker extends EfsElement {
       ${
         refused
           ? html`<p class="efs-tag-refused" role="alert">
-              ${t('files.topic.badWord', { word: refused.word, code: refused.code })}
+              ${t('files.topic.badWord', { word: wordText(refused.word), code: refused.code })}
               <span class="efs-quiet" translate="no">${refused.rule}</span>
             </p>`
           : nothing
@@ -258,7 +258,7 @@ export class EfsTagPicker extends EfsElement {
       ${
         unstable !== undefined
           ? html`<p class="efs-tag-unstable" role="alert">
-              ${t('files.tag.unstable', { word: unstable })}
+              ${t('files.tag.unstable', { word: wordText(unstable) })}
             </p>`
           : nothing
       }
@@ -277,11 +277,11 @@ export class EfsTagPicker extends EfsElement {
       ${
         s.phase === 'reading'
           ? html`<p class="wa-cluster wa-gap-xs efs-quiet" role="status">
-              <wa-spinner></wa-spinner>${t('files.tag.looking', { word: s.word })}
+              <wa-spinner></wa-spinner>${t('files.tag.looking', { word: wordText(s.word) })}
             </p>`
           : s.phase === 'shown' && s.rows.length > 0
             ? html`<div class="wa-stack wa-gap-2xs efs-tag-suggestions">
-                <p class="efs-quiet">${t('files.tag.placesUsing', { word: s.word })}</p>
+                <p class="efs-quiet">${t('files.tag.placesUsing', { word: wordText(s.word) })}</p>
                 <ul class="efs-entries" role="list">
                   ${s.rows.map(
                     (r) => html`<li class="efs-entry efs-tag-suggestion">

@@ -7,6 +7,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import { shortId } from './editor.ts';
 import type { FolderNav } from './navigation.ts';
 import type { PlaceLink } from './topic.ts';
+import { wordText } from './topic-model.ts';
 
 export type FilesViewKind = 'location';
 
@@ -49,7 +50,7 @@ export class EfsFilesView extends EfsElement {
     return [
       { name: t('files.topic.mark'), depth: 0, data: false, go: undefined },
       ...place.segments.map((word, i) => ({
-        name: word,
+        name: wordText(word),
         depth: i + 1,
         data: true,
         go: () => {
