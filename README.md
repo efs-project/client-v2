@@ -2,7 +2,12 @@
 
 The web client for the [Ethereum File System](https://github.com/efs-project) v2: a static, IPFS-hostable app that opens EFS links without a wallet or backend, and grows into a modular, user-owned Web OS.
 
-**Status: the File Browser MVP.** It opens files by EFS link and shows only verified contents. It lists folders and addresses, and tags, word pages and the tags on a file, each row saying whose it is. A connected wallet can create, upload, edit, rename, move, remove and restore its own entries, tag and untag, and block names in places it owns: each a review, then one approval, carried through reloads to "Saved". Settings cover appearance and RPC/gateway endpoints, with themes that follow the system's light/dark setting and a mobile layout.
+**Status: the File Browser MVP.** What you can click today (in `pnpm demo`, below):
+
+- **Read, no wallet needed:** open any file by its EFS link and see only verified contents (text, images, media); browse folders and addresses, with a folder's README in the Overview and every row saying whose it is.
+- **Tags:** a tag's page in three views (people you trust, everyone, unfiltered), here or with everything below; a kind filter (files, folders, addresses, other); "Include tags that mean the same"; what it's also called and what it's under; a word's page across every place that uses it; and the tags on a file.
+- **Write, once connected:** create folders and text files, upload, edit, rename, move, remove and restore your own entries, at a folder or an address; tag, say "not this", and take your tag back; name a tag, and say two tags are the same or one is under another; block names in places you own; and link a file stored elsewhere (IPFS, Arweave or a web address), with public gateways only if you choose them. Each is one review, then one approval, carried through reloads to "Saved".
+- **Testing:** EFS dev accounts on the local chain (twenty personas, no keys), and Settings for appearance and your own RPC and gateway lists.
 
 To point a deployment at a network, replace `efs.config.json` beside `index.html` (format `efs-config/1`, see `apps/web/src/platform/settings/model.ts`). Users can then reorder, disable or add their own RPC endpoints and gateways in Settings.
 
