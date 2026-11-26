@@ -33,7 +33,7 @@ import {
 import { shortAccount } from '../../shell/wallet-state.ts';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, live, nothing } from '../../ui/element.ts';
-import type { MessageId } from '../../ui/i18n.ts';
+import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { pressedOnce } from '../../ui/press-once.ts';
 import { approvalsLine } from './approvals.ts';
@@ -53,7 +53,7 @@ import {
   type ViewPath,
   withoutIndices,
 } from './folder-requests.ts';
-import { settleTwin } from './held.ts';
+import { checkTwin, settleTwin } from './held.ts';
 import {
   checkLocator,
   fingerprint,
@@ -300,6 +300,10 @@ export class EfsFolderSave extends EfsElement {
   #moveLabel = '';
   /** Plans made since this opening (shown as data-plans; see #plan). */
   #plans = 0;
+  /** A held save's twin the saves don't list, as its attempt last read (#checkTwin). */
+  #twinChecked = state<
+    { readonly planId: string; readonly standing: 'settled' | 'waiting' } | undefined
+  >(undefined);
   /**
    * The person pressed a key or a pointer inside the dialog since it opened: only then can a
    * focus elsewhere be theirs (never the browser's or Web Awesome's own focus on open).
@@ -613,7 +617,32 @@ export class EfsFolderSave extends EfsElement {
       account: '',
       ...(statements ? { statements } : places ? { places } : {}),
     });
-    return twinStanding(twin, this.host.saving.saves.get(), mine);
+    const standing = twinStanding(twin, this.host.saving.saves.get(), mine);
+    if (standing !== 'unlisted') return standing;
+    // Not listed is unknown, never settled: the twin's own attempt decides (#checkTwin).
+    const checked = this.#twinChecked.get();
+    return checked && twin && checked.planId === twin.planId ? checked.standing : 'unlisted';
+  }
+
+  /** A twin the saves don't list, checked by its attempt (the review then decides from that). */
+  async #checkTwin(writer: EfsWriter, twin: Twin | undefined): Promise<void> {
+    if (!twin) return;
+    const standing = await checkTwin(writer, twin);
+    this.#twinChecked.set({ planId: twin.planId, standing });
+  }
+
+  /** "Check again" while a held save waits: the saves, and an unlisted twin's attempt. */
+  #checkAgain(writer: EfsWriter, twin: Twin | undefined, t: Translator['t']) {
+    return html`<wa-button
+      size="s"
+      appearance="outlined"
+      class="efs-held-check"
+      @click=${() => {
+        void this.host.saving.refresh();
+        void this.#checkTwin(writer, twin);
+      }}
+      >${t('files.edit.checkAgain')}</wa-button
+    >`;
   }
 
   /** This computer's test chain (every enabled RPC local): waits there are said in minutes. */
@@ -718,6 +747,9 @@ export class EfsFolderSave extends EfsElement {
         // may, starts a new save).
         await this.#drop(writer, progress.sequenceId);
         const read = await settleTwin(this.host.saving, writer, outcome.twin);
+        if (this.#twinStanding(request, plan, outcome.twin) === 'unlisted') {
+          await this.#checkTwin(writer, outcome.twin);
+        }
         back(
           read === 'read'
             ? { sent: { outcome } }
@@ -1842,6 +1874,13 @@ export class EfsFolderSave extends EfsElement {
                         ? { account: shortAccount(sent.outcome.account), chain: '' }
                         : {},
                     )}</p>
+                    ${
+                      (held === 'waiting' || held === 'unlisted') &&
+                      sent.outcome.kind === 'held' &&
+                      !sending
+                        ? this.#checkAgain(s.writer, sent.outcome.twin, t)
+                        : nothing
+                    }
                   </wa-callout>`
                   : nothing
               }

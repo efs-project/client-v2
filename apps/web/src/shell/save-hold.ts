@@ -194,11 +194,13 @@ export function saveHold(
  * - 'same': the same save again (it touches what the twin's save touches, or the SDK named no
  *   save for the twin): "already being saved", and never a second Send;
  * - 'waiting': another save of the same bytes, still open or not yet final: Send waits for it;
- * - 'settled': that other save is final, stopped or no longer listed (a listed save that turns
- *   final elsewhere drops off): this one may be sent again.
+ * - 'settled': that other save is final or stopped: this one may be sent again;
+ * - 'unlisted': the SDK named a save the list doesn't hold (another tab's, or one that dropped
+ *   off): unknown, never settled. The caller checks the twin's attempt (`twinFromReconcile`) and
+ *   waits meanwhile.
  * Unknown effects count as the same (fail-closed: no Send).
  */
-export type TwinStanding = 'same' | 'waiting' | 'settled';
+export type TwinStanding = 'same' | 'waiting' | 'settled' | 'unlisted';
 
 export function twinStanding(
   twin: { readonly sequenceId?: string } | undefined,
@@ -209,7 +211,7 @@ export function twinStanding(
   if (id === undefined) return 'same';
   if (saves === undefined) return 'waiting';
   const earlier = saves.find((p) => p.sequenceId.toLowerCase() === id);
-  if (!earlier) return 'settled';
+  if (!earlier) return 'unlisted';
   if (!disjoint(touchesOf(earlier.effect), mine)) return 'same';
   if (earlier.state === 'COMPLETE') return earlier.final ? 'settled' : 'waiting';
   return earlier.state === 'ABANDONED' || earlier.state === 'NOT_STARTED' ? 'settled' : 'waiting';
@@ -221,8 +223,22 @@ export function heldMessage(standing: TwinStanding, localChain: boolean): Messag
     case 'same':
       return 'save.held';
     case 'waiting':
+    case 'unlisted':
       return localChain ? 'save.heldSameBytesLocal' : 'save.heldSameBytes';
     case 'settled':
       return 'save.heldSettled';
   }
+}
+
+/**
+ * An unlisted twin, decided by its attempt (`writer.reconcile(planId)`): final or proven not
+ * committed lets this save go; anything else (committed but not final, unknown) waits.
+ */
+export function twinFromReconcile(r: {
+  readonly outcome: 'COMMITTED' | 'NOT_COMMITTED_PROVEN' | 'UNKNOWN';
+  readonly final?: boolean;
+}): 'settled' | 'waiting' {
+  return r.outcome === 'NOT_COMMITTED_PROVEN' || (r.outcome === 'COMMITTED' && r.final === true)
+    ? 'settled'
+    : 'waiting';
 }

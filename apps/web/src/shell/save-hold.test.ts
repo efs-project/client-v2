@@ -6,6 +6,7 @@ import {
   statementKey,
   touchesOf,
   touchesOfInput,
+  twinFromReconcile,
   twinStanding,
 } from './save-hold.ts';
 
@@ -290,8 +291,9 @@ describe('twinStanding (a save the SDK held back for an earlier attempt)', () =>
     expect(twinStanding(twin, [earlier({ state: 'PARTIAL' })], elsewhere)).toBe('waiting');
     expect(twinStanding(twin, [earlier({ final: true })], elsewhere)).toBe('settled');
     expect(twinStanding(twin, [earlier({ state: 'ABANDONED' })], elsewhere)).toBe('settled');
-    // No longer listed: it turned final (or was dismissed once saved).
-    expect(twinStanding(twin, [], elsewhere)).toBe('settled');
+    // Not listed (another tab's save, or one that dropped off) is unknown, never settled: the
+    // caller checks the twin's attempt.
+    expect(twinStanding(twin, [], elsewhere)).toBe('unlisted');
   });
 
   it("fail-closed: saves that can't be read wait; an effect it can't read is the same save", () => {
@@ -305,5 +307,14 @@ describe('twinStanding (a save the SDK held back for an earlier attempt)', () =>
     expect(heldMessage('waiting', false)).toBe('save.heldSameBytes');
     expect(heldMessage('waiting', true)).toBe('save.heldSameBytesLocal');
     expect(heldMessage('settled', false)).toBe('save.heldSettled');
+    expect(heldMessage('unlisted', true)).toBe('save.heldSameBytesLocal');
+  });
+
+  it('an unlisted twin is decided by its attempt: final or proven not committed, else it waits', () => {
+    expect(twinFromReconcile({ outcome: 'COMMITTED', final: true })).toBe('settled');
+    expect(twinFromReconcile({ outcome: 'NOT_COMMITTED_PROVEN' })).toBe('settled');
+    expect(twinFromReconcile({ outcome: 'COMMITTED', final: false })).toBe('waiting');
+    expect(twinFromReconcile({ outcome: 'COMMITTED' })).toBe('waiting');
+    expect(twinFromReconcile({ outcome: 'UNKNOWN' })).toBe('waiting');
   });
 });

@@ -209,15 +209,29 @@ test('a tag lists what people tagged: Everyone by default, the public tier label
   }
 });
 
-test('a word the network refuses is named before any read; a tag word ending .eth says it is not an address', async ({
+test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla); a refused word says so; a tag word ending .eth says it is not an address', async ({
   page,
 }) => {
   const chain = await testChain('client-tags-words', 'No tags.');
   try {
-    await open(page, chain, './#/r/testnet/Cars');
-    const bad = page.locator('efs-files-word .efs-topic-bad-word');
-    await expect(bad).toContainText(/Cars\W+isn't a word the network accepts in a tag \(rule\W+3/);
-    chain.step('Cars: refused by the grammar (rule 3), nothing read');
+    // The SDK's interim fold (e229ea3): an all-ASCII word is lowercased, and the link canonical.
+    await open(page, chain, './#/r/testnet/Cars/Tesla');
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/cars/tesla');
+    await expect(topic(page).locator('.efs-topic-title')).toHaveText(
+      /Everything tagged\W+\/cars\/tesla/,
+    );
+    chain.step('Cars/Tesla: folded to cars/tesla, and the address bar shows the canonical link');
+
+    // A word the grammar refuses even after the fold (a capital in a word with other letters).
+    await go(page, '#/r/testnet/Straße');
+    await expect(preview(page).locator('.efs-preview-invalid')).toHaveAttribute(
+      'data-rule',
+      'bad-word',
+    );
+    await expect(preview(page).locator('.efs-preview-invalid')).toContainText(
+      "This link names a tag with a word the network doesn't accept",
+    );
+    chain.step('Straße: refused by the link grammar, said as a tag word; nothing read');
 
     await go(page, '#/r/testnet/vitalik.eth');
     const word = page.locator('efs-files-word');
@@ -430,21 +444,7 @@ const plansOf = (page: Page, which: 'efs-preview-tag-dialog' | 'efs-topic-tag-di
 
 test('Tag from the Preview: suggestions from the word, a new tag said new, the review names what it creates; then Remove my tag', async ({
   page,
-  browserName,
 }) => {
-  // QUARANTINED in WebKit replay (2026-11-26; docs/design/writes.md "Quarantined"). Decoded from
-  // the replay's own order: in about 1 run in 40 under load, WebKit reads the latest block once
-  // more around Review than the recording did. Replay answers a repeated call in recorded order,
-  // so that extra read takes Send's "latest" answer, Send's own read gets the block the tag lands
-  // in (recorded after it), the page re-pins there, and the tag is planned at a block whose plan
-  // the transcript doesn't have: a miss at finish, every assertion passing. Not a second save:
-  // the one-press guard is in, and the miss is the tag's first and only plan. Chromium and
-  // Firefox replay it, and the live job runs it. Lift it once replay stops letting an extra
-  // "latest" read move the chain ahead.
-  test.skip(
-    browserName === 'webkit' && CHAIN_MODE === 'replay',
-    'quarantined: an extra latest-block read moves the replayed chain ahead (writes.md)',
-  );
   const chain = await testChain(
     'client-tags-tagging',
     'note.txt at the root by anvil #6; c.txt tagged /cars/tesla by anvil #0.',
@@ -473,9 +473,19 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     // A path nobody has used is said to be new before anything is signed.
     await path.fill('notes/todo');
     await expect(d.locator('.efs-tag-new')).toContainText(/Nobody has used\W+\/notes\/todo\W+yet/);
-    // A word the grammar refuses is named, and Review stays off.
+    // A typed word is folded as it will be saved, and the picker says so: Review stays on.
     await path.fill('Notes');
+    await expect(d.locator('.efs-tag-folded')).toContainText(/Saved as\W+\/notes/);
+    await expect(d.locator('wa-button.efs-tag-review')).not.toHaveAttribute('disabled');
+    // A word the grammar refuses (it isn't folded: not all ASCII) is named, and Review stays off.
+    await path.fill('Straße');
     await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
+    await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
+    // A word a ruling on the tag text rule could change waits for that ruling.
+    await path.fill('École');
+    await expect(d.locator('.efs-tag-unstable')).toContainText(
+      /This word can't be used until the tag text rule is chosen:\W+École/,
+    );
     await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
     await page.waitForFunction(() => document.getAnimations().length === 0);
     const axe = await new AxeBuilder({ page })
@@ -483,7 +493,9 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
       .withTags(AXE_TAGS)
       .analyze();
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
-    chain.step('Tag note.txt: suggestions for tesla; notes/todo is new; Notes is refused');
+    chain.step(
+      'Tag note.txt: suggestions for tesla; notes/todo is new; Notes saved as notes; Straße refused; École waits for the ruling',
+    );
 
     // "Not this" is a different act: its review says what it hides, and where it doesn't reach.
     await path.fill('notes/todo');

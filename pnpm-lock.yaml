@@ -179,8 +179,8 @@ importers:
         specifier: file:vendor/efs-fixture-0.0.0-31ee83a.tgz
         version: file:vendor/efs-fixture-0.0.0-31ee83a.tgz(typescript@7.0.2)
       '@efs/sdk':
-        specifier: file:vendor/efs-sdk-0.0.0-31ee83a.tgz
-        version: file:vendor/efs-sdk-0.0.0-31ee83a.tgz(typescript@7.0.2)
+        specifier: file:vendor/efs-sdk-0.0.0-e229ea3.tgz
+        version: file:vendor/efs-sdk-0.0.0-e229ea3.tgz(typescript@7.0.2)
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -209,8 +209,8 @@ importers:
         specifier: 3.15.0
         version: 3.15.0(@floating-ui/utils@0.2.12)(@types/node@24.13.6)(@types/react@19.3.0)
       '@efs/sdk':
-        specifier: file:../../vendor/efs-sdk-0.0.0-31ee83a.tgz
-        version: file:vendor/efs-sdk-0.0.0-31ee83a.tgz(typescript@7.0.2)
+        specifier: file:../../vendor/efs-sdk-0.0.0-e229ea3.tgz
+        version: file:vendor/efs-sdk-0.0.0-e229ea3.tgz(typescript@7.0.2)
       '@lit-labs/signals':
         specifier: 0.3.0
         version: 0.3.0
@@ -313,8 +313,8 @@ packages:
     version: 0.0.0
     engines: {node: '>=22.12'}
 
-  '@efs/sdk@file:vendor/efs-sdk-0.0.0-31ee83a.tgz':
-    resolution: {integrity: sha512-ql2MLRxop7sShqzsqzSiBeX3ooPCSomh967KEr9EpBsv+1P1K/TQ1fBUPZ8JP6BCJVwmR2NIScKnCc+UBHqFaw==, tarball: file:vendor/efs-sdk-0.0.0-31ee83a.tgz}
+  '@efs/sdk@file:vendor/efs-sdk-0.0.0-e229ea3.tgz':
+    resolution: {integrity: sha512-vZoY3Nay+ek4q1hQAl3YooLSr7IX9TFiSCBDDfiG7GBJZCqer1EA4UyWa99f8UAv3A4msDwiR+YqM0uIpOCmbQ==, tarball: file:vendor/efs-sdk-0.0.0-e229ea3.tgz}
     version: 0.0.0
     engines: {node: '>=22.12'}
 
@@ -1143,7 +1143,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@efs/sdk@file:vendor/efs-sdk-0.0.0-31ee83a.tgz(typescript@7.0.2)':
+  '@efs/sdk@file:vendor/efs-sdk-0.0.0-e229ea3.tgz(typescript@7.0.2)':
     dependencies:
       '@noble/hashes': 1.8.0
       viem: 2.58.4(typescript@7.0.2)

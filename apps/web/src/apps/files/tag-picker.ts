@@ -6,10 +6,14 @@
 //   no index service is set up. Lens counts wait for the SDK (only the global figure is shown).
 // - A path no suggestion matches is said to be new ("Nobody has used /cars/teslaa yet"), so a
 //   typo is visible before it becomes permanent; the review then names every tag it creates.
-// - Words go as typed (no fold until one is ruled): one the chain's grammar refuses is named.
+// - Words are folded as the SDK folds them (its interim fold, sdk-v2 e229ea3): "Notes" saves as
+//   notes, and the picker says so ("Saved as /notes"), never changing a word silently. One the
+//   chain's grammar refuses is named; a non-ASCII word a ruling could change (École, straße) is
+//   refused until the tag text rule is chosen (checkStableWord), with Review off.
 // - Reads are debounced and one at a time; a newer word cancels an older read.
 
 import type { Efs } from '@efs/sdk';
+import { checkStableWord, foldWord } from '@efs/sdk/links';
 import type { TopicView } from '@efs/sdk/tags';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -87,6 +91,10 @@ export class EfsTagPicker extends EfsElement {
   #stance = state<'tag' | 'deny'>('tag');
   #suggestions = state<Suggestions>({ phase: 'idle' });
   #refused = state<{ word: string; code: number; rule: string } | undefined>(undefined);
+  /** A word that can't be written until the tag text rule is chosen (checkStableWord). */
+  #unstable = state<string | undefined>(undefined);
+  /** The path as it will be saved, when folding changed what was typed. */
+  #folded = state<readonly string[] | undefined>(undefined);
   #timer: ReturnType<typeof setTimeout> | undefined;
   #controller: AbortController | undefined;
   #checkWord: ((w: string) => { ok: true } | { ok: false; code: number; rule: string }) | undefined;
@@ -111,13 +119,24 @@ export class EfsTagPicker extends EfsElement {
 
   /** The person's choice changed: say so, and look the last word up (debounced). */
   #changed(): void {
-    const words = typedWords(this.#text.get());
+    const typed = typedWords(this.#text.get());
+    // As the SDK will save them: folded (a word it can't fold stays as typed, for the grammar).
+    // The link grammar's own fold, already loaded with the app (a lazy import of it would split
+    // the startup chunks, and WebKit then can't recover a failed app chunk by reloading).
+    const words = typed.map((w) => {
+      const f = foldWord(w);
+      return f.ok ? f.word : w;
+    });
     const refused =
       this.#checkWord && words.length > 0 ? badWord(words, this.#checkWord) : undefined;
     this.#refused.set(
       refused ? { word: refused.word, code: refused.code, rule: refused.rule } : undefined,
     );
-    const valid = words.length > 0 && this.#checkWord !== undefined && !refused;
+    const unstable = refused ? undefined : words.find((w) => !checkStableWord(w).ok);
+    this.#unstable.set(unstable);
+    const valid =
+      words.length > 0 && this.#checkWord !== undefined && !refused && unstable === undefined;
+    this.#folded.set(valid && words.some((w, i) => w !== typed[i]) ? words : undefined);
     this.dispatchEvent(
       new CustomEvent<TagPick>(TAG_PICK_EVENT, {
         detail: { words: valid ? words : undefined, stance: this.#stance.get() },
@@ -180,12 +199,16 @@ export class EfsTagPicker extends EfsElement {
 
   override render() {
     const t = this.translator.t.bind(this.translator);
-    const words = typedWords(this.#text.get());
     const s = this.#suggestions.get();
     const refused = this.#refused.get();
+    const unstable = this.#unstable.get();
+    const folded = this.#folded.get();
+    // The words as they'll be saved (folded), which the suggestions were looked up by.
+    const words = folded ?? typedWords(this.#text.get());
     const isNew =
       words.length > 0 &&
       !refused &&
+      unstable === undefined &&
       ((s.phase === 'shown' && s.word === words.at(-1) && !isSuggested(words, s.rows)) ||
         (s.phase === 'unused' && s.word === words.at(-1)));
     return html`<div class="wa-stack wa-gap-s efs-tag-picker">
@@ -206,6 +229,20 @@ export class EfsTagPicker extends EfsElement {
           ? html`<p class="efs-tag-refused" role="alert">
               ${t('files.topic.badWord', { word: refused.word, code: refused.code })}
               <span class="efs-quiet" translate="no">${refused.rule}</span>
+            </p>`
+          : nothing
+      }
+      ${
+        unstable !== undefined
+          ? html`<p class="efs-tag-unstable" role="alert">
+              ${t('files.tag.unstable', { word: unstable })}
+            </p>`
+          : nothing
+      }
+      ${
+        folded
+          ? html`<p class="efs-tag-folded" role="status">
+              ${t('files.tag.savedAs', { path: pathText(folded) })}
             </p>`
           : nothing
       }
