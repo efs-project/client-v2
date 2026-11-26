@@ -458,7 +458,7 @@ export class EfsFilesPreview extends EfsElement {
         html`<efs-file-editor
           .host=${this.host}
           .efs=${efs}
-          .create=${{ folder: c.folder, folderName: c.folderName, name: c.name }}
+          .create=${{ folder: c.folder, key: c.key, folderName: c.folderName, name: c.name }}
           .realm=${location.realm}
           .route=${formatRealmRoute(location.realm, c.route)}
           .link=${''}

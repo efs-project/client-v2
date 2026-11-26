@@ -18,6 +18,7 @@ import { WEB } from './paths.ts';
 export const APP_ICONS = [
   'arrow-down',
   'arrow-up',
+  'ban',
   'bars',
   'circle-check',
   'circle-exclamation',

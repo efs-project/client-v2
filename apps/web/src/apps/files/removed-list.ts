@@ -13,17 +13,18 @@
 //   "you hid someone else's entry: Unhide") slot in without reshaping the row.
 
 import type { Efs, PrincipalId } from '@efs/sdk';
-import type { FolderRef, RemovedCursor, RemovedRow } from '@efs/sdk/files';
+import type { ParentRef, RemovedCursor, RemovedRow } from '@efs/sdk/files';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { parentKey } from './navigation.ts';
 import { fromRemovedPage, type RemovedListState, removedNotice } from './removed-model.ts';
 
 export const RESTORE_REMOVED_EVENT = 'efs-restore-removed';
 /** The event's detail: the removed row the person chose, what to do with it, and its folder. */
 export interface RestoreRemovedDetail {
-  readonly folder: FolderRef;
+  readonly folder: ParentRef;
   readonly row: RemovedRow;
   /** Restore its last target (KNOWN rows), or unblock the name (NEVER_BOUND rows). */
   readonly action: 'restore' | 'unhide';
@@ -47,7 +48,8 @@ export class EfsFilesRemoved extends EfsElement {
     restorable: { attribute: false },
   };
   declare efs: Efs | undefined;
-  declare folder: FolderRef | undefined;
+  /** The folder or address listed. */
+  declare folder: ParentRef | undefined;
   /** The connected account's principal: whose removed entries these are. */
   declare author: PrincipalId | undefined;
   declare translator: Translator;
@@ -74,7 +76,7 @@ export class EfsFilesRemoved extends EfsElement {
   override updated(): void {
     const base =
       this.efs && this.folder && this.author
-        ? `${this.folder.directory.toLowerCase()}|${this.author.toLowerCase()}`
+        ? `${parentKey(this.folder)}|${this.author.toLowerCase()}`
         : undefined;
     const key = base ? `${base}|${this.generation}` : undefined;
     if (key === this.#loaded) return;

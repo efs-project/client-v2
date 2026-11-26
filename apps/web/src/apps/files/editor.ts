@@ -25,8 +25,8 @@ import type {
   CreateFileReview,
   EditPlanResult,
   FolderPlanResult,
-  FolderRef,
   OpenedFile,
+  ParentRef,
   RevisionRef,
 } from '@efs/sdk/files';
 import type { RealmRef } from '../../boot/route.ts';
@@ -46,6 +46,7 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import { approvalsLine } from './approvals.ts';
+import { attachNotice } from './attach-notice.ts';
 import { newFileKey } from './compose.ts';
 import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
 import { authorLabel } from './who.ts';
@@ -56,7 +57,9 @@ type Planned = EditPlanned | CreatePlanned;
 
 /** A new file to write (create mode): where, and the name it was given. */
 export interface NewFileTarget {
-  readonly folder: FolderRef;
+  readonly folder: ParentRef;
+  /** The place's chain key, lowercase, as save holds name it (a folder's record, an address's word). */
+  readonly key: string;
   readonly folderName: string;
   readonly name: string;
 }
@@ -80,6 +83,7 @@ type Phase =
   | {
       readonly phase: 'sending';
       readonly plan: Planned;
+      readonly writer: EfsWriter;
       readonly approving?: { readonly part: number; readonly total: number };
     }
   /** The send threw: it may or may not have gone out. The banner settles it. */
@@ -353,11 +357,11 @@ export class EfsFileEditor extends EfsElement {
   /** Create mode: the (folder, name) the new file takes. */
   #place(): { readonly folder: string; readonly name: string } | undefined {
     return this.create
-      ? { folder: this.create.folder.directory.toLowerCase(), name: this.#name.get() }
+      ? { folder: this.create.key.toLowerCase(), name: this.#name.get() }
       : undefined;
   }
 
-  #progressOpts(plan: Planned): SequenceOpts {
+  #progressOpts(plan: Planned, writer: EfsWriter): SequenceOpts {
     return {
       onProgress: (now, event) => {
         const first = event.kind === 'wallet-request' ? event.parts[0] : undefined;
@@ -365,6 +369,7 @@ export class EfsFileEditor extends EfsElement {
           this.#phase.set({
             phase: 'sending',
             plan,
+            writer,
             approving: { part: first + 1, total: now.total },
           });
         }
@@ -531,7 +536,7 @@ export class EfsFileEditor extends EfsElement {
 
   /** Sends the reviewed plan; a save that wasn't sent before is continued, not started again. */
   async #send(plan: Planned, writer: EfsWriter, again?: Hex): Promise<void> {
-    this.#phase.set({ phase: 'sending', plan });
+    this.#phase.set({ phase: 'sending', plan, writer });
     // Checked again at Send, from the journal: a save may have opened (here or in another tab)
     // since the plan was made.
     if (!(await this.#relist()) || this.#hold(again).hold) {
@@ -540,7 +545,7 @@ export class EfsFileEditor extends EfsElement {
     }
     let progress: SequenceProgress;
     try {
-      const opts = this.#progressOpts(plan);
+      const opts = this.#progressOpts(plan, writer);
       progress = again
         ? await writer.resume(again, opts)
         : await writer.runSequence(plan.parts, opts);
@@ -733,6 +738,7 @@ export class EfsFileEditor extends EfsElement {
             : nothing
         }
         <p>${t('review.appears')}</p>
+        ${this.create ? attachNotice(t, this.create.folder, s.writer.principal) : nothing}
         <p class="efs-review-prompts">
           ${approvalsLine(t, r.prompts)}
         </p>

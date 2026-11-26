@@ -238,7 +238,7 @@ Remove "pet.jpg" from 0x12…ab?
       - UNKNOWN: the history is too deep to read, for that row only. The row says so and offers nothing; it is never a guess.
       - Restore's refusals NEVER_BOUND and HISTORY_UNKNOWN, and Unblock's NOT_HIDDEN, each have their own words.
       - An Unblock's save names its effect (`files.unhide`, sdk-v2 13a733d), as a block's does (`files.hide`): the listing re-reads for it from any tab, and the save hold keys it by (folder, name).
-      - A request whose parent is an address (a home) has no (folder, name) key in the client yet: it holds, and is held by, every unsettled save of the account (fail-closed) until homes are wired.
+      - A request whose parent is an address (a home) is keyed by the address's padded word (the SDK's `homeId`, read lazily by the listing): until that's read it holds, and is held by, every unsettled save of the account (fail-closed).
     - **It reads again** whenever a save touching the folder lands, keeping its rows shown meanwhile.
   - **Restoring a folder needs the path to it** (`via`: from the realm's root, by the names on the trail), so the SDK can check it never lands inside itself. In a folder opened by its link the trail has no names: a folder's Restore is disabled there, with "Open this folder from the root to restore a folder here." A file restores anywhere. The SDK checks the path against the chain, so a stale trail is refused, never trusted.
   - **The review says where else the target is placed now** (`alsoPlaced`, by anyone): "It's in N other places now too; restoring puts it here as well." Nothing is said when the index can't vouch for the count (never "0").
@@ -342,6 +342,7 @@ The shape agreed by the SDK dev and the PM (2026-11-25), all from `@efs/sdk/file
   - A new text file sends none.
 - `planMoveEntries({ moves: [{ from, to: { folder?, name?, via? } }] })`: a release plus a bind, atomic. Rename is a move with only `name`. `via` (`{ from: FolderRef, segments }`) is required for a folder move; `from` is the start of the view.
 - `planRemoveEntries({ entries, hide? })`: releases by default, and `hide` masks (offered only to the place's owner).
+- `planHideEntries({ entries })`: "Block this name here" on someone else's entry, offered only to the place's owner (`tags.md`, stage 4b).
 - `planRestoreEntries({ entries })`.
 
 **Refusals** are REFUSED `{ refused: [{ index, code }] }`, with nothing planned if any part is refused. Each code has its own copy:

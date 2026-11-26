@@ -4,12 +4,15 @@
 // file's folder and name (newFileKey), which the folder's listing offers back. Once Saved, the
 // new file opens by its own link.
 
-import type { FolderRef } from '@efs/sdk/files';
+import type { ParentRef } from '@efs/sdk/files';
 import { formatRealmRoute, type RealmRef } from '../../boot/route.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 
 export interface NewFile {
-  readonly folder: FolderRef;
+  /** Where it's written: a folder, or an address. */
+  readonly folder: ParentRef;
+  /** The place's chain key, lowercase, as save holds name it (a folder's record, an address's word). */
+  readonly key: string;
   /** The folder's name as shown (its row's name, or the root's), for the review. */
   readonly folderName: string;
   readonly name: string;
@@ -38,6 +41,7 @@ export function createComposer(): Composer {
  * An unsaved new file's key among unsaved edits: its realm, folder and exact name. Routes start
  * with "#/", so it never collides with a file's key (shell/drafts.ts).
  */
-export function newFileKey(realm: RealmRef, folder: FolderRef, name: string): string {
-  return `new:${formatRealmRoute(realm)}\u0000${folder.directory.toLowerCase()}\u0000${name}`;
+export function newFileKey(realm: RealmRef, folder: ParentRef, name: string): string {
+  const where = folder.kind === 'folder' ? folder.directory : `home:${folder.address}`;
+  return `new:${formatRealmRoute(realm)}\u0000${where.toLowerCase()}\u0000${name}`;
 }

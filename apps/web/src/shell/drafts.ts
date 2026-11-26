@@ -7,7 +7,7 @@
 // saved has no route: it is kept under its folder and name (the Files app's newFileKey) until it
 // is saved.
 
-import type { FolderRef, RevisionRef } from '@efs/sdk/files';
+import type { ParentRef, RevisionRef } from '@efs/sdk/files';
 import { formatRealmRoute, type RealmRef } from '../boot/route.ts';
 import { type ReadonlySignal, state } from '../state/signals.ts';
 
@@ -34,7 +34,9 @@ export interface EditDraft {
 export interface NewFileDraft {
   readonly text: string;
   readonly create: {
-    readonly folder: FolderRef;
+    readonly folder: ParentRef;
+    /** The place's chain key, lowercase, as save holds name it (a folder's record, an address's word). */
+    readonly key: string;
     readonly folderName: string;
     readonly name: string;
   };

@@ -285,7 +285,6 @@ export class EfsFilesTopic extends EfsElement {
     }
     const run = this.#scope.child();
     this.#run = run;
-    const { signal } = run;
     // While this list's reads run (rows, paths, children, names): `data-reading` on the element,
     // so anything waiting for the view to settle (a test) waits for exactly this.
     this.dataset.reading = '';
