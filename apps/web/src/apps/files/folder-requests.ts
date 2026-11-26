@@ -3,7 +3,13 @@
 
 import type { Efs, Lens } from '@efs/sdk';
 import type { EfsWriter } from '@efs/sdk/actions';
-import type { EntryRef, FolderPlanResult, FolderRef, ParentRef } from '@efs/sdk/files';
+import type {
+  EntryRef,
+  ExternalContent,
+  FolderPlanResult,
+  FolderRef,
+  ParentRef,
+} from '@efs/sdk/files';
 import type { TagPlace, TagPlanResult, TagTarget, TopicStatementPlanResult } from '@efs/sdk/tags';
 import type { Place } from '../../shell/save-hold.ts';
 import type { MessageId } from '../../ui/i18n.ts';
@@ -31,7 +37,8 @@ export type FolderRequest =
       readonly kind: 'createFile';
       readonly folder: ParentRef;
       readonly name: string;
-      readonly content: Uint8Array;
+      /** The bytes, or (a linked file) where they're stored, with their length and SHA-256. */
+      readonly content: Uint8Array | ExternalContent;
       readonly mediaType: string;
     }
   | { readonly kind: 'rename'; readonly from: EntryRef; readonly to: string }
