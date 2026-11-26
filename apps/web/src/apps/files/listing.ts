@@ -52,7 +52,7 @@ import type {
   SelectedEntry,
 } from './folder-save.ts';
 import { pendingCreates, showsEffect, touchesFolder } from './listing-sync.ts';
-import { uploadMediaType } from './upload-model.ts';
+import { declaredMediaType, uploadMediaType } from './upload-model.ts';
 import { authorLabel } from './who.ts';
 
 /**
@@ -995,27 +995,26 @@ export class EfsFilesListing extends EfsElement {
       this.#uploadNote.set('files.upload.oneAtATime');
       return;
     }
-    if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
-      this.#uploadNote.set('files.upload.tooBig');
-      return;
-    }
     this.#uploadNote.set(undefined);
-    const [buffer, { normalizeMediaType }] = await Promise.all([
-      file.arrayBuffer(),
-      import('@efs/sdk/files'),
-    ]);
-    const bytes = new Uint8Array(buffer);
-    const type = uploadMediaType(bytes, file.type, normalizeMediaType);
     if (this.#keyOf(s.folder) === undefined) return;
-    this.#ask({
+    const { normalizeMediaType } = await import('@efs/sdk/files');
+    const base = {
       kind: 'upload',
       folder: s.folder,
       folderName: this.#folderName(),
       name: file.name,
-      bytes,
-      mediaType: type.mediaType,
-      typeFrom: type.from,
-    });
+      file,
+    } as const;
+    // Too large to read here (and far past what the chain stores): it can only be linked, so its
+    // bytes are read once, to fingerprint, and its type is as the device reports it.
+    if (file.size > UPLOAD_MAX_MB * 1024 * 1024) {
+      const declared = declaredMediaType(file.type, normalizeMediaType);
+      this.#ask({ ...base, mediaType: declared, typeFrom: declared ? 'browser' : 'unknown' });
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const type = uploadMediaType(bytes, file.type, normalizeMediaType);
+    this.#ask({ ...base, bytes, mediaType: type.mediaType, typeFrom: type.from });
   }
 
   /** "New text file", named in the dialog: the Preview's editor writes it, here. */

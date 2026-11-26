@@ -12,6 +12,7 @@ import {
 import type { Hosting } from '../platform/hosting.ts';
 import { createScope, type OwnerScope } from '../platform/scope.ts';
 import { defaultNetwork, EMPTY_CONFIG } from '../platform/settings/model.ts';
+import { withPublicGateways } from '../platform/settings/public-gateways.ts';
 import { effect } from '../state/effect.ts';
 import { computed, state } from '../state/signals.ts';
 import { EfsElement, html, nothing } from '../ui/element.ts';
@@ -250,6 +251,16 @@ export class EfsShell extends EfsElement {
         if (realm) this.#go(formatRealmRoute(realm, link), options?.replace);
       },
       saving: this.#saving(),
+      usePublicGateways: async (kind) => {
+        const now = this.os.network.get();
+        if (!('network' in now)) return 'FAILED';
+        const { definition, ipfsGateways, arweaveGateways } = now.network;
+        const current = kind === 'ipfs' ? ipfsGateways : arweaveGateways;
+        const result = await this.os.updateSettings((s) =>
+          withPublicGateways(s, definition, current, kind),
+        );
+        return result.status === 'SAVED' ? 'SAVED' : 'FAILED';
+      },
     };
   }
 

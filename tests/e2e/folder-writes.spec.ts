@@ -1429,3 +1429,129 @@ test('At your own address: Block works on a junk entry too, one that points at n
     await chain.finish();
   }
 });
+
+/** Answers every request to the given gateway hosts with `body` (no real gateway is reached). */
+async function gateway(page: Page, hosts: RegExp, body: string): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route(hosts, (route) => {
+    asked.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/octet-stream', body });
+  });
+  return asked;
+}
+
+test('Store it elsewhere and link it: fingerprinted here, the address checked, one send; the Preview offers public gateways, then verifies (or rejects wrong bytes)', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-link-file',
+    'The realm root; anvil #6 links talk.txt (ar://), then notes.txt (ipfs://), and checks a file too large for the chain is offered linking.',
+  );
+  const TALK = 'Hello from Arweave\n';
+  const AR_ID = 'bNbA3TEQVL60xlgCcqdz4ZPHFZ711cZ3hmkpGttDt_U';
+  const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi';
+  try {
+    // The public gateways answer the right bytes; the test's own IPFS gateway answers wrong ones.
+    const arweave = await gateway(page, /^https:\/\/(arweave\.net|ar-io\.net)\//, TALK);
+    await gateway(page, /^https:\/\/ipfs\.example\.net\//, 'not the bytes that were linked\n');
+    await openRoot(page, chain);
+
+    // Too large for the chain: the plan says so and offers to link it instead.
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({
+        name: 'big.bin',
+        mimeType: 'application/octet-stream',
+        buffer: Buffer.alloc(1_500_000, 7),
+      });
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await expect(dialog(page)).toContainText('This file is too large to save here');
+    await dialog(page).locator('wa-button.efs-link-offer').click();
+    await expect(dialog(page).locator('.efs-link-fingerprint')).toContainText(/0x[0-9a-f]{64}/);
+    await dialog(page).locator('wa-button', { hasText: 'Cancel' }).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    expect(sendRequests(chain)).toHaveLength(0);
+    chain.step('A file too large for the chain: refused, with "Store it elsewhere and link it"');
+
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({ name: 'talk.txt', mimeType: 'text/plain', buffer: Buffer.from(TALK) });
+    await dialog(page).locator('wa-button.efs-link-offer').click();
+    const link = dialog(page);
+    await expect(link.locator('.efs-link-fingerprint')).toContainText(
+      // SHA-256 of TALK, made on this device.
+      /0x[0-9a-f]{64}/,
+    );
+    await expect(link.locator('.efs-link-fingerprint')).toContainText('19 bytes');
+    const where = link.locator('wa-input.efs-link-locator input');
+    await where.fill('ftp://example.org/talk.txt');
+    await expect(link.locator('.efs-link-rule')).toContainText(
+      'Use an ipfs://, ar:// or https:// address.',
+    );
+    await expect(link.locator('wa-button.efs-link-review')).toHaveAttribute('disabled', '');
+    await where.fill('ar://too-short');
+    await expect(link.locator('.efs-link-rule')).toContainText(
+      "doesn't look like a complete address",
+    );
+    await where.fill(`ar://${AR_ID}`);
+    await expect(link.locator('.efs-link-rule')).toHaveCount(0);
+    await link.locator('wa-button.efs-link-review').click();
+    await expect(link.locator('.efs-link-says')).toContainText(/Links\W+talk\.txt\W+in/);
+    await expect(link.locator('.efs-link-where')).toHaveText(`ar://${AR_ID}`);
+    await expect(link.locator('.efs-link-promise')).toContainText(
+      'The bytes stay where you put them. The chain keeps only their fingerprint.',
+    );
+    await expect(link.locator('.efs-link-promise')).toContainText('never as different bytes');
+    await expect(link).toContainText('One approval in your wallet.');
+    chain.step(
+      'Link talk.txt at ar://…: fingerprinted here, the address checked, the review says what is kept',
+    );
+
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'talk.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(1);
+    chain.step('Send: one approval; talk.txt is listed');
+
+    // No Arweave gateway is set up (the client ships none): the Preview says so and offers.
+    await row(page, 'talk.txt').locator('a.efs-entry-open').click();
+    const offer = preview(page).locator('.efs-gateway-offer');
+    await expect(offer).toContainText('This file is stored on Arweave');
+    await expect(offer.locator('.efs-gateway-note')).toContainText(
+      /arweave\.net, ar-io\.net\W+see your IP address and which file you read/,
+    );
+    expect(arweave).toEqual([]);
+    chain.step(
+      'Open it: stored on Arweave, no gateway: "Use public gateways", named, never on silently',
+    );
+
+    await offer.locator('wa-button.efs-gateway-public').click();
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(TALK, { timeout: 20_000 });
+    await expect(preview(page).locator('.efs-gateway-offer')).toHaveCount(0);
+    expect(arweave.length).toBeGreaterThan(0);
+    await chain.idle(500);
+    chain.step('Use public gateways: saved as a setting; the copy is fetched and verified');
+
+    // A host answering different bytes: rejected, never shown as the file.
+    await page.locator('efs-files-view wa-breadcrumb-item').first().click();
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('notes\n') });
+    await dialog(page).locator('wa-button.efs-link-offer').click();
+    await dialog(page).locator('wa-input.efs-link-locator input').fill(`ipfs://${CID}`);
+    await dialog(page).locator('wa-button.efs-link-review').click();
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await row(page, 'notes.txt').locator('a.efs-entry-open').click();
+    await expect(preview(page).locator('efs-outcome')).toContainText(
+      "don't match the published fingerprint",
+      { timeout: 20_000 },
+    );
+    await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
+    expect(sendRequests(chain)).toHaveLength(2);
+    await chain.idle(500);
+    chain.step('notes.txt at ipfs://…, whose host answers other bytes: rejected, never shown');
+  } finally {
+    await chain.finish();
+  }
+});

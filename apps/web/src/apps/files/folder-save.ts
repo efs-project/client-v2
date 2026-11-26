@@ -10,7 +10,7 @@
 
 import type { Efs, Lens, NameCheck } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
-import type { EntryRef, FolderRef, ParentRef } from '@efs/sdk/files';
+import type { CreateFileReview, EntryRef, FolderRef, ParentRef } from '@efs/sdk/files';
 import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
 import { saveHold, statementKey } from '../../shell/save-hold.ts';
@@ -42,6 +42,13 @@ import {
   type ViewPath,
   withoutIndices,
 } from './folder-requests.ts';
+import {
+  checkLocator,
+  fingerprint,
+  isHttps,
+  LINK_MAX_BYTES,
+  type LocatorCheck,
+} from './link-model.ts';
 import type { NavStep } from './navigation.ts';
 import type { TagPick } from './tag-picker.ts';
 import { pathText } from './topic-model.ts';
@@ -68,6 +75,13 @@ export interface FolderSavedDetail {
 /** checkName, loaded with the SDK when a name is first asked for (the app entry stays SDK-free). */
 type CheckName = (input: string) => NameCheck;
 const loadCheckName = async (): Promise<CheckName> => (await import('@efs/sdk')).checkName;
+
+/** What a refused address says, by the rule it breaks (link-model.ts). */
+const LOCATOR_RULE: Record<Exclude<LocatorCheck, 'ok' | 'empty'>, MessageId> = {
+  scheme: 'files.link.schemeRule',
+  chars: 'files.link.charsRule',
+  shape: 'files.link.shapeRule',
+};
 
 /** checkText (the chain's text grammar, for a tag's name), loaded when a name is first typed. */
 type CheckText = (text: string) => { ok: true } | { ok: false; code: number; rule: string };
@@ -104,10 +118,13 @@ export type FolderAsk =
       readonly folderName: string;
       /** The file's own name, offered first. */
       readonly name: string;
-      readonly bytes: Uint8Array;
-      /** From the bytes (upload-model.ts); "" unknown. */
+      /** The file picked: fingerprinted here when it's linked instead of stored. */
+      readonly file: Blob;
+      /** Its bytes; absent for a file too large to read here, which can only be linked. */
+      readonly bytes?: Uint8Array;
+      /** From the bytes (upload-model.ts), or as the device reports it (`browser`); "" unknown. */
       readonly mediaType: string;
-      readonly typeFrom: 'signature' | 'text' | 'unknown';
+      readonly typeFrom: 'signature' | 'text' | 'unknown' | 'browser';
     }
   | { readonly kind: 'rename'; readonly from: EntryRef }
   /** One entry, or a selection, all from the folder on screen. */
@@ -204,6 +221,8 @@ type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${strin
 type Phase =
   | { readonly phase: 'closed' }
   | { readonly phase: 'naming'; readonly value: string }
+  /** An upload stored elsewhere and linked: its name, and the address typed so far. */
+  | { readonly phase: 'linking'; readonly name: string; readonly locator: string }
   | { readonly phase: 'picking' }
   | { readonly phase: 'planning'; readonly request: FolderRequest }
   | {
@@ -228,6 +247,19 @@ type Phase =
       readonly note?: MessageId;
     }
   | { readonly phase: 'unconfirmed' };
+
+/** An upload's bytes; a file too large to read here has none, and is only ever linked. */
+function uploadBytes(ask: Extract<FolderAsk, { kind: 'upload' }>): Uint8Array {
+  if (!ask.bytes) throw new Error('a file too large to read here can only be linked');
+  return ask.bytes;
+}
+
+/** A linked file's fingerprint, made on this device. */
+type Fingerprint =
+  | { readonly status: 'reading' }
+  | { readonly status: 'done'; readonly length: bigint; readonly sha256: `0x${string}` }
+  | { readonly status: 'failed' }
+  | { readonly status: 'tooBig' };
 
 export class EfsFolderSave extends EfsElement {
   static override properties = {
@@ -269,6 +301,10 @@ export class EfsFolderSave extends EfsElement {
   /** The SDK's checkName, once loaded: until then a name can't be reviewed. */
   #checkName = state<CheckName | undefined>(undefined);
   #checkText = state<CheckText | undefined>(undefined);
+  /** The fingerprint of the upload being linked (one ask at a time). */
+  #fingerprint = state<{ readonly of: FolderAsk; readonly value: Fingerprint } | undefined>(
+    undefined,
+  );
   #phase = state<Phase>({ phase: 'closed' });
   #controller: AbortController | undefined;
 
@@ -438,7 +474,7 @@ export class EfsFolderSave extends EfsElement {
           kind: 'createFile',
           folder: ask.folder,
           name,
-          content: ask.bytes,
+          content: uploadBytes(ask),
           mediaType: ask.mediaType,
         };
       case 'rename':
@@ -527,10 +563,12 @@ export class EfsFolderSave extends EfsElement {
       // INTO_ITSELF can be reached through Restore (a folder put back inside itself): said in
       // words. Any other MISUSE is a client bug (names are checked before Review): reported as one.
       const code = (error as { details?: { code?: unknown } }).details?.code;
+      // A linked file the SDK refuses (its address, as the chain would store it): said as that.
+      const linked = request.kind === 'createFile' && !(request.content instanceof Uint8Array);
       this.#phase.set({
         phase: 'plan-failed',
         request,
-        code: code === 'INTO_ITSELF' ? 'INTO_ITSELF' : 'CLIENT_ERROR',
+        code: code === 'INTO_ITSELF' ? 'INTO_ITSELF' : linked ? 'BAD_LOCATOR' : 'CLIENT_ERROR',
       });
     }
   }
@@ -892,6 +930,137 @@ export class EfsFolderSave extends EfsElement {
       }`;
   }
 
+  /**
+   * "Store it elsewhere and link it": to the address step, fingerprinting the picked file on this
+   * device meanwhile (once per ask). Nothing is uploaded or fetched.
+   */
+  #startLinking(name: string, locator = ''): void {
+    const ask = this.#ask.get();
+    if (ask?.kind !== 'upload') return;
+    this.#phase.set({ phase: 'linking', name, locator });
+    if (this.#fingerprint.get()?.of === ask) return;
+    const set = (value: Fingerprint) => {
+      if (this.#ask.get() === ask) this.#fingerprint.set({ of: ask, value });
+    };
+    if (ask.file.size > LINK_MAX_BYTES) {
+      set({ status: 'tooBig' });
+      return;
+    }
+    set({ status: 'reading' });
+    void (async () => {
+      try {
+        const bytes = ask.bytes ?? new Uint8Array(await ask.file.arrayBuffer());
+        const made = await fingerprint(bytes);
+        set({ status: 'done', ...made });
+      } catch (error) {
+        console.error(error);
+        set({ status: 'failed' });
+      }
+    })();
+  }
+
+  /** The address step: the fingerprint made here, and where the person stored the file. */
+  #linking(ask: Extract<FolderAsk, { kind: 'upload' }>, name: string, locator: string) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const fp = this.#fingerprint.get();
+    const print = fp?.of === ask ? fp.value : { status: 'reading' as const };
+    const check = checkLocator(locator);
+    const ready = this.host.saving.availability.get().status === 'READY';
+    const can = ready && print.status === 'done' && check === 'ok';
+    const review = () => {
+      if (!can || print.status !== 'done') return;
+      void this.#plan({
+        kind: 'createFile',
+        folder: ask.folder,
+        name,
+        content: { kind: 'external', length: print.length, sha256: print.sha256, locator },
+        mediaType: ask.mediaType,
+      });
+    };
+    return html`<div class="wa-stack wa-gap-s efs-link">
+        <p>${t('files.link.intro', { name })}</p>
+        ${
+          print.status === 'reading'
+            ? html`<p class="wa-cluster wa-gap-xs efs-quiet" role="status">
+                <wa-spinner></wa-spinner>${t('files.link.fingerprinting')}
+              </p>`
+            : print.status === 'done'
+              ? html`<dl class="efs-facts efs-link-fingerprint">
+                  <dt>${t('files.link.fingerprint')}</dt>
+                  <dd><code translate="no" dir="ltr" class="efs-hash">${print.sha256}</code></dd>
+                  <dt>${t('review.size')}</dt>
+                  <dd>${t('files.upload.size', { size: Number(print.length) })}</dd>
+                </dl>`
+              : html`<p class="efs-folder-name-error" role="alert">
+                  ${
+                    print.status === 'tooBig'
+                      ? t('files.link.fingerprintTooBig', { limit: LINK_MAX_BYTES / 1024 ** 3 })
+                      : t('files.link.fingerprintFailed')
+                  }
+                </p>`
+        }
+        <wa-input
+          class="efs-link-locator"
+          label=${t('files.link.locator')}
+          hint=${t('files.link.locatorHint')}
+          autocomplete="off"
+          spellcheck="false"
+          .value=${locator}
+          autofocus
+          @input=${(event: Event) =>
+            this.#phase.set({
+              phase: 'linking',
+              name,
+              locator: (event.target as HTMLInputElement).value.trim(),
+            })}
+          @keydown=${(event: KeyboardEvent) => {
+            if (event.key === 'Enter') review();
+          }}
+        ></wa-input>
+        ${
+          check === 'ok' || check === 'empty'
+            ? nothing
+            : html`<p class="efs-folder-name-error efs-link-rule" role="alert">
+                ${t(LOCATOR_RULE[check])}
+              </p>`
+        }
+        ${
+          check === 'ok' && isHttps(locator)
+            ? html`<p class="efs-quiet efs-link-https">${t('files.link.httpsNote')}</p>`
+            : nothing
+        }
+        ${
+          ready
+            ? nothing
+            : html`<wa-callout variant="neutral" size="small">
+                <span slot="icon">${appIcon('wallet')}</span>
+                <p>${t('files.save.connect')}</p>
+              </wa-callout>`
+        }
+      </div>
+      <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
+        >${t('review.cancel')}</wa-button
+      >
+      ${
+        ready
+          ? html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-link-review"
+              ?disabled=${!can}
+              @click=${review}
+              >${t('files.save.review')}</wa-button
+            >`
+          : html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-connect"
+              @click=${() => this.host.saving.requestWallet()}
+              >${t('files.save.connectButton')}</wa-button
+            >`
+      }`;
+  }
+
   /** The name typed so far (the naming phase's value), else `fallback`. */
   #nameNow(fallback: string): string {
     const s = this.#phase.get();
@@ -916,6 +1085,9 @@ export class EfsFolderSave extends EfsElement {
                 : 'files.name.rule.character',
             );
     const writes = ask.kind === 'createFile';
+    // An upload can be stored elsewhere and linked instead; one too large to read here only can.
+    const linkable = ask.kind === 'upload';
+    const linkOnly = ask.kind === 'upload' && !ask.bytes;
     // Enter can come before checkName has loaded (it loads with the SDK when the dialog opens):
     // it waits for it, then checks the name as it is now, so a fast typist's Enter is never lost.
     const review = async () => {
@@ -953,6 +1125,14 @@ export class EfsFolderSave extends EfsElement {
             : nothing
         }
         ${
+          linkOnly
+            ? html`<wa-callout variant="neutral" size="small" class="efs-link-only">
+                <span slot="icon">${appIcon('circle-info')}</span>
+                <p>${t('files.link.tooBigHere')}</p>
+              </wa-callout>`
+            : nothing
+        }
+        ${
           ready || writes
             ? nothing
             : html`<wa-callout variant="neutral" size="small">
@@ -965,8 +1145,25 @@ export class EfsFolderSave extends EfsElement {
         >${t('review.cancel')}</wa-button
       >
       ${
-        writes
+        linkable
           ? html`<wa-button
+              slot="footer"
+              appearance=${linkOnly ? 'accent' : 'outlined'}
+              variant=${linkOnly ? 'brand' : 'neutral'}
+              class="efs-link-offer"
+              ?disabled=${check?.status !== 'VALID'}
+              @click=${() => {
+                if (check?.status === 'VALID') this.#startLinking(check.text);
+              }}
+              >${t('files.link.offer')}</wa-button
+            >`
+          : nothing
+      }
+      ${
+        linkOnly
+          ? nothing
+          : writes
+            ? html`<wa-button
               slot="footer"
               variant="brand"
               class="efs-folder-write"
@@ -974,8 +1171,8 @@ export class EfsFolderSave extends EfsElement {
               @click=${review}
               >${t('files.new.continue')}</wa-button
             >`
-          : ready
-            ? html`<wa-button
+            : ready
+              ? html`<wa-button
             slot="footer"
             variant="brand"
             class="efs-folder-review"
@@ -983,7 +1180,7 @@ export class EfsFolderSave extends EfsElement {
             @click=${review}
             >${t('files.save.review')}</wa-button
           >`
-            : html`<wa-button
+              : html`<wa-button
             slot="footer"
             variant="brand"
             class="efs-folder-connect"
@@ -1074,6 +1271,49 @@ export class EfsFolderSave extends EfsElement {
       }`;
   }
 
+  /** A linked file's review: where its bytes are, and what the chain keeps (only their fingerprint). */
+  #linkReview(r: CreateFileReview, ask: FolderAsk) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const s = this.#phase.get();
+    const request = s.phase === 'review' || s.phase === 'sending' ? s.request : undefined;
+    const locator =
+      request?.kind === 'createFile' && !(request.content instanceof Uint8Array)
+        ? request.content.locator
+        : '';
+    return html`<p class="efs-link-says">
+        ${t('files.link.review', {
+          name: r.name,
+          folder: ask.kind === 'upload' ? ask.folderName : '',
+        })}
+      </p>
+      <p><code translate="no" dir="ltr" class="efs-hash efs-link-where">${locator}</code></p>
+      <wa-callout variant="neutral" size="small" class="efs-link-promise">
+        <span slot="icon">${appIcon('circle-info')}</span>
+        <p>${t('files.link.promise')}</p>
+      </wa-callout>
+      ${isHttps(locator) ? html`<p class="efs-quiet efs-link-https">${t('files.link.httpsNote')}</p>` : nothing}
+      <dl class="efs-facts">
+        <dt>${t('files.link.fingerprint')}</dt>
+        <dd><code translate="no" dir="ltr" class="efs-hash">${r.sha256}</code></dd>
+        <dt>${t('review.size')}</dt>
+        <dd>${t('files.upload.size', { size: Number(r.size) })}</dd>
+      </dl>
+      <p class="efs-upload-type">
+        ${
+          r.mediaType
+            ? t(
+                ask.kind === 'upload' && ask.typeFrom === 'signature'
+                  ? 'files.upload.typeSignature'
+                  : ask.kind === 'upload' && ask.typeFrom === 'browser'
+                    ? 'files.upload.typeBrowser'
+                    : 'files.upload.typeText',
+                { type: r.mediaType },
+              )
+            : t('files.upload.typeUnknown')
+        }
+      </p>`;
+  }
+
   #reviewLines(ask: FolderAsk, plan: Planned) {
     const t = this.host.translator.t.bind(this.host.translator);
     const r = plan.review;
@@ -1099,6 +1339,7 @@ export class EfsFolderSave extends EfsElement {
       </p>`;
     switch (r.kind) {
       case 'efs.createFileReview':
+        if (r.layout === 'external') return this.#linkReview(r, ask);
         return html`<p>
             ${t('files.upload.review', { name: r.name, folder: ask.kind === 'upload' ? ask.folderName : '' })}
           </p>
@@ -1346,6 +1587,9 @@ export class EfsFolderSave extends EfsElement {
         case 'naming':
           body = this.#naming(ask, s.value);
           break;
+        case 'linking':
+          if (ask.kind === 'upload') body = this.#linking(ask, s.name, s.locator);
+          break;
         case 'picking':
           if (ask.kind === 'move') body = this.#picking(ask);
           else if (ask.kind === 'tag') body = this.#tagPicking(ask);
@@ -1409,13 +1653,24 @@ export class EfsFolderSave extends EfsElement {
           const noWallet = s.code === 'NO_WALLET';
           const intoItself = s.code === 'INTO_ITSELF';
           const tooLarge = s.code === 'TOO_LARGE';
+          const badLocator = s.code === 'BAD_LOCATOR';
           const message = noWallet
             ? t('files.save.connect')
             : intoItself
               ? t('files.move.intoSelf')
               : tooLarge
                 ? t('files.upload.tooLarge')
-                : t('files.save.planFailed', { code: s.code });
+                : badLocator
+                  ? t('files.link.invalid')
+                  : t('files.save.planFailed', { code: s.code });
+          // Too large for the chain, or an address the SDK refused: link it instead, or fix it.
+          const relink =
+            ask.kind === 'upload' && s.request.kind === 'createFile' && (tooLarge || badLocator)
+              ? {
+                  name: s.request.name,
+                  locator: s.request.content instanceof Uint8Array ? '' : s.request.content.locator,
+                }
+              : undefined;
           body = html`<wa-callout variant=${noWallet ? 'neutral' : 'danger'} size="small">
               <span slot="icon">${appIcon(noWallet ? 'wallet' : 'circle-exclamation')}</span>
               <p>${message}</p>
@@ -1431,9 +1686,17 @@ export class EfsFolderSave extends EfsElement {
                     @click=${() => this.host.saving.requestWallet()}
                     >${t('files.save.connectButton')}</wa-button
                   >`
-                : intoItself || tooLarge
-                  ? nothing
-                  : html`<wa-button
+                : relink
+                  ? html`<wa-button
+                      slot="footer"
+                      variant="brand"
+                      class="efs-link-offer"
+                      @click=${() => this.#startLinking(relink.name, relink.locator)}
+                      >${t(badLocator ? 'files.link.fix' : 'files.link.offer')}</wa-button
+                    >`
+                  : intoItself || tooLarge
+                    ? nothing
+                    : html`<wa-button
                       slot="footer"
                       variant="brand"
                       @click=${() => void this.#plan(s.request)}

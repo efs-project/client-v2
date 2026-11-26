@@ -7,6 +7,7 @@ import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { RealmRef } from '../boot/route.ts';
 import type { Hosting } from '../platform/hosting.ts';
 import type { OwnerScope } from '../platform/scope.ts';
+import type { GatewayKind } from '../platform/settings/public-gateways.ts';
 import type { ReadonlySignal } from '../state/signals.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import type { DraftStore } from './drafts.ts';
@@ -93,6 +94,11 @@ export interface AppHost {
   /** Goes to a link (from the SDK's link()) in the current realm, or the default realm. */
   openLink(link: string, options?: { readonly replace?: boolean }): void;
   readonly saving: SavingHost;
+  /**
+   * Adds the named public gateways of `kind` to the selected network's list, saved as the
+   * person's setting (shown and changeable in Settings). Only ever from the person's own click.
+   */
+  usePublicGateways(kind: GatewayKind): Promise<'SAVED' | 'FAILED'>;
 }
 
 export interface AppMount {
