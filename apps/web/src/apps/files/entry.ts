@@ -148,11 +148,17 @@ function preview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement 
   element.composer = shared.composer;
   const link = shared.link;
   element.target = link;
-  // Shared links are normalized (e.g. uppercase hex) to the SDK's canonical form, in place.
+  // Shared links are normalized (e.g. uppercase hex) to the SDK's canonical form, in place; so are
+  // tag paths, folded by the SDK (a typed /Cars/Tesla shows as /cars/tesla), so a copied link is
+  // the canonical one.
   effect(scope, () => {
     const now = link.get();
     const location = host.location.get();
-    if (now.status === 'target' && location.kind === 'realm' && now.canonical !== location.link) {
+    if (
+      (now.status === 'target' || now.status === 'topic') &&
+      location.kind === 'realm' &&
+      now.canonical !== location.link
+    ) {
       queueMicrotask(() => host.openLink(now.canonical, { replace: true }));
     }
   });

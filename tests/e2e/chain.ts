@@ -5,23 +5,23 @@
 //   than recorded (a second eth_sendTransaction, say) fails the test.
 // - live (CI's live-chain job): a fresh @efs/fixture chain (anvil) per test, and a wallet that
 //   signs through anvil's unlocked accounts, as a real wallet would through eth_sendTransaction.
-// - record (`pnpm transcripts:record`): live, with the SDK's recordingFetch and
-//   recordingProvider around both halves; writes tests/e2e/transcripts/<case>.json (the SDK's
-//   efs-sdk-rpc-transcript/1) and <case>.deployment.json. Never edit those files by hand:
-//   replay matches calls by order, so the order belongs to this client and changes with it.
+// - record (`pnpm transcripts:record`): live, with the SDK's createRecorder around both halves;
+//   writes tests/e2e/transcripts/<case>.json (the SDK's efs-sdk-rpc-transcript/1, with `seq` and
+//   `marks`) and <case>.deployment.json. Never edit those files by hand: replay matches calls by
+//   order, so the order belongs to this client and changes with it.
+//
+// The chain's head moves only with what moved it when recorded (sdk-v2 e229ea3 createReplay): a
+// wallet write, or a mark for a head move the page didn't make (editAs, actAs, control.mine,
+// control.automine). Those helpers exist in every mode and mark in record and replay alike, so a
+// page that reads "latest" more often than the recording did gets the same head again, never the
+// one a later write produced. Reads replay forgave are counted (`extraReads`) and printed.
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { FixtureChain } from '@efs/fixture';
-import {
-  createRpcReplay,
-  type RpcTranscript,
-  recordingFetch,
-  recordingProvider,
-  replayProvider,
-} from '@efs/sdk/testing';
+import { createRecorder, createReplay, type RpcTranscript } from '@efs/sdk/testing';
 import type { Page } from '@playwright/test';
 
-type FetchLike = Parameters<typeof recordingFetch>[0];
+type FetchLike = Parameters<typeof createRecorder>[0];
 
 export type ChainMode = 'replay' | 'live' | 'record';
 export const CHAIN_MODE: ChainMode = (() => {
@@ -226,12 +226,21 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     ) as RpcTranscript;
     deployment = readFileSync(`${TRANSCRIPTS}${name}.deployment.json`, 'utf8');
     ids = { ...transcript.ids };
-    const rpc = createRpcReplay(transcript);
-    const wallet = replayProvider(transcript, { strict: true });
-    answerRpc = async (body) => rpc.answer(body);
-    askWallet = (r) => wallet.request(r as never);
+    const replay = createReplay(transcript);
+    answerRpc = async (body) => replay.answer(body);
+    askWallet = (r) => replay.provider.request(r as never);
+    // Head moves the page didn't make: the recorded mark, served in its place.
+    editAs = async (index) => replay.mark(`editAs #${index}`);
+    actAs = async (index) => replay.mark(`actAs #${index}`);
+    control = {
+      automine: async (on) => replay.mark(`automine ${on}`),
+      mine: async (blocks) => replay.mark(`mine ${blocks}`),
+    };
     finish = async () => {
-      const misses = [...rpc.misses, ...wallet.misses];
+      // Every gate never served (a missing write or mark) is a miss too.
+      const misses = replay.finish();
+      const extra = Object.values(replay.extraReads).reduce((a, b) => a + b, 0);
+      if (extra > 0) console.log(`${name}: ${extra} extra reads forgiven by replay`);
       if (misses.length > 0) {
         throw new Error(
           `replay misses (re-record with pnpm transcripts:record if the client's calls changed):\n${misses.join('\n')}`,
@@ -325,11 +334,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       },
     };
     const toAnvil: FetchLike = (url, init) => fetch(url, init as RequestInit);
-    const recorder = recordingFetch(toAnvil);
     const base = anvilWallet(rpc, account, drop);
-    const recorded = recordingProvider(base as never);
     const record = CHAIN_MODE === 'record';
-    const send = record ? recorder.fetch : toAnvil;
+    const recorder = record ? createRecorder(toAnvil, base as never) : undefined;
+    const send = recorder?.fetch ?? toAnvil;
     answerRpc = async (body) => {
       // The SDK's FetchLike: its recorder answers with text(), not json().
       const response = await send(chain.rpcUrl, {
@@ -339,20 +347,40 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       });
       return JSON.parse(await response.text());
     };
-    askWallet = (r) => (record ? recorded.provider : base).request(r as never);
+    askWallet = (r) => (recorder?.provider ?? base).request(r as never);
+    // Head moves the page didn't make, marked where they happen (replay serves them in place).
+    const mark = (label: string) => recorder?.mark(label);
+    const actOn = actAs;
+    const editOn = editAs;
+    const controlOn = control;
+    actAs = async (index, act) => {
+      await actOn?.(index, act);
+      mark(`actAs #${index}`);
+    };
+    editAs = async (index, content, opts) => {
+      await editOn?.(index, content, opts);
+      mark(`editAs #${index}`);
+    };
+    control = {
+      automine: async (on) => {
+        await controlOn?.automine(on);
+        mark(`automine ${on}`);
+      },
+      mine: async (blocks) => {
+        await controlOn?.mine(blocks);
+        mark(`mine ${blocks}`);
+      },
+    };
     finish = async () => {
       try {
-        if (!record) return;
-        const transcript: RpcTranscript = {
-          schema: 'efs-sdk-rpc-transcript/1',
+        if (!recorder) return;
+        const transcript: RpcTranscript = recorder.transcript({
           case: name,
           note,
           contractsCommit: chain.contracts.commit,
           ids,
           steps,
-          calls: recorder.calls,
-          wallet: recorded.calls,
-        };
+        } as never);
         mkdirSync(TRANSCRIPTS, { recursive: true });
         writeFileSync(`${TRANSCRIPTS}${name}.json`, `${JSON.stringify(transcript, null, 2)}\n`);
         writeFileSync(`${TRANSCRIPTS}${name}.deployment.json`, deployment);

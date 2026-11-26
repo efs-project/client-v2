@@ -984,12 +984,18 @@ export class EfsFilesPreview extends EfsElement {
       return html`<p class="efs-quiet">${t('files.preview.empty')}</p>`;
     }
     if (link.status === 'invalid') {
-      return html`<wa-callout variant="warning">
+      // A tag path with a word the chain's grammar refuses (sdk-v2 e229ea3 parseLink checks each
+      // word): said as such, since the link is otherwise a tag's.
+      return html`<wa-callout variant="warning" class="efs-preview-invalid" data-rule=${link.rule}>
         <span slot="icon">${appIcon('triangle-exclamation')}</span>
-        <p>
-          ${t('files.preview.invalidLink')}
-          <code translate="no" dir="ltr">${link.rule}</code>
-        </p>
+        ${
+          link.rule === 'bad-word'
+            ? html`<p>${t('files.preview.badWordLink')}</p>`
+            : html`<p>
+                ${t('files.preview.invalidLink')}
+                <code translate="no" dir="ltr">${link.rule}</code>
+              </p>`
+        }
       </wa-callout>`;
     }
     const notice = readerNotice(this, this.host, t);

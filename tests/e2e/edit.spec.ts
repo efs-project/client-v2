@@ -6,7 +6,7 @@
 // EFS_CHAIN=live runs it against a fresh @efs/fixture chain, and EFS_CHAIN=record re-records
 // the transcripts (see tests/e2e/chain.ts).
 
-import { type Page, test } from '@playwright/test';
+import { test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import {
   DOUBLE_PRESSES,

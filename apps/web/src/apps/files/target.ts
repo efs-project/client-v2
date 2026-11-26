@@ -25,8 +25,9 @@ export type LinkState =
   | { readonly status: 'path'; readonly link: PathLink; readonly canonical: string }
   | { readonly status: 'invalid'; readonly rule: string }
   /**
-   * A tag (a topic: a path of words, `cars/tesla`), as typed: the SDK checks each word against the
-   * chain's grammar when it reads it (no fold until James rules on one).
+   * A tag (a topic: a path of words, `cars/tesla`), folded by the SDK's interim fold (sdk-v2
+   * e229ea3: an all-ASCII word is trimmed, spaces become `_`, A–Z become a–z; any other word stays
+   * as typed), each word checked against the chain's grammar when it's read.
    */
   | {
       readonly status: 'topic';

@@ -6,6 +6,7 @@
 
 import type { EfsWriter } from '@efs/sdk/actions';
 import type { SavingHost } from '../../shell/apps.ts';
+import { twinFromReconcile } from '../../shell/save-hold.ts';
 import type { Twin } from '../../shell/save-outcome.ts';
 import type { CheckResult } from '../../shell/saves-state.ts';
 
@@ -24,4 +25,17 @@ export async function settleTwin(
     });
   }
   return saving.refresh();
+}
+
+/**
+ * A twin the saves don't list, checked by its attempt: 'settled' once it's final or proven not
+ * committed, else 'waiting' (a failed check waits too).
+ */
+export async function checkTwin(writer: EfsWriter, twin: Twin): Promise<'settled' | 'waiting'> {
+  try {
+    return twinFromReconcile(await writer.reconcile(twin.planId));
+  } catch (error) {
+    console.warn('could not check the earlier attempt', twin.planId, error);
+    return 'waiting';
+  }
 }

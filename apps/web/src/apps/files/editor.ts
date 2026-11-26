@@ -60,7 +60,7 @@ import { approvalsLine } from './approvals.ts';
 import { attachNotice } from './attach-notice.ts';
 import { newFileKey } from './compose.ts';
 import { nameRuleMessage, refusalMessage } from './folder-requests.ts';
-import { settleTwin } from './held.ts';
+import { checkTwin, settleTwin } from './held.ts';
 import { authorLabel } from './who.ts';
 
 type EditPlanned = Extract<EditPlanResult, { status: 'PLANNED' }>;
@@ -197,6 +197,10 @@ export class EfsFileEditor extends EfsElement {
 
   #text = state('');
   #phase = state<Phase>({ phase: 'editing' });
+  /** A held save's twin the saves don't list, as its attempt last read (#checkTwin). */
+  #twinChecked = state<
+    { readonly planId: string; readonly standing: 'settled' | 'waiting' } | undefined
+  >(undefined);
   /** The unsaved edit this editor reopened, if it did (said once, at the top). */
   #restored: KeptDraft | undefined;
   /** Cancel with changes: "Discard your edit?" is open. */
@@ -373,7 +377,18 @@ export class EfsFileEditor extends EfsElement {
       account: '',
       ...(place ? { places: [place] } : this.file ? { file: this.file.file } : {}),
     });
-    return twinStanding(twin, this.host.saving.saves.get(), mine);
+    const standing = twinStanding(twin, this.host.saving.saves.get(), mine);
+    if (standing !== 'unlisted') return standing;
+    // Not listed is unknown, never settled: the twin's own attempt decides (#checkTwin).
+    const checked = this.#twinChecked.get();
+    return checked && twin && checked.planId === twin.planId ? checked.standing : 'unlisted';
+  }
+
+  /** A twin the saves don't list, checked by its attempt (the review then decides from that). */
+  async #checkTwin(writer: EfsWriter, twin: Twin | undefined): Promise<void> {
+    if (!twin) return;
+    const standing = await checkTwin(writer, twin);
+    this.#twinChecked.set({ planId: twin.planId, standing });
   }
 
   /** This computer's test chain (every enabled RPC local): waits there are said in minutes. */
@@ -633,6 +648,9 @@ export class EfsFileEditor extends EfsElement {
         // may, starts a new save).
         await this.#drop(writer, progress.sequenceId);
         await settleTwin(this.host.saving, writer, outcome.twin);
+        if (this.#twinStanding(outcome.twin) === 'unlisted') {
+          await this.#checkTwin(writer, outcome.twin);
+        }
         this.#phase.set({ phase: 'review', plan, writer, sent: { outcome } });
         return;
       }
@@ -830,7 +848,24 @@ export class EfsFileEditor extends EfsElement {
                   held
                     ? t(heldMessage(held, this.#onLocalChain()))
                     : t(saveMessage(sent.outcome), values)
-                }</p></wa-callout
+                }</p>
+                ${
+                  (held === 'waiting' || held === 'unlisted') &&
+                  sent.outcome.kind === 'held' &&
+                  !sending
+                    ? html`<wa-button
+                        size="s"
+                        appearance="outlined"
+                        class="efs-held-check"
+                        @click=${() => {
+                          const twin = sent.outcome.kind === 'held' ? sent.outcome.twin : undefined;
+                          void this.host.saving.refresh();
+                          void this.#checkTwin(s.writer, twin);
+                        }}
+                        >${t('files.edit.checkAgain')}</wa-button
+                      >`
+                    : nothing
+                }</wa-callout
               >`
             : nothing
         }
