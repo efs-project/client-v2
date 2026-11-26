@@ -44,6 +44,12 @@ async function saveThenLag(page: import('@playwright/test').Page, chain: TestCha
   await press(review.locator('wa-button.efs-review-send'));
   await expect(save(page, 'confirming')).toContainText('Saved · confirming');
   expect(sendRequests(chain)).toHaveLength(1);
+  // "Saved · confirming" refreshes this view once (preview.ts): let that read finish before the
+  // endpoint falls behind. A refresh that reads after the lag is itself BEHIND, which has no
+  // "Show my version" to press (CI run 45830906590 timed out waiting for it).
+  await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
+  await expect(preview(page).locator('wa-button.efs-edit-show-mine')).toBeVisible();
+  await chain.idle();
   await chain.control?.lagBefore(chain.broadcasts.at(-1) as string);
   // This view shows the fixture's version; the person's own is read again, at the floor.
   await press(preview(page).locator('wa-button.efs-edit-show-mine'));

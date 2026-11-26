@@ -270,12 +270,16 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   /**
    * A plain await (not a Playwright call) that names itself if it would outlive the test. A
    * Playwright call cut by the test timeout reports itself; a plain promise gives only a bare "Test
-   * timeout", and a hang in a `finally` hides even that it was the cleanup (read-floor case (b) on
-   * CI, 2026-11-26). This rejects 1.5 s before the test's own timeout, saying what was waited on.
+   * timeout". This rejects 1.5 s before the test's own timeout, saying what was waited on.
+   *
+   * With less than that left (an await begun in the test's last moments), it just waits:
+   * rejecting at once would claim a wait that never happened, and from a `finally` its throw
+   * would replace the test's own error, the stuck call's log.
    */
   const within = async <T>(label: string, work: Promise<T>): Promise<T> => {
     const { timeout } = test.info();
-    if (timeout === 0) return work;
+    const wait = timeout - (Date.now() - startedAt) - 1500;
+    if (timeout === 0 || wait <= 0) return work;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stuck = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -285,7 +289,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
               `still waiting on ${label} ${Date.now() - startedAt} ms into the test (timeout ${timeout} ms): a plain await, not a Playwright call`,
             ),
           ),
-        Math.max(0, timeout - (Date.now() - startedAt) - 1500),
+        wait,
       );
     });
     try {
@@ -575,7 +579,19 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         writeFileSync(`${TRANSCRIPTS}${name}.json`, `${JSON.stringify(transcript, null, 2)}\n`);
         writeFileSync(`${TRANSCRIPTS}${name}.deployment.json`, deployment);
       } finally {
-        await within('stopping the fixture chain (finish)', chain.stop());
+        const stopping = chain.stop();
+        if (test.info().status === 'timedOut') {
+          // After the test timed out, a Playwright call cut by the timeout reports its call log
+          // (what it waited for) only if the test then returns at once: a `finally` that waits
+          // 100 ms already loses it (measured, Playwright 1.63), leaving a bare "Test timeout"
+          // (read-floor case (b), CI run 45830906590). So the stop goes on in the background;
+          // anvil also stops itself (the fixture's 900 s limit) if it never finishes.
+          stopping.catch((error: unknown) => {
+            console.error(`${name}: stopping the fixture chain after the timeout failed`, error);
+          });
+        } else {
+          await within('stopping the fixture chain (finish)', stopping);
+        }
       }
     };
   }
