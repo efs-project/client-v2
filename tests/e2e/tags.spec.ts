@@ -234,30 +234,20 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
     await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('Straße');
     chain.step('Straße: refused by the link grammar, the word and the reason named; nothing read');
 
-    // The word as the link spelled it can hold what broke the rule: a bidi override and a
-    // zero-width joiner are shown, never applied, and the sentence reads in order.
-    await go(page, '#/r/testnet/A%E2%80%AEb%E2%80%8Dc');
-    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('A[U+202E]b[U+200D]c');
+    // The word as the link spelled it can hold what broke the rule. A lowercase word with a bidi
+    // override and a zero-width joiner is refused for the characters themselves (sdk-v2 754f6d2:
+    // parseLink runs the chain's word grammar): they are shown, never applied, and the sentence
+    // reads in order.
+    await go(page, '#/r/testnet/a%E2%80%AEb%E2%80%8Dc');
+    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('a[U+202E]b[U+200D]c');
     const said = (await invalid.locator('p').textContent()) ?? '';
     expect(said).not.toMatch(/[\u202E\u200D]/);
     expect(said.replace(/\s+/g, ' ').trim()).toBe(
-      "This link names a tag with a word the network doesn't accept: A[U+202E]b[U+200D]c (a capital letter, in a word that isn't all plain letters)",
+      "This link names a tag with a word the network doesn't accept: a[U+202E]b[U+200D]c (a character a tag word can't hold)",
     );
-    chain.step('A, U+202E, b, U+200D, c: the characters shown as U+ codes, the sentence in order');
-
-    // A lowercase word holding a bidi override opens a word page today (the SDK's link grammar
-    // checks a subset of the word rules): every word from the link shows the override, never
-    // applies it, in the title and the location bar alike.
-    await go(page, '#/r/testnet/a%E2%80%AEb');
-    const wordTitle = page.locator('efs-files-word .efs-topic-title');
-    await expect(wordTitle).toContainText('a[U+202E]b');
-    expect((await wordTitle.textContent()) ?? '').not.toContain('\u202E');
-    const crumb = page.locator('efs-files-view wa-breadcrumb-item').last();
-    await expect(crumb).toHaveText('a[U+202E]b');
-    await settled(page);
-    chain.step(
-      'a, U+202E, b: a word page whose title and location bar show the override as a code',
-    );
+    // Never a word page for a word the chain can't hold.
+    await expect(page.locator('efs-files-word:not([hidden])')).toHaveCount(0);
+    chain.step('a, U+202E, b, U+200D, c: refused for the characters, shown as U+ codes, in order');
 
     await go(page, '#/r/testnet/vitalik.eth');
     const word = page.locator('efs-files-word');

@@ -17,10 +17,14 @@ const FORBIDDEN_PACKAGES = [/^viem$/, /^ethers$/, /^ox$/, /^abitype$/];
  * core/platform (globalThis wrappers, nothing at import time). PM-checked, 2026-11-25. Since
  * sdk-v2 e229ea3 parseLink folds each word by default (the interim fold, PM D15): names/fold, pure
  * string code with no imports (its constants, its functions and three Unicode-property regexes;
- * nothing read or fetched at import time), 3.8 KB. Added 2026-11-26, for the PM's check.
+ * nothing read or fetched at import time), 3.8 KB. Added 2026-11-26, PM-approved. Since sdk-v2
+ * 754f6d2 parseLink runs the chain's word grammar (checkWord) on each folded word: names/word (its
+ * rules, imports only core/platform and the constants) and generated/constants (data only: the
+ * refused-scalar table and the word limits, among the protocol's other constants), 8.9 KB
+ * unminified together. Added 2026-11-26, for the PM's check.
  */
 const STARTUP_SDK_MODULES =
-  /\/dist\/(links\/index|names\/links|names\/fold|core\/errors|names\/name|names\/segment|core\/platform)\.js$/;
+  /\/dist\/(links\/index|names\/links|names\/fold|names\/word|generated\/constants|core\/errors|names\/name|names\/segment|core\/platform)\.js$/;
 // First-party paths that must only ever load after an explicit action (plan §1.2).
 const FORBIDDEN_PATHS = [
   /\/apps\/web\/src\/features\/[^/]+\/write\//,
