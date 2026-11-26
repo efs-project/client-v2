@@ -8,12 +8,16 @@
 
 import type { Hex } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
+import { markEach } from '../platform/marks.ts';
+import { onLocalChain } from '../platform/settings/model.ts';
 import { state } from '../state/signals.ts';
-import { EfsElement, html, nothing } from '../ui/element.ts';
+import { EfsElement, html, live, nothing } from '../ui/element.ts';
 import type { MessageId, Translator } from '../ui/i18n.ts';
 import { appIcon } from '../ui/icons.ts';
+import { pressedOnce } from '../ui/press-once.ts';
 import type { DraftStore } from './drafts.ts';
 import type { NetworkState } from './network-state.ts';
+import { heldMessage, touchesOf, twinStanding } from './save-hold.ts';
 import {
   isFault,
   type SaveAction,
@@ -99,11 +103,15 @@ export class EfsSavesBanner extends EfsElement {
   /**
    * Runs a writer call for `p`, after checking the wallet can act for the save's account.
    * Returns the new progress, or undefined when nothing could be confirmed.
+   * One call at a time: it claims the banner (`#busy`) before it awaits anything, so a second
+   * press before the page re-renders (a double click, Enter then a click) finds it busy and does
+   * nothing. Two resumes of one save would each try to send its open part.
    */
   async #act(
     p: SequenceProgress,
     call: (writer: EfsWriter, id: Hex) => Promise<SequenceProgress>,
   ): Promise<SequenceProgress | undefined> {
+    if (this.#busy.get() !== undefined) return undefined;
     const ready = this.writer.availability.get();
     if (ready.status !== 'READY') {
       this.dispatchEvent(new CustomEvent(REQUEST_WALLET_EVENT, { bubbles: true, composed: true }));
@@ -138,14 +146,15 @@ export class EfsSavesBanner extends EfsElement {
   }
 
   #resume(p: SequenceProgress): void {
-    void this.#act(p, (writer, id) =>
-      writer.resume(id, {
+    void this.#act(p, (writer, id) => {
+      markEach('efs:send');
+      return writer.resume(id, {
         onProgress: (now, event) => {
           const first = event.kind === 'wallet-request' ? event.parts[0] : undefined;
           if (first !== undefined) this.#approving.set({ part: first + 1, total: now.total });
         },
-      }),
-    );
+      });
+    });
   }
 
   /**
@@ -179,15 +188,36 @@ export class EfsSavesBanner extends EfsElement {
       variant="brand"
       class=${action === 'reopen' ? 'efs-save-reopen' : 'efs-save-continue'}
       ?loading=${this.#busy.get() === p.sequenceId}
-      ?disabled=${this.#busy.get() !== undefined}
-      @click=${() => (action === 'reopen' ? void this.#reopen(p) : this.#resume(p))}
+      .disabled=${live(this.#busy.get() !== undefined)}
+      @click=${(e: Event) => {
+        if (action === 'reopen') void this.#reopen(p);
+        else this.#resume(p);
+        // Busy with this save means the press started it (#act claims before it awaits).
+        if (this.#busy.get() === p.sequenceId) pressedOnce(e);
+      }}
       >${t(label)}</wa-button
     >`;
   }
 
   #row(p: SequenceProgress, t: Translator['t']) {
     const outcome = saveOutcome(p);
-    const action = saveAction(outcome);
+    // Held back by an earlier save of the same publication: the same save again waits; another
+    // save of the same bytes may go on once that one is final.
+    const listed = this.saves.state.get();
+    const standing =
+      outcome.kind === 'held'
+        ? twinStanding(
+            outcome.twin,
+            listed.status === 'READY' ? listed.saves : undefined,
+            touchesOf(p.effect),
+          )
+        : undefined;
+    const action: SaveAction | undefined =
+      standing === 'settled'
+        ? p.state === 'PARTIAL'
+          ? 'continue'
+          : 'send-again'
+        : saveAction(outcome);
     const notice = this.#notices.get().get(p.sequenceId);
     const done = outcome.kind === 'saved';
     // The network is deciding: nothing to press, and stopping would be refused (a part is in flight).
@@ -199,7 +229,9 @@ export class EfsSavesBanner extends EfsElement {
     // A reorg or a lost wallet connection is worth a warning while it settles.
     const calm = outcome.kind !== 'undone-checking' && outcome.kind !== 'wallet-lost';
     const variant = done || (settling && calm) ? 'success' : 'warning';
-    const message = describeSave(p, this.network, t);
+    const message = standing
+      ? t(heldMessage(standing, 'network' in this.network && onLocalChain(this.network.network)))
+      : describeSave(p, this.network, t);
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).
     const canStop = !done && !settling && outcome.kind !== 'abandoned';

@@ -12,19 +12,30 @@ import type { Efs, Lens, NameCheck } from '@efs/sdk';
 import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
 import type { CreateFileReview, EntryRef, FolderRef, ParentRef } from '@efs/sdk/files';
 import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
+import { markEach } from '../../platform/marks.ts';
+import { onLocalChain } from '../../platform/settings/model.ts';
 import type { AppHost } from '../../shell/apps.ts';
-import { saveHold, statementKey } from '../../shell/save-hold.ts';
+import {
+  heldMessage,
+  saveHold,
+  statementKey,
+  type TwinStanding,
+  touchesOfInput,
+  twinStanding,
+} from '../../shell/save-hold.ts';
 import {
   type SaveOutcome,
   saveMessage,
   saveOutcome,
+  type Twin,
   thrownOutcome,
 } from '../../shell/save-outcome.ts';
 import { shortAccount } from '../../shell/wallet-state.ts';
 import { state } from '../../state/signals.ts';
-import { EfsElement, html, nothing } from '../../ui/element.ts';
+import { EfsElement, html, live, nothing } from '../../ui/element.ts';
 import type { MessageId } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { pressedOnce } from '../../ui/press-once.ts';
 import { approvalsLine } from './approvals.ts';
 import { attachNotice } from './attach-notice.ts';
 import type { PickerSelection } from './folder-picker.ts';
@@ -42,6 +53,7 @@ import {
   type ViewPath,
   withoutIndices,
 } from './folder-requests.ts';
+import { settleTwin } from './held.ts';
 import {
   checkLocator,
   fingerprint,
@@ -577,19 +589,41 @@ export class EfsFolderSave extends EfsElement {
   }
 
   /** Why this reviewed save can't be sent now, if it can't: checked on the signer, never the screen. */
-  #hold(request: FolderRequest, writer: EfsWriter, plan: Planned, except?: string) {
-    // A tag save is held by the statements it makes (its review's topic and things), never by
-    // a folder name: a tag doesn't place anything.
+  /**
+   * The statements a tag save makes (its review's topic and things): a tag save is held by them,
+   * never by a folder name, since a tag doesn't place anything. Undefined for a folder save.
+   */
+  #statementsOf(plan: Planned): string[] | undefined {
     const review = plan.review;
-    const statements =
-      review.kind === 'efs.tagReview'
-        ? review.statements.map((x) => statementKey(review.place.id, x.thing))
-        : review.kind === 'efs.topicStatementReview'
-          ? review.purpose === 'label'
-            ? [statementKey(review.subject.id, `label:${review.lang ?? ''}`)]
-            : // The tags.same / tags.broader effect's own key (shell/save-hold.ts).
-              [statementKey(review.subject.id, `tags.${review.purpose}:${review.other?.id ?? ''}`)]
-          : undefined;
+    return review.kind === 'efs.tagReview'
+      ? review.statements.map((x) => statementKey(review.place.id, x.thing))
+      : review.kind === 'efs.topicStatementReview'
+        ? review.purpose === 'label'
+          ? [statementKey(review.subject.id, `label:${review.lang ?? ''}`)]
+          : // The tags.same / tags.broader effect's own key (shell/save-hold.ts).
+            [statementKey(review.subject.id, `tags.${review.purpose}:${review.other?.id ?? ''}`)]
+        : undefined;
+  }
+
+  /** A save the SDK held back: the same save again, or another save of the same bytes. */
+  #twinStanding(request: FolderRequest, plan: Planned, twin: Twin | undefined): TwinStanding {
+    const statements = this.#statementsOf(plan);
+    const places = placesOf(request, this.keyOf);
+    const mine = touchesOfInput({
+      account: '',
+      ...(statements ? { statements } : places ? { places } : {}),
+    });
+    return twinStanding(twin, this.host.saving.saves.get(), mine);
+  }
+
+  /** This computer's test chain (every enabled RPC local): waits there are said in minutes. */
+  #onLocalChain(): boolean {
+    const n = this.host.network.get();
+    return 'network' in n && onLocalChain(n.network);
+  }
+
+  #hold(request: FolderRequest, writer: EfsWriter, plan: Planned, except?: string) {
+    const statements = this.#statementsOf(plan);
     return folderHold(
       {
         availability: this.host.saving.availability.get(),
@@ -604,10 +638,23 @@ export class EfsFolderSave extends EfsElement {
     );
   }
 
-  async #send(s: Extract<Phase, { phase: 'review' | 'sending' }>): Promise<void> {
+  /**
+   * Claims this review for its one send, and starts it; false when the review is no longer the
+   * current one. The button's handler sees the phase as it was rendered, so a second activation
+   * before the page re-renders (WebKit delivered one) must find this exact review gone: two sends
+   * of one plan would be two saves of it.
+   */
+  #send(s: Extract<Phase, { phase: 'review' | 'sending' }>): boolean {
+    if (this.#phase.get() !== s || s.phase !== 'review') return false;
+    this.#phase.set({ ...s, phase: 'sending' });
+    void this.#sendClaimed(s);
+    return true;
+  }
+
+  async #sendClaimed(s: Extract<Phase, { phase: 'review' | 'sending' }>): Promise<void> {
+    markEach('efs:send');
     const { request, plan, writer } = s;
     const again = s.sent?.sequenceId;
-    this.#phase.set({ ...s, phase: 'sending' });
     const places = placesOf(request, this.keyOf);
     // Back to the review, keeping what the last attempt said unless something new replaces it.
     const back = (next: { sent?: NotSent; note?: MessageId } = {}) => {
@@ -663,6 +710,19 @@ export class EfsFolderSave extends EfsElement {
         // again, which shows what's there now (or a refusal).
         await this.#drop(writer, progress.sequenceId);
         await this.#plan(request);
+        return;
+      }
+      if (outcome.kind === 'held') {
+        // This call sent nothing, and its new record would linger as "not sent": stop it. Then
+        // read the twin again, so the review can say which case this is (Send again, once it
+        // may, starts a new save).
+        await this.#drop(writer, progress.sequenceId);
+        const read = await settleTwin(this.host.saving, writer, outcome.twin);
+        back(
+          read === 'read'
+            ? { sent: { outcome } }
+            : { sent: { outcome }, note: 'files.save.checkFailed' },
+        );
         return;
       }
       back({ sent: { outcome, sequenceId: progress.sequenceId } });
@@ -1727,9 +1787,15 @@ export class EfsFolderSave extends EfsElement {
           const { hold, lapsed } = this.#hold(s.request, s.writer, s.plan, sent?.sequenceId);
           const prompts = s.plan.review.prompts;
           const isRemove = ask.kind === 'remove';
+          // Held back: which case it is, from the saves listed (and Send again once it may).
+          const held =
+            sent?.outcome.kind === 'held'
+              ? this.#twinStanding(s.request, s.plan, sent.outcome.twin)
+              : undefined;
           // Sent again (continued) only when the SDK says this same save can go as planned.
           const canSendAgain =
             !sent ||
+            held === 'settled' ||
             sent.outcome.kind === 'refused' ||
             sent.outcome.kind === 'busy' ||
             sent.outcome.kind === 'wallet-mismatch' ||
@@ -1769,7 +1835,9 @@ export class EfsFolderSave extends EfsElement {
                     <p role="alert">${t(
                       sent.outcome.kind === 'changed'
                         ? 'files.save.changed'
-                        : saveMessage(sent.outcome),
+                        : held
+                          ? heldMessage(held, this.#onLocalChain())
+                          : saveMessage(sent.outcome),
                       sent.outcome.kind === 'wallet-mismatch' && sent.outcome.account
                         ? { account: shortAccount(sent.outcome.account), chain: '' }
                         : {},
@@ -1827,9 +1895,9 @@ export class EfsFolderSave extends EfsElement {
                       variant=${isRemove ? 'danger' : 'brand'}
                       class="efs-folder-send"
                       ?loading=${sending}
-                      ?disabled=${sending || !canSendAgain || hold !== undefined}
-                      @click=${() => {
-                        if (s.phase === 'review') void this.#send(s);
+                      .disabled=${live(sending || !canSendAgain || hold !== undefined)}
+                      @click=${(e: Event) => {
+                        if (s.phase === 'review' && this.#send(s)) pressedOnce(e);
                       }}
                       >${t(
                         sent

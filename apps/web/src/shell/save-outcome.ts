@@ -76,7 +76,22 @@ export type SaveOutcome =
    * A call threw, and the SDK says that call sent nothing, but earlier parts of the save may be on
    * chain (or it can't tell): "nothing new was sent", never "nothing was saved".
    */
-  | { readonly kind: 'nothing-new' };
+  | { readonly kind: 'nothing-new' }
+  /**
+   * Held back (ALREADY_ATTEMPTED): the same publication is already on its way, an earlier attempt
+   * (`twin`) still open or committed and not yet final. This call sent nothing, and the twin may
+   * land or have landed, so never "nothing was saved". Whether it's the same save again or another
+   * save of the same bytes is the caller's to tell (`twinStanding`, from the saves listed).
+   */
+  | {
+      readonly kind: 'held';
+      readonly committed: number;
+      readonly total: number;
+      readonly twin?: Twin;
+    };
+
+/** The earlier attempt a held-back save waits for (sdk-v2 31ee83a). */
+export type Twin = NonNullable<NonNullable<SequenceProgress['reason']>['twin']>;
 
 /** The ledger refused because the editor's own HEAD moved (compare-and-swap). */
 const isCasRace = (reason: SequenceProgress['reason']): boolean =>
@@ -128,6 +143,12 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
           return { kind: 'busy' };
         case 'OVER_TX_GAS_CAP':
           return { kind: 'too-large' };
+        case 'ALREADY_ATTEMPTED': {
+          const twin = reason?.twin;
+          return twin
+            ? { kind: 'held', committed: p.committed, total: p.total, twin }
+            : { kind: 'held', committed: p.committed, total: p.total };
+        }
         case 'STALE': {
           if (isCasRace(reason)) return { kind: 'changed', committed: p.committed };
           const error = reason?.revert?.error;
@@ -203,6 +224,7 @@ export const SAVE_MESSAGE: Readonly<Record<SaveOutcome['kind'], MessageId>> = {
   abandoned: 'save.abandoned',
   'not-sent': 'save.notSent',
   'nothing-new': 'save.nothingNew',
+  held: 'save.held',
 };
 
 /** The message for an outcome, with the detail some outcomes add. */

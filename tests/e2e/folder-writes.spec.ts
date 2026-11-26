@@ -6,7 +6,16 @@
 import { AxeBuilder } from '@axe-core/playwright';
 import { type Page, test } from '@playwright/test';
 import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
-import { expect, objectLink, preview, save, sendRequests } from './edit-support.ts';
+import {
+  DOUBLE_PRESSES,
+  expect,
+  objectLink,
+  pauseClock,
+  preview,
+  save,
+  sendRequests,
+  sendsStarted,
+} from './edit-support.ts';
 import {
   dialog,
   entries,
@@ -684,6 +693,67 @@ test('Upload: a file over the limit says how large a file can be saved here, wit
     await expect(dialog(page).locator('wa-button', { hasText: 'Try again' })).toHaveCount(0);
     expect(sendRequests(chain)).toHaveLength(0);
     chain.step('Review: TOO_LARGE, said with the limit; no retry; nothing sent');
+  } finally {
+    await chain.finish();
+  }
+});
+
+/** 150 KiB of text: an upload plans it as two parts, its content first, then the name. */
+const TWO_PARTS = Buffer.from(`${'y'.repeat(150 * 1024 - 1)}\n`);
+
+test('the same big file into two folders: the second waits until the first is final, then sends', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-upload-same-bytes',
+    'The realm root; upload big.txt (150 KiB: a content part, then the name), then the same bytes into docs/ while the first is confirming. Its content part is the same publication, so the SDK holds the save back (ALREADY_ATTEMPTED, its twin the first save): the review says an earlier save with the same contents is still confirming, and Send waits. After 64 blocks the first is final, and Send sends the second (its content part goes out again, then the name).',
+  );
+  try {
+    await page.clock.install();
+    await openRoot(page, chain);
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: TWO_PARTS });
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await expect(dialog(page)).toContainText(/2\W+approvals in your wallet/);
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(save(page, 'confirming')).toHaveCount(1);
+    expect(sendRequests(chain)).toHaveLength(2);
+    chain.step('Upload big.txt at the root: two parts, two sends; Saved · confirming');
+
+    await row(page, 'docs').locator('button.efs-entry-open').click();
+    await expect(row(page, 'readme.txt')).toBeVisible();
+    await entries(page)
+      .locator('input.efs-upload-input')
+      .setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: TWO_PARTS });
+    await dialog(page).locator('wa-button.efs-folder-review').click();
+    await send(page).click();
+    const note = dialog(page).locator('.efs-review-not-sent');
+    await expect(note).toContainText(
+      'An earlier save with the same contents is still confirming. You can send this once it has',
+    );
+    await expect(note).not.toContainText(/nothing was saved/i);
+    await expect(send(page)).toHaveAttribute('disabled', '');
+    expect(sendRequests(chain), 'held back before the wallet').toHaveLength(2);
+    chain.step('The same bytes into docs/: held back (ALREADY_ATTEMPTED); its new save stopped');
+
+    // Finality: 64 more blocks on anvil, then the saves' next check (12 s).
+    await pauseClock(page);
+    await chain.idle();
+    await chain.control?.mine(64);
+    await page.clock.fastForward(12_000);
+    chain.step('64 blocks later, the saves check again: the first save is final');
+    await expect(note).toContainText(
+      'The earlier save with the same contents has confirmed. You can send this now.',
+    );
+    await page.clock.resume();
+    await expect(send(page)).not.toHaveAttribute('disabled');
+    await send(page).click();
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    await expect(row(page, 'big.txt')).toBeVisible();
+    expect(sendRequests(chain)).toHaveLength(4);
+    chain.step('Send: a new save, both parts sent; big.txt is listed in docs/');
   } finally {
     await chain.finish();
   }
@@ -1555,3 +1625,30 @@ test('Store it elsewhere and link it: fingerprinted here, the address checked, o
     await chain.finish();
   }
 });
+
+for (const [how, press] of Object.entries(DOUBLE_PRESSES)) {
+  test(`a folder save whose Send is pressed twice (${how}) is sent once`, async ({ page }) => {
+    const name = `once-${how}`;
+    const chain = await testChain(
+      `client-folder-send-once-${how}`,
+      `The realm root; New folder "${name}", then Send pressed twice (${how}) before the page re-renders: one save.`,
+    );
+    try {
+      await openRoot(page, chain);
+      await entries(page).locator('wa-button.efs-new-folder').click();
+      await dialog(page).locator('wa-input.efs-folder-name input').fill(name);
+      await dialog(page).locator('wa-button.efs-folder-review').click();
+      await expect(send(page)).toBeVisible();
+      await press(send(page));
+      chain.step(`Send, twice (${how}): one runSequence, one eth_sendTransaction`);
+      await expect(dialog(page)).not.toHaveAttribute('open');
+      await expect(row(page, name).locator('.efs-entry-whose')).toHaveText('yours');
+      await chain.idle(500);
+      expect(sendRequests(chain)).toHaveLength(1);
+      // The page's own count: the second press started nothing.
+      expect(await sendsStarted(page)).toBe(1);
+    } finally {
+      await chain.finish();
+    }
+  });
+}

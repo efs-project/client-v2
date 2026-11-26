@@ -8,3 +8,5 @@ export const EfsElement = SignalWatcher(LitElement);
 export { css, html, nothing, render } from 'lit';
 /** Renders a fresh element when the key changes (a different new file gets a new editor). */
 export { keyed } from 'lit/directives/keyed.js';
+/** Binds to the element's value as it is now, not as last rendered (see `press-once.ts`). */
+export { live } from 'lit/directives/live.js';

@@ -1,6 +1,13 @@
 import type { SequenceProgress } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
-import { saveHold, statementKey } from './save-hold.ts';
+import {
+  heldMessage,
+  saveHold,
+  statementKey,
+  touchesOf,
+  touchesOfInput,
+  twinStanding,
+} from './save-hold.ts';
 
 const ME = `0x${'ab'.repeat(20)}`;
 const FILE = `0x${'f1'.repeat(32)}`;
@@ -244,5 +251,59 @@ describe('saveHold for tag saves: per (topic, thing) statement (sdk-v2 983d70b e
     ).toEqual({
       kind: 'unsettled',
     });
+  });
+});
+
+describe('twinStanding (a save the SDK held back for an earlier attempt)', () => {
+  const TWIN = `0x${'02'.repeat(32)}` as const;
+  const twin = { sequenceId: TWIN };
+  const FOLDER = `0x${'fd'.repeat(32)}`;
+  const OTHER_FOLDER = `0x${'fe'.repeat(32)}`;
+  // The earlier save: a big file created at (FOLDER, photo.png).
+  const earlier = (over: Partial<SequenceProgress> = {}) =>
+    p({
+      sequenceId: TWIN,
+      state: 'COMPLETE',
+      final: false,
+      effect: { kind: 'files.create', folder: FOLDER, name: 'photo.png' } as never,
+      ...over,
+    });
+  const elsewhere = touchesOfInput({
+    account: ME,
+    places: [{ folder: OTHER_FOLDER, name: 'photo.png' }],
+  });
+  const here = touchesOfInput({ account: ME, places: [{ folder: FOLDER, name: 'photo.png' }] });
+
+  it('the same save again (the same place), or no save named for the twin: "same"', () => {
+    expect(twinStanding(twin, [earlier()], here)).toBe('same');
+    expect(twinStanding({}, [earlier()], elsewhere)).toBe('same');
+    expect(twinStanding(undefined, [], elsewhere)).toBe('same');
+    // Matched case-insensitively (hex).
+    expect(
+      twinStanding({ sequenceId: TWIN.toUpperCase().replace('0X', '0x') }, [earlier()], here),
+    ).toBe('same');
+  });
+
+  it('another save of the same bytes waits until that one is final, or stopped', () => {
+    expect(twinStanding(twin, [earlier()], elsewhere)).toBe('waiting');
+    expect(twinStanding(twin, [earlier({ state: 'IN_FLIGHT' })], elsewhere)).toBe('waiting');
+    expect(twinStanding(twin, [earlier({ state: 'PARTIAL' })], elsewhere)).toBe('waiting');
+    expect(twinStanding(twin, [earlier({ final: true })], elsewhere)).toBe('settled');
+    expect(twinStanding(twin, [earlier({ state: 'ABANDONED' })], elsewhere)).toBe('settled');
+    // No longer listed: it turned final (or was dismissed once saved).
+    expect(twinStanding(twin, [], elsewhere)).toBe('settled');
+  });
+
+  it("fail-closed: saves that can't be read wait; an effect it can't read is the same save", () => {
+    expect(twinStanding(twin, undefined, elsewhere)).toBe('waiting');
+    expect(twinStanding(twin, [earlier({ effect: undefined } as never)], elsewhere)).toBe('same');
+    expect(twinStanding(twin, [earlier()], touchesOf(undefined))).toBe('same');
+  });
+
+  it('says which case it is, with the wait on a local test chain', () => {
+    expect(heldMessage('same', true)).toBe('save.held');
+    expect(heldMessage('waiting', false)).toBe('save.heldSameBytes');
+    expect(heldMessage('waiting', true)).toBe('save.heldSameBytesLocal');
+    expect(heldMessage('settled', false)).toBe('save.heldSettled');
   });
 });

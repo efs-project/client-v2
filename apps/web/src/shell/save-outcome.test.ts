@@ -74,6 +74,17 @@ const R = {
   expired: { code: 'EXPIRED', retry: 'transient' },
   notVerified: { code: 'NOT_VERIFIED_DEPLOYMENT', retry: 'never' },
   aborted: { code: 'ABORTED', retry: 'never' },
+  // sdk-v2 31ee83a: the same publication's earlier attempt is still open (or committed, not final).
+  alreadyAttempted: {
+    code: 'ALREADY_ATTEMPTED',
+    retry: 'after-reconcile',
+    detail: 'the same publication is already on its way (attempt 0x0d…)',
+    twin: {
+      planId: `0x${'0d'.repeat(32)}`,
+      stage: 'SUBMITTED',
+      sequenceId: `0x${'02'.repeat(32)}`,
+    },
+  },
 } as const;
 const reason = (r: (typeof R)[keyof typeof R]) => r as never;
 
@@ -125,6 +136,33 @@ describe('saveOutcome', () => {
     // Not started and no reason recorded (listed after a reload): it didn't go through.
     expect(saveOutcome(p({ state: 'NOT_STARTED' }))).toEqual({ kind: 'not-through' });
     expect(saveAction({ kind: 'not-through' })).toBe('send-again');
+  });
+
+  it('a save held back for its twin is "held", never "not sent", with nothing to press', () => {
+    const twin = R.alreadyAttempted.twin;
+    // Its retry is "after-reconcile", which would otherwise offer Try again ("not sent").
+    expect(saveOutcome(p({ reason: reason(R.alreadyAttempted) }))).toEqual({
+      kind: 'held',
+      committed: 0,
+      total: 1,
+      twin,
+    });
+    expect(
+      saveOutcome(
+        p({ state: 'PARTIAL', committed: 1, total: 3, reason: reason(R.alreadyAttempted) }),
+      ),
+    ).toEqual({ kind: 'held', committed: 1, total: 3, twin });
+    const held = { kind: 'held', committed: 0, total: 1, twin } as const;
+    expect(saveAction(held)).toBeUndefined();
+    expect(saveMessage(held)).toBe('save.held');
+    expect(en['save.held']).not.toMatch(/nothing was saved/i);
+    // Without a twin named (an older SDK), still held, never "not sent".
+    const { twin: _twin, ...bare } = R.alreadyAttempted;
+    expect(saveOutcome(p({ reason: bare as never }))).toEqual({
+      kind: 'held',
+      committed: 0,
+      total: 1,
+    });
   });
 
   it('decides by code before retry: a gas-cap refusal is "too large", not "stale"', () => {
@@ -313,6 +351,9 @@ describe('saveOutcome', () => {
       'save.walletMismatchTo',
       'save.nothingNew',
       'save.expiredPart',
+      'save.heldSameBytes',
+      'save.heldSameBytesLocal',
+      'save.heldSettled',
     ])
       expect(en).toHaveProperty(id);
   });

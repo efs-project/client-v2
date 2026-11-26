@@ -6,6 +6,7 @@
 import { test } from '@playwright/test';
 import { CHAIN_MODE, testChain } from './chain.ts';
 import {
+  DOUBLE_PRESSES,
   editAndConnect,
   editAndReview,
   editor,
@@ -15,6 +16,7 @@ import {
   reviewDialog,
   save,
   sendRequests,
+  sendsStarted,
   start,
 } from './edit-support.ts';
 
@@ -152,6 +154,35 @@ test('a part declined mid-save: "You declined part 2", Continue finishes it, eac
     chain.step('Continue: resume sends part 2');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');
     expect(sendRequests(chain)).toHaveLength(3);
+    if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'each part once').toHaveLength(2);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('"Continue to finish" pressed twice before the banner catches up resumes once', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-partial-continue-once',
+    'As "a part declined mid-save", but Continue is pressed twice in one task: the banner is busy with the first, so the second does nothing. Part 2 is sent once: three wallet requests and two broadcasts in all.',
+  );
+  try {
+    await start(page, chain);
+    await editAndConnect(page, chain, LARGE);
+    const review = await openReview(page, chain);
+    chain.refuseSend(2);
+    await review.locator('wa-button.efs-review-send').click();
+    chain.step('Send: part 1 approved and sent; part 2 declined (4001)');
+    const declined = save(page, 'declined');
+    await expect(declined).toContainText(/You declined part .*2.* in your wallet/);
+    await DOUBLE_PRESSES.twice(declined.locator('wa-button.efs-save-continue'));
+    chain.step('Continue, twice in one task: one resume sends part 2');
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    await chain.idle(500);
+    expect(sendRequests(chain)).toHaveLength(3);
+    // One send from the review, one resume from the banner: the second press started nothing.
+    expect(await sendsStarted(page)).toBe(2);
     if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'each part once').toHaveLength(2);
   } finally {
     await chain.finish();

@@ -70,6 +70,10 @@ test('an edit kept while away keeps its base: the file changed meanwhile, so Rev
     await page.goBack();
     await expect(preview(page)).toBeVisible();
     await expect(editor(page)).toHaveCount(0);
+    // The file's read finishes before the case ends, so the transcript holds all of it (it once
+    // ended mid-read, and replay asked for the rest).
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('My kept edit.\n');
+    await chain.idle(500);
   } finally {
     await chain.finish();
   }
