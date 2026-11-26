@@ -661,3 +661,104 @@ test('320 px: a tag, a word page and an address view fit with no sideways scroll
     await chain.finish();
   }
 });
+
+test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged), "Under…", the word level, then Remove yours', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-same',
+    'c.txt tagged /cars/tesla by anvil #0, who also says the word tesla is the same as tsla; anvil #6 (the wallet) joins /cars/tesla to /auto/tesla, puts it under /vehicles, then removes both.',
+  );
+  const d = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
+  const synonyms = topic(page).locator('[data-section="synonyms"]');
+  try {
+    await taggedFile(chain, 0, 'c.txt', [['cars', 'tesla']]);
+    await chain.actAs?.(0, async ({ efs, writer, save }) => {
+      const tags = await import('@efs/sdk/tags');
+      await save(await tags.planSame(efs, writer, { topic: ['tesla'], other: ['tsla'] }));
+    });
+    await openRoot(page, chain);
+    await go(page, '#/r/testnet/cars/tesla');
+    await expect(section(page, 'lens')).toHaveCount(1);
+    await settled(page);
+    // The word level, from the default view's author: tesla is the same as tsla, a link of its own.
+    await expect(synonyms).toContainText('Same word elsewhere');
+    await expect(synonyms).toContainText(/Tags with the word\W+tesla\W+are the same as tags with/);
+    await expect(synonyms.locator('.efs-synonym')).toHaveCount(1);
+    await expect(synonyms.locator('.efs-synonym')).toContainText(/tsla[\s\S]*said by\W+0xf39F/);
+    await expect(synonyms).not.toContainText('Also called');
+    await expect(synonyms.locator('.efs-synonyms-more')).toHaveCount(0);
+    chain.step('/cars/tesla: the word tesla is the same as tsla (said by #0); nothing else');
+
+    await topic(page).locator('wa-button.efs-topic-same').click();
+    await expect(d).toHaveAttribute('open', '');
+    await expect(d.locator('wa-input.efs-tag-path')).toHaveAttribute(
+      'label',
+      /The tag\W+\/cars\/tesla\W+is the same as/,
+    );
+    await expect(d.locator('.efs-tag-stance')).toHaveCount(0);
+    await d.locator('wa-input.efs-tag-path input').fill('cars/tesla');
+    await expect(d.locator('.efs-folder-name-error')).toContainText("can't be joined to itself");
+    await expect(d.locator('wa-button.efs-join-review')).toHaveAttribute('disabled', '');
+    await d.locator('wa-input.efs-tag-path input').fill('auto/tesla');
+    await d.locator('wa-button.efs-join-review').click();
+    await expect(d.locator('.efs-label-says')).toContainText(
+      /\/cars\/tesla\W+is the same as\W+\/auto\/tesla/,
+    );
+    await expect(d.locator('.efs-label-public')).toContainText(
+      'others decide whether to follow you',
+    );
+    await expect(d.locator('wa-button.efs-folder-send')).toHaveText("Say they're the same");
+    await d.locator('wa-button.efs-folder-send').click();
+    await expect(d).not.toHaveAttribute('open');
+    const also = synonyms.locator('.efs-synonym', { hasText: '/auto/tesla' });
+    await expect(also).toContainText('said by you', { timeout: 20_000 });
+    await expect(synonyms).toContainText('Also called');
+    await settled(page);
+    await expect(plansOf(page, 'efs-topic-tag-dialog')).toHaveAttribute('data-plans', '1');
+    chain.step('Same as /auto/tesla: the review says others decide; it lists as yours');
+
+    await topic(page).locator('wa-button.efs-topic-under').click();
+    await d.locator('wa-input.efs-tag-path input').fill('vehicles');
+    await d.locator('wa-button.efs-join-review').click();
+    await expect(d.locator('.efs-label-says')).toContainText(
+      /\/cars\/tesla\W+is under\W+\/vehicles/,
+    );
+    await expect(d.locator('wa-button.efs-folder-send')).toHaveText("Say it's under");
+    await d.locator('wa-button.efs-folder-send').click();
+    await expect(d).not.toHaveAttribute('open');
+    const under = topic(page).locator(
+      '[data-section="broader"] [data-group="under"] .efs-synonym',
+      {
+        hasText: '/vehicles',
+      },
+    );
+    await expect(under).toContainText('said by you', { timeout: 20_000 });
+    await settled(page);
+    chain.step('Under /vehicles: one send; "This tag is under" lists it as yours');
+
+    await also.locator('wa-button.efs-synonym-remove').click();
+    await expect(d.locator('.efs-label-says')).toContainText(
+      /Your\W+\/cars\/tesla\W+is the same as\W+\/auto\/tesla\W+goes/,
+    );
+    await expect(d.locator('wa-button.efs-folder-send')).toHaveText('Remove mine');
+    await d.locator('wa-button.efs-folder-send').click();
+    await expect(d).not.toHaveAttribute('open');
+    await expect(also).toHaveCount(0, { timeout: 20_000 });
+    await settled(page);
+    chain.step('Remove yours: one send; /auto/tesla is no longer listed');
+
+    await under.locator('wa-button.efs-synonym-remove').click();
+    await expect(d.locator('.efs-label-says')).toContainText(
+      /Your\W+\/cars\/tesla\W+is under\W+\/vehicles\W+goes/,
+    );
+    await d.locator('wa-button.efs-folder-send').click();
+    await expect(d).not.toHaveAttribute('open');
+    await expect(under).toHaveCount(0, { timeout: 20_000 });
+    await settled(page);
+    await chain.idle(500);
+    chain.step('Remove your "under": one send; /vehicles is no longer listed');
+  } finally {
+    await chain.finish();
+  }
+});

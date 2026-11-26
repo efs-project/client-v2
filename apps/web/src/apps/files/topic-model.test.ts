@@ -1,4 +1,11 @@
-import type { LookupPage, PlaceCountRow, TopicPage, TopicRow } from '@efs/sdk/tags';
+import type {
+  BroaderResult,
+  LookupPage,
+  PlaceCountRow,
+  SynonymsResult,
+  TopicPage,
+  TopicRow,
+} from '@efs/sdk/tags';
 import { describe, expect, it } from 'vitest';
 import {
   aboutCount,
@@ -6,7 +13,9 @@ import {
   CHILDREN_SHOWN,
   emptyLine,
   filedBelow,
+  fromBroader,
   fromPlacesPage,
+  fromSynonyms,
   fromTopicPage,
   pathText,
   rowWho,
@@ -206,5 +215,142 @@ describe('names are keyed by the row they were read for (file and tagger)', () =
     ]);
     expect(nameOf(names, byAlice as never)).toBe("alice's name");
     expect(nameOf(names, pub as never)).toBeUndefined();
+  });
+});
+
+describe('synonyms and "Under": shown as links, never merged; honest about where the search stopped', () => {
+  const A = `0x${'aa'.repeat(32)}`;
+  const B = `0x${'bb'.repeat(32)}`;
+  const W1 = `0x${'c1'.repeat(32)}`;
+  const W2 = `0x${'c2'.repeat(32)}`;
+  const ME = `0x${'00'.repeat(12)}${'66'.repeat(20)}`;
+  const present = (o: Partial<Extract<SynonymsResult, { status: 'PRESENT' }>>): SynonymsResult =>
+    ({
+      kind: 'efs.synonyms',
+      status: 'PRESENT',
+      topic: { words: ['cars', 'tesla'], id: A },
+      places: [],
+      words: [],
+      limited: false,
+      complete: true,
+      ...o,
+    }) as unknown as SynonymsResult;
+
+  it('each row carries its words, who said it, and the statement as said by words (for its removal)', () => {
+    const s = fromSynonyms(
+      present({
+        // Said from the other side: "/auto/tesla is the same as /cars/tesla".
+        places: [
+          { id: B, kind: 'path', hops: 1, author: ME, said: { subject: B, other: A } },
+        ] as never,
+        words: [
+          { word: 'cars', page: W1, synonyms: [] },
+          {
+            word: 'tesla',
+            page: W1,
+            synonyms: [
+              {
+                id: W2,
+                kind: 'word',
+                hops: 1,
+                author: ME,
+                word: 'tsla',
+                said: { subject: W1, other: W2 },
+              },
+            ],
+          },
+        ] as never,
+      }),
+      new Map([[B, ['auto', 'tesla']]]),
+    );
+    expect(s).toEqual({
+      phase: 'shown',
+      places: [
+        {
+          id: B,
+          words: ['auto', 'tesla'],
+          author: ME,
+          hops: 1,
+          said: { subject: ['auto', 'tesla'], other: ['cars', 'tesla'] },
+        },
+      ],
+      words: [
+        {
+          word: 'tesla',
+          synonyms: [
+            {
+              id: W2,
+              words: ['tsla'],
+              author: ME,
+              hops: 1,
+              said: { subject: ['tesla'], other: ['tsla'] },
+            },
+          ],
+        },
+      ],
+      more: false,
+    });
+  });
+
+  it("a statement whose sides couldn't both be read has no said (so no Remove)", () => {
+    const C = `0x${'dd'.repeat(32)}`;
+    const s = fromSynonyms(
+      present({
+        places: [
+          { id: B, kind: 'path', hops: 2, author: ME, said: { subject: B, other: C } },
+        ] as never,
+      }),
+      new Map<string, readonly string[] | null>([
+        [B, ['auto', 'tesla']],
+        [C, null],
+      ]),
+    );
+    expect(s?.phase === 'shown' ? s.places[0]?.said : 'not shown').toBeUndefined();
+  });
+
+  it('"there may be more" whenever a bound stopped the walk or the index does not vouch', () => {
+    expect(fromSynonyms(present({ limited: true, complete: false }), new Map())).toMatchObject({
+      more: true,
+    });
+    expect(fromSynonyms(present({ limited: false, complete: false }), new Map())).toMatchObject({
+      more: true,
+    });
+    expect(fromSynonyms(present({}), new Map())).toMatchObject({ more: false });
+  });
+
+  it('an unregistered tag shows nothing; a read the network cannot vouch for is unknown, never "none"', () => {
+    const absent = { kind: 'efs.synonyms', status: 'ABSENT_PROVEN' } as unknown as SynonymsResult;
+    const unknown = { kind: 'efs.synonyms', status: 'UNKNOWN' } as unknown as SynonymsResult;
+    expect(fromSynonyms(absent, new Map())).toBeUndefined();
+    expect(fromSynonyms(unknown, new Map())).toEqual({ phase: 'unknown' });
+  });
+
+  it('"Under" and "Over": one hop each, with words and said; the same honesty about limits', () => {
+    const V = `0x${'ee'.repeat(32)}`;
+    const result = {
+      kind: 'efs.broader',
+      status: 'PRESENT',
+      topic: { words: ['cars', 'tesla'], id: A },
+      broader: [{ id: V, kind: 'word', author: ME, said: { subject: A, other: V } }],
+      narrower: [],
+      limited: false,
+      complete: false,
+    } as unknown as BroaderResult;
+    expect(fromBroader(result, new Map([[V, ['vehicles']]]))).toEqual({
+      phase: 'shown',
+      broader: [
+        {
+          id: V,
+          words: ['vehicles'],
+          author: ME,
+          hops: 1,
+          said: { subject: ['cars', 'tesla'], other: ['vehicles'] },
+        },
+      ],
+      narrower: [],
+      more: true,
+    });
+    const unknown = { kind: 'efs.broader', status: 'UNKNOWN' } as unknown as BroaderResult;
+    expect(fromBroader(unknown, new Map())).toEqual({ phase: 'unknown' });
   });
 });

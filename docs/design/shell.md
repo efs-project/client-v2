@@ -233,6 +233,12 @@ CI runners vary about twofold between runs: the last two rows are main with a do
 | Word (`sunsets`) | 73–76 | 349–367 |
 | Address | 74–76 | 434–483 |
 
+CI samples (ms), as they come in:
+
+| CI run | tag booted / listed | word | address |
+|---|---|---|---|
+| 45738636212 | 272 / 1,336 | 163 / 871 | 241 / 1,420 |
+
 At 320 px the three views are checked in all three browsers (`tags.spec.ts`, `client-views-320`): the page never scrolls sideways, and nothing in the Entries pane reaches past the screen's right edge, which also catches a long path or address that a pane would otherwise clip.
 
 ## Startup budget
