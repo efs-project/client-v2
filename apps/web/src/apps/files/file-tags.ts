@@ -8,10 +8,11 @@
 //   never "no tags". Page sizes are the SDK's own.
 // - Closed by default, so a Preview reads nothing for it until asked.
 
-import type { Efs, Lens } from '@efs/sdk';
+import type { Efs, Lens, Reason } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
 import type { ThingTagRow, ThingTagsPage, TopicCursor } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
+import { readFloorReset } from '../../shell/read-floor.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { Translator } from '../../ui/i18n.ts';
@@ -35,7 +36,8 @@ type TagsState =
       readonly denied: number;
       readonly more: 'idle' | 'loading' | 'failed';
     }
-  | { readonly phase: 'unknown' };
+  /** `reason`: the SDK's, when the read answered (BEHIND has its own copy); none when it threw. */
+  | { readonly phase: 'unknown'; readonly reason?: Reason };
 
 /** The list after a page of lensTagsOf: the first, or `before` with the next appended. */
 export function fromThingTags(
@@ -43,7 +45,7 @@ export function fromThingTags(
   before?: Extract<TagsState, { phase: 'page' }>,
 ): TagsState {
   if (page.status !== 'PRESENT')
-    return before ? { ...before, more: 'failed' } : { phase: 'unknown' };
+    return before ? { ...before, more: 'failed' } : { phase: 'unknown', reason: page.reason };
   return {
     phase: 'page',
     rows: before ? [...before.rows, ...page.rows] : page.rows,
@@ -209,6 +211,8 @@ export class EfsFileTags extends EfsElement {
         return html`<efs-outcome
           .kind=${'read'}
           .code=${'UNKNOWN'}
+          .reason=${s.reason?.code}
+          .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
           .translator=${this.host.translator}
           retryable
           @efs-retry=${() => void this.#load()}

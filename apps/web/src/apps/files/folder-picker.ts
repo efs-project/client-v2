@@ -46,6 +46,7 @@ export class EfsFolderPicker extends EfsElement {
   static override properties = {
     efs: { attribute: false },
     reader: { attribute: false },
+    reset: { attribute: false },
     translator: { attribute: false },
     names: { attribute: false },
     start: { attribute: false },
@@ -55,6 +56,8 @@ export class EfsFolderPicker extends EfsElement {
   declare efs: Efs | undefined;
   /** The connected account (the place Lens puts it first). */
   declare reader: string | undefined;
+  /** Forgets the read floor (a local test chain only; shell/read-floor.ts), from the dialog. */
+  declare reset: (() => void) | undefined;
   declare translator: Translator;
   /** Names beside addresses (the local test chain's dev accounts). */
   declare names: ReadonlyMap<string, string> | undefined;
@@ -241,6 +244,8 @@ export class EfsFolderPicker extends EfsElement {
         compact
         .kind=${'read'}
         .code=${code}
+        .reason=${'reason' in s ? s.reason?.code : undefined}
+        .reset=${this.reset}
         .translator=${this.translator}
         retryable
         @efs-retry=${() => this.#retry()}
@@ -268,6 +273,8 @@ export class EfsFolderPicker extends EfsElement {
               compact
               .kind=${'read'}
               .code=${'UNKNOWN'}
+              .reason=${s.more.reason?.code}
+              .reset=${this.reset}
               .translator=${this.translator}
               retryable
               @efs-retry=${() => void this.#more()}

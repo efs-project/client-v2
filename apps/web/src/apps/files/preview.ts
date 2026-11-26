@@ -14,6 +14,7 @@ import {
 import type { AppHost } from '../../shell/apps.ts';
 import { draftKey } from '../../shell/drafts.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
+import { readFloorReset } from '../../shell/read-floor.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
 import { effect } from '../../state/effect.ts';
@@ -759,6 +760,8 @@ export class EfsFilesPreview extends EfsElement {
         return html`<efs-outcome
           .kind=${'read'}
           .code=${named.status === 'absent' ? 'ABSENT_PROVEN' : named.status === 'invalid' ? 'INVALID' : 'UNKNOWN'}
+          .reason=${'reason' in named ? named.reason?.code : undefined}
+          .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
           .translator=${this.host.translator}
           retryable
           @efs-retry=${() => this.object?.retry()}
@@ -806,6 +809,8 @@ export class EfsFilesPreview extends EfsElement {
         return html`<efs-outcome
           .kind=${'read'}
           .code=${s.open.status}
+          .reason=${'reason' in s.open ? s.open.reason?.code : undefined}
+          .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
           .translator=${this.host.translator}
           retryable
           @efs-retry=${retry}
@@ -843,6 +848,8 @@ export class EfsFilesPreview extends EfsElement {
             compact
             .kind=${'bytes'}
             .code=${bytes.grade}
+            .reason=${'reason' in bytes ? bytes.reason?.code : undefined}
+            .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
             .translator=${this.host.translator}
             retryable
             @efs-retry=${retry}

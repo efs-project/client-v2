@@ -326,7 +326,8 @@ export type PlacesState =
       readonly next?: PlacesCursor;
       readonly more: 'idle' | 'loading' | 'failed';
     }
-  | { readonly phase: 'unknown' }
+  /** `reason`: the SDK's, when the read answered (BEHIND has its own copy); none when it threw. */
+  | { readonly phase: 'unknown'; readonly reason?: Reason }
   /** The SDK refused the directory read: shown with its code, never as empty or as unknown. */
   | { readonly phase: 'invalid'; readonly reason: Reason }
   /** The reader proved the directory isn't there: a word nobody has used, a tag nobody registered. */
@@ -353,7 +354,7 @@ export function fromPlacesPage(
     if (before) return { ...before, more: 'failed' };
     return page.status === 'INVALID'
       ? { phase: 'invalid', reason: page.reason }
-      : { phase: 'unknown' };
+      : { phase: 'unknown', reason: page.reason };
   }
   return {
     phase: 'page',

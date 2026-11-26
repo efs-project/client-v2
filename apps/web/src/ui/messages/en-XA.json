@@ -409,6 +409,8 @@
   "network.indicator.deploymentProblem": "{$network}⟦ · šéţúþ þŕóƀļéɱ·····⟧",
   "network.indicator.loadFailed": "{$network}⟦ · ðíðñ'ţ ļóáð·····⟧",
   "outcome.retry": "⟦Ţŕý áĝáíñ···⟧",
+  "outcome.behind": "⟦Ţĥíš ñéţŵóŕķ çóññéçţíóñ ĥášñ'ţ çáúĝĥţ úþ ŵíţĥ ŵĥáţ ýóú'ṽé áļŕéáðý šééñ. Ţŕý áĝáíñ íñ á ɱóɱéñţ.·····························⟧",
+  "outcome.startOver": "⟦Ţĥé ţéšţ çĥáíñ ŵáš ŕéšéţ? Šţáŕţ óṽéŕ···········⟧",
   "settings.network.status.checking": "⟦Çĥéçķíñĝ ţĥé ÉƑŠ ðéþļóýɱéñţ óñ ţĥíš ñéţŵóŕķ…··············⟧",
   "settings.network.status.reason": "⟦Ŕéášóñ:···⟧",
   "settings.network.status.expected": "⟦éẋþéçţéð···⟧",

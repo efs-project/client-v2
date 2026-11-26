@@ -15,6 +15,7 @@ import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import { markEach } from '../../platform/marks.ts';
 import { onLocalChain } from '../../platform/settings/model.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { readFloorReset } from '../../shell/read-floor.ts';
 import {
   heldMessage,
   saveHold,
@@ -1000,6 +1001,7 @@ export class EfsFolderSave extends EfsElement {
         .efs=${this.efs}
         .reader=${reader}
         .translator=${this.host.translator}
+        .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
         .names=${this.host.names.get()}
         .start=${ask.start}
         .source=${ask.entries[0]?.entry.folder}

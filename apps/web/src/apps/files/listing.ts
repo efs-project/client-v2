@@ -62,6 +62,7 @@ import { authorLabel } from './who.ts';
 const UPLOAD_MAX_MB = 50;
 
 import { markOnce } from '../../platform/marks.ts';
+import { readFloorReset } from '../../shell/read-floor.ts';
 import { type FolderNav, parentKey, sameParent, viewPath } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import type { ObjectKindState } from './object-kind.ts';
@@ -757,6 +758,8 @@ export class EfsFilesListing extends EfsElement {
       body = html`<efs-outcome
         .kind=${'read'}
         .code=${code}
+        .reason=${'reason' in s ? s.reason?.code : undefined}
+        .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
         .translator=${this.host.translator}
         retryable
         @efs-retry=${retry}
@@ -855,6 +858,8 @@ export class EfsFilesListing extends EfsElement {
               compact
               .kind=${'read'}
               .code=${'UNKNOWN'}
+              .reason=${s.more.reason?.code}
+              .reset=${readFloorReset(this.host.network.get(), this.host.reader.get())}
               .translator=${this.host.translator}
               retryable
               @efs-retry=${() => this.#more()}
