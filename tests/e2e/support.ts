@@ -133,7 +133,7 @@ export const TEST_CONFIG = {
       id: 'testnet',
       label: 'Testnet',
       chainId: 31337,
-      core: '0x83dbd3411050c131bd2f4e1493ff5750d80530c6',
+      core: '0x83ce0b9e2ddd9c5cebbfe6b2b9bc275fda9a20fb',
       deployment: 'deployments/testnet.json',
       release: 'deployments/testnet-release.json',
       rpcs: [{ url: 'https://rpc.example.net/', label: 'Example RPC' }],
