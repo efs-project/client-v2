@@ -69,12 +69,17 @@ export interface FolderSavedDetail {
 type CheckName = (input: string) => NameCheck;
 const loadCheckName = async (): Promise<CheckName> => (await import('@efs/sdk')).checkName;
 
+/** checkText (the chain's text grammar, for a tag's name), loaded when a name is first typed. */
+type CheckText = (text: string) => { ok: true } | { ok: false; code: number; rule: string };
+const loadCheckText = async (): Promise<CheckText> => (await import('@efs/sdk/tags')).checkText;
+
 const loadPlanners = async (): Promise<FolderPlanners> => {
   const [files, tags] = await Promise.all([import('@efs/sdk/files'), import('@efs/sdk/tags')]);
   return {
     planTag: tags.planTag,
     planDeny: tags.planDeny,
     planUntag: tags.planUntag,
+    planLabel: tags.planLabel,
     planCreateFile: files.planCreateFile,
     planCreateFolder: files.planCreateFolder,
     planMoveEntries: files.planMoveEntries,
@@ -135,6 +140,19 @@ export type FolderAsk =
       /** "Remove my tag" from a list: the place is known, so it plans at once (no picker). */
       readonly place?: TagPlace;
       readonly stance?: 'untag';
+    }
+  /**
+   * "Name this tag": the person's own name for the tag in their language. `current`: their name
+   * there now, if any (offered for editing, and "Remove my name"). `tag` and `langName`: how the
+   * tag and the language are shown.
+   */
+  | {
+      readonly kind: 'label';
+      readonly place: readonly string[];
+      readonly lang: string;
+      readonly langName: string;
+      readonly tag: string;
+      readonly current?: string;
     };
 
 /** An entry the person picked: what it is, and whether it's a folder. */
@@ -237,6 +255,7 @@ export class EfsFolderSave extends EfsElement {
   #composing: ComposeDetail | undefined;
   /** The SDK's checkName, once loaded: until then a name can't be reviewed. */
   #checkName = state<CheckName | undefined>(undefined);
+  #checkText = state<CheckText | undefined>(undefined);
   #phase = state<Phase>({ phase: 'closed' });
   #controller: AbortController | undefined;
 
@@ -298,7 +317,14 @@ export class EfsFolderSave extends EfsElement {
       this.#phase.set({ phase: 'naming', value: '' });
     } else if (ask.kind === 'upload') this.#phase.set({ phase: 'naming', value: ask.name });
     else if (ask.kind === 'rename') this.#phase.set({ phase: 'naming', value: ask.from.name });
-    else if (ask.kind === 'move') this.#pickAgain();
+    else if (ask.kind === 'label') {
+      if (!this.#checkText.get()) {
+        loadCheckText()
+          .then((check) => this.#checkText.set(check))
+          .catch((error: unknown) => console.error(error));
+      }
+      this.#phase.set({ phase: 'naming', value: ask.current ?? '' });
+    } else if (ask.kind === 'move') this.#pickAgain();
     else if (ask.kind === 'tag') {
       if (ask.place && ask.stance === 'untag') {
         void this.#plan({ kind: 'tag', place: ask.place, targets: ask.targets, stance: 'untag' });
@@ -407,6 +433,8 @@ export class EfsFolderSave extends EfsElement {
         return { kind: 'hide', entries: ask.entries };
       case 'tag':
         throw new Error('a tag is planned from the tag picker');
+      case 'label':
+        return { kind: 'label', place: ask.place, lang: ask.lang, text: name };
     }
   }
 
@@ -431,6 +459,13 @@ export class EfsFolderSave extends EfsElement {
       const plan = await planRequest(await loadPlanners(), efs, writer, request, lens, signal);
       if (signal.aborted) return;
       if (plan.status === 'PLANNED') this.#phase.set({ phase: 'review', request, plan, writer });
+      else if (plan.status === 'REFUSED' && plan.kind === 'efs.topicStatementPlan')
+        // A tag's name: one statement, refused as a whole (its own codes, named apart).
+        this.#phase.set({
+          phase: 'refused',
+          request,
+          refused: [{ index: 0, code: `LABEL_${plan.code}`, name: '' }],
+        });
       else if (plan.status === 'REFUSED')
         this.#phase.set({
           phase: 'refused',
@@ -475,7 +510,9 @@ export class EfsFolderSave extends EfsElement {
     const statements =
       review.kind === 'efs.tagReview'
         ? review.statements.map((x) => statementKey(review.place.id, x.thing))
-        : undefined;
+        : review.kind === 'efs.topicStatementReview' && review.purpose === 'label'
+          ? [statementKey(review.subject.id, `label:${review.lang ?? ''}`)]
+          : undefined;
     return folderHold(
       {
         availability: this.host.saving.availability.get(),
@@ -754,6 +791,7 @@ export class EfsFolderSave extends EfsElement {
   }
 
   #naming(ask: FolderAsk, value: string) {
+    if (ask.kind === 'label') return this.#labelling(ask, value);
     const t = this.host.translator.t.bind(this.host.translator);
     const checkName = this.#checkName.get();
     const check: NameCheck | undefined = checkName ? checkName(value) : undefined;
@@ -844,6 +882,87 @@ export class EfsFolderSave extends EfsElement {
             @click=${() => this.host.saving.requestWallet()}
             >${t('files.save.connectButton')}</wa-button
           >`
+      }`;
+  }
+
+  /**
+   * "Name this tag": the person's name for it in their language, checked as typed with the chain's
+   * text grammar (checkText). Review plans it; "Remove my name" (when they have one) plans taking
+   * it back. Unchanged, Review stays off.
+   */
+  #labelling(ask: Extract<FolderAsk, { kind: 'label' }>, value: string) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const checkText = this.#checkText.get();
+    const check = checkText && value !== '' ? checkText(value) : undefined;
+    const ready = this.host.saving.availability.get().status === 'READY';
+    const unchanged = value === (ask.current ?? '');
+    const review = async () => {
+      const now = this.#nameNow(value);
+      const ok = (this.#checkText.get() ?? (await loadCheckText()))(now).ok;
+      if (this.#ask.get() !== ask || this.#phase.get().phase !== 'naming') return;
+      if (!ok || now === (ask.current ?? '') || !ready) return;
+      void this.#plan({ kind: 'label', place: ask.place, lang: ask.lang, text: now });
+    };
+    return html`<div class="wa-stack wa-gap-s">
+        <wa-input
+          class="efs-label-text"
+          label=${t('files.label.field', { tag: ask.tag, lang: ask.langName })}
+          .value=${value}
+          autofocus
+          @input=${(event: Event) =>
+            this.#phase.set({ phase: 'naming', value: (event.target as HTMLInputElement).value })}
+          @keydown=${(event: KeyboardEvent) => {
+            if (event.key === 'Enter') void review();
+          }}
+        ></wa-input>
+        ${
+          check && !check.ok
+            ? html`<p class="efs-folder-name-error" role="alert">${t('files.label.rule')}</p>`
+            : nothing
+        }
+        <p class="efs-quiet efs-label-hint">${t('files.label.hint')}</p>
+        ${
+          ready
+            ? nothing
+            : html`<wa-callout variant="neutral" size="small">
+                <span slot="icon">${appIcon('wallet')}</span>
+                <p>${t('files.save.connect')}</p>
+              </wa-callout>`
+        }
+      </div>
+      <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
+        >${t('review.cancel')}</wa-button
+      >
+      ${
+        ready && ask.current !== undefined
+          ? html`<wa-button
+              slot="footer"
+              appearance="outlined"
+              variant="danger"
+              class="efs-label-remove"
+              @click=${() =>
+                void this.#plan({ kind: 'label', place: ask.place, lang: ask.lang, remove: true })}
+              >${t('files.label.remove')}</wa-button
+            >`
+          : nothing
+      }
+      ${
+        ready
+          ? html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-label-review"
+              ?disabled=${!check?.ok || unchanged}
+              @click=${review}
+              >${t('files.save.review')}</wa-button
+            >`
+          : html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-connect"
+              @click=${() => this.host.saving.requestWallet()}
+              >${t('files.save.connectButton')}</wa-button
+            >`
       }`;
   }
 
@@ -1004,6 +1123,19 @@ export class EfsFolderSave extends EfsElement {
         </ul>
         <p class="efs-quiet efs-hide-reach">${t('files.hide.reach')}</p>`;
       }
+      case 'efs.topicStatementReview': {
+        // A tag's name: what it says (or that it goes), and that names are public.
+        if (ask.kind !== 'label') return nothing;
+        const args = { tag: ask.tag, lang: ask.langName };
+        return html`<p class="efs-label-says">
+            ${
+              r.text === undefined
+                ? t('files.label.reviewRemove', args)
+                : t('files.label.review', { ...args, name: r.text })
+            }
+          </p>
+          <p class="efs-quiet efs-label-public">${t('files.label.public')}</p>`;
+      }
       case 'efs.unhideReview': {
         // Your block goes; what shows at the name afterwards is the next author's, or nothing.
         const e = r.entries[0];
@@ -1049,7 +1181,9 @@ export class EfsFolderSave extends EfsElement {
                       ? 'files.hide.title'
                       : ask?.kind === 'tag'
                         ? 'files.tag.title'
-                        : 'files.remove.title';
+                        : ask?.kind === 'label'
+                          ? 'files.label.title'
+                          : 'files.remove.title';
     const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
     const first =
       ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
@@ -1300,9 +1434,13 @@ export class EfsFolderSave extends EfsElement {
                               ? 'files.unhide.yes'
                               : ask.kind === 'hide'
                                 ? 'files.hide.yes'
-                                : s.plan.review.kind === 'efs.tagReview'
-                                  ? TAG_SEND[tagStance(s.plan.review)]
-                                  : 'review.send',
+                                : ask.kind === 'label'
+                                  ? s.request.kind === 'label' && s.request.remove
+                                    ? 'files.label.remove'
+                                    : 'files.label.yes'
+                                  : s.plan.review.kind === 'efs.tagReview'
+                                    ? TAG_SEND[tagStance(s.plan.review)]
+                                    : 'review.send',
                       )}</wa-button
                     >`
             }`;

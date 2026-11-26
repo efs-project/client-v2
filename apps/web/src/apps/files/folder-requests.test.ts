@@ -108,6 +108,7 @@ describe('planRequest', () => {
     planRestoreEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planUnhideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planHideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
+    planLabel: vi.fn(async () => ({ status: 'PLANNED' })),
     planTag: vi.fn(async () => ({ status: 'PLANNED' })),
     planDeny: vi.fn(async () => ({ status: 'PLANNED' })),
     planUntag: vi.fn(async () => ({ status: 'PLANNED' })),
@@ -167,6 +168,32 @@ describe('planRequest', () => {
       lens,
     });
     expect(p.planRestoreEntries).not.toHaveBeenCalled();
+  });
+
+  it('Name this tag: planLabel with the text, or with remove (never both); it holds no folder name', async () => {
+    const p = planners();
+    const place = ['photos', 'sunsets'];
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'label', place, lang: 'en', text: 'Sunset photos' },
+      lens,
+      signal,
+    );
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'label', place, lang: 'en', remove: true },
+      lens,
+      signal,
+    );
+    const calls = p.planLabel.mock.calls as unknown as unknown[][];
+    expect(calls[0]?.[2]).toEqual({ topic: place, lang: 'en', text: 'Sunset photos' });
+    expect(calls[1]?.[2]).toEqual({ topic: place, lang: 'en', remove: true });
+    expect(placesOf({ kind: 'label', place, lang: 'en', text: 'x' })).toEqual([]);
+    expect(withoutIndices({ kind: 'label', place, lang: 'en', text: 'x' }, [0])).toBeUndefined();
   });
 
   it("Block hides someone else's entry through planHideEntries, in the view's Lens", async () => {
@@ -348,6 +375,9 @@ describe('copy', () => {
     expect(refusalMessage('PATH_CHANGED')).toBe('files.refused.pathChanged');
     expect(refusalMessage('NOT_REMOVED')).toBe('files.refused.notRemoved');
     expect(refusalMessage('ALREADY_HIDDEN')).toBe('files.refused.alreadyHidden');
+    // A tag's name: its own words, never a tag's.
+    expect(refusalMessage('LABEL_UNCHANGED')).toBe('files.label.unchanged');
+    expect(refusalMessage('LABEL_NOT_STATED')).toBe('files.label.notStated');
     // The tag release's restore and unhide refusals.
     expect(refusalMessage('NEVER_BOUND')).toBe('files.refused.neverBound');
     expect(refusalMessage('HISTORY_UNKNOWN')).toBe('files.refused.historyUnknown');

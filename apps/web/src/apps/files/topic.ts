@@ -33,7 +33,15 @@ import { EfsElement, html, nothing } from '../../ui/element.ts';
 import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
 import type { EfsFolderSave } from './folder-save.ts';
-import { type NameRead, nameOf, readerLangs, readFileNames, readTopicName } from './names.ts';
+import {
+  languageName,
+  type NameRead,
+  nameOf,
+  readerLangs,
+  readFileNames,
+  readMyLabel,
+  readTopicName,
+} from './names.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
@@ -179,12 +187,17 @@ export class EfsFilesTopic extends EfsElement {
   #paths = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
   /** The address shown, checksummed (display only; the lowercase form is what's read). */
   #checksummed = state<string | undefined>(undefined);
-  /** Saves sent from this list ("Remove my tag"): once complete, the list is read again. */
+  /** Saves sent from this list ("Remove my tag", "Name this tag"): once complete, read again. */
   #untagging = new Set<string>();
   /** Names for listed files, by thing (fileNames): read once each. */
   #names = state<ReadonlyMap<string, NameRead>>(new Map());
   /** The tag's segments as named in the reader's languages (topicName), when read. */
   #segments = state<readonly SegmentName[] | undefined>(undefined);
+  /**
+   * The connected person's own name for this tag in their language (labelOf in a Lens of just
+   * them): a string, null when they have none, undefined until read (or not connected).
+   */
+  #mine = state<string | null | undefined>(undefined);
   /** "Tags under this one": newest first (the junk rule and the Lens tiers wait on the SDK). */
   #children = state<PlacesState | undefined>(undefined);
   #showAll = state(false);
@@ -309,6 +322,7 @@ export class EfsFilesTopic extends EfsElement {
     this.#children.set(undefined);
     this.#showAll.set(false);
     this.#segments.set(undefined);
+    this.#mine.set(undefined);
     this.#names.set(new Map());
     if (place.status === 'home') {
       void loadChecksum()
@@ -368,6 +382,11 @@ export class EfsFilesTopic extends EfsElement {
         const langs = readerLangs(this.host.translator.locale);
         const segments = await readTopicName(efs, place.segments, lens, langs, signal);
         if (!signal.aborted) this.#segments.set(segments);
+        // Yours, for "Name this tag" (to change or remove): read only when you're connected.
+        if (reader && !signal.aborted) {
+          const mine = await readMyLabel(efs, place.segments, reader, this.#lang(), signal);
+          if (!signal.aborted) this.#mine.set(mine);
+        }
       }
     } catch (error) {
       if (signal.aborted) return;
@@ -751,6 +770,26 @@ export class EfsFilesTopic extends EfsElement {
     );
   }
 
+  /** The language a name is given in here: the reader's first. */
+  #lang(): string {
+    return readerLangs(this.host.translator.locale)[0] ?? 'en';
+  }
+
+  /** "Name this tag": the person's own name for it in their language (planLabel). */
+  #name(place: Extract<PlaceLink, { status: 'topic' }>): void {
+    const dialog = this.querySelector<EfsFolderSave>('efs-files-folder-save.efs-topic-tag-dialog');
+    const lang = this.#lang();
+    const mine = this.#mine.get();
+    dialog?.open({
+      kind: 'label',
+      place: place.segments,
+      lang,
+      langName: languageName(lang, this.host.translator.locale),
+      tag: pathText(place.segments),
+      ...(typeof mine === 'string' ? { current: mine } : {}),
+    });
+  }
+
   /** The tag's path as shown: each segment's label (topicName) where the Lens gives one. */
   #shownPath(words: readonly string[]): string {
     const named = this.#segments.get();
@@ -811,7 +850,35 @@ export class EfsFilesTopic extends EfsElement {
             ? html`<p class="efs-quiet efs-topic-count">${t('files.topic.countUnknown')}</p>`
             : nothing
       }
+      ${place.status === 'topic' ? this.#naming(place, t) : nothing}
     </header>`;
+  }
+
+  /** "Name this tag", with your name for it when you have one: only when you're connected. */
+  #naming(place: Extract<PlaceLink, { status: 'topic' }>, t: Translator['t']) {
+    const mine = this.#mine.get();
+    if (!readerOf(this.host) || this.host.saving.hosting.shared || mine === undefined) {
+      return nothing;
+    }
+    return html`<div class="wa-cluster wa-gap-xs efs-topic-naming">
+      ${
+        mine
+          ? html`<span class="efs-quiet efs-topic-mine"
+              >${t('files.label.mine', {
+                name: mine,
+                lang: languageName(this.#lang(), this.host.translator.locale),
+              })}</span
+            >`
+          : nothing
+      }
+      <wa-button
+        size="s"
+        appearance="outlined"
+        class="efs-topic-name"
+        @click=${() => this.#name(place)}
+        ><span slot="start">${appIcon('pen-to-square')}</span>${t('files.label.button')}</wa-button
+      >
+    </div>`;
   }
 
   #controls(place: PlaceLink, t: Translator['t']) {

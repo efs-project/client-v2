@@ -85,6 +85,33 @@ export function readerLangs(locale: string): string[] {
   return [...new Set(all.filter((l) => /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(l)))].slice(0, 8);
 }
 
+/**
+ * The connected person's own name for a tag in `lang` (labelOf in a Lens of just them): its text,
+ * null when they have none (proven), undefined when it couldn't be read.
+ */
+export async function readMyLabel(
+  efs: Efs,
+  words: readonly string[],
+  reader: string,
+  lang: string,
+  signal: AbortSignal,
+): Promise<string | null | undefined> {
+  const { labelOf } = await loadTags();
+  const lens = efs.lens.from([reader as never]);
+  const answer = await labelOf(efs, words, { lens, langs: [lang], signal }).catch(() => undefined);
+  if (answer?.status === 'PRESENT') return answer.label.text;
+  return answer?.status === 'ABSENT_PROVEN' ? null : undefined;
+}
+
+/** A language's name in the reader's own language ("English"), else its tag ("en"). */
+export function languageName(lang: string, locale: string): string {
+  try {
+    return new Intl.DisplayNames([locale], { type: 'language' }).of(lang) ?? lang;
+  } catch {
+    return lang;
+  }
+}
+
 /** A tag's words as names: each segment's label, or the word itself. */
 export async function readTopicName(
   efs: Efs,
