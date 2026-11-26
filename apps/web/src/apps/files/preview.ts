@@ -19,8 +19,9 @@ import { sharedGatewayNotice } from '../../shell/shared-gateway.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, keyed, nothing } from '../../ui/element.ts';
-import type { Translator } from '../../ui/i18n.ts';
+import type { MessageId, Translator } from '../../ui/i18n.ts';
 import { appIcon } from '../../ui/icons.ts';
+import { visibleText } from '../../ui/visible-text.ts';
 import { type Composer, type NewFile, newFileKey } from './compose.ts';
 import type { EditDoneDetail } from './editor.ts';
 import { placeLens } from './folder-model.ts';
@@ -989,9 +990,15 @@ export class EfsFilesPreview extends EfsElement {
       return html`<wa-callout variant="warning" class="efs-preview-invalid" data-rule=${link.rule}>
         <span slot="icon">${appIcon('triangle-exclamation')}</span>
         ${
-          link.rule === 'bad-word'
-            ? html`<p>${t('files.preview.badWordLink')}</p>`
-            : html`<p>
+          link.rule === 'bad-word' && link.word !== undefined
+            ? html`<p>
+                ${t('files.preview.badWordNamed')}
+                <bdi translate="no" class="efs-bad-word">${visibleText(link.word)}</bdi>
+                ${badWordReason(link.detail, t)}
+              </p>`
+            : link.rule === 'bad-word'
+              ? html`<p>${t('files.preview.badWordLink')}</p>`
+              : html`<p>
                 ${t('files.preview.invalidLink')}
                 <code translate="no" dir="ltr">${link.rule}</code>
               </p>`
@@ -1053,3 +1060,19 @@ export class EfsFilesPreview extends EfsElement {
     </div>`;
   }
 }
+
+/** Why the grammar refused a tag word, from parseLink's `detail` (unknown ones shown as given). */
+function badWordReason(detail: string | undefined, t: Translator['t']) {
+  const id = detail ? BAD_WORD_REASONS[detail] : undefined;
+  if (id) return html`<span>(${t(id)})</span>`;
+  return detail
+    ? html`<span>(<code translate="no" dir="ltr">${visibleText(detail)}</code>)</span>`
+    : nothing;
+}
+
+const BAD_WORD_REASONS: Readonly<Record<string, MessageId>> = {
+  unfolded: 'files.badWord.unfolded',
+  slash: 'files.badWord.slash',
+  dot: 'files.badWord.dot',
+  control: 'files.badWord.control',
+};

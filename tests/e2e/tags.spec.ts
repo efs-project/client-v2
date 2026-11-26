@@ -226,14 +226,24 @@ test('a typed path folds and the address bar shows it (Cars/Tesla is cars/tesla)
 
     // A word the grammar refuses even after the fold (a capital in a word with other letters).
     await go(page, '#/r/testnet/Straße');
-    await expect(preview(page).locator('.efs-preview-invalid')).toHaveAttribute(
-      'data-rule',
-      'bad-word',
+    const invalid = preview(page).locator('.efs-preview-invalid');
+    await expect(invalid).toHaveAttribute('data-rule', 'bad-word');
+    await expect(invalid.locator('p')).toHaveText(
+      /^\s*This link names a tag with a word the network doesn't accept:\s+Straße\s+\(a capital letter, in a word that isn't all plain letters\)\s*$/,
     );
-    await expect(preview(page).locator('.efs-preview-invalid')).toContainText(
-      "This link names a tag with a word the network doesn't accept",
+    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('Straße');
+    chain.step('Straße: refused by the link grammar, the word and the reason named; nothing read');
+
+    // The word as the link spelled it can hold what broke the rule: a bidi override and a
+    // zero-width joiner are shown, never applied, and the sentence reads in order.
+    await go(page, '#/r/testnet/A%E2%80%AEb%E2%80%8Dc');
+    await expect(invalid.locator('bdi.efs-bad-word')).toHaveText('A[U+202E]b[U+200D]c');
+    const said = (await invalid.locator('p').textContent()) ?? '';
+    expect(said).not.toMatch(/[\u202E\u200D]/);
+    expect(said.replace(/\s+/g, ' ').trim()).toBe(
+      "This link names a tag with a word the network doesn't accept: A[U+202E]b[U+200D]c (a capital letter, in a word that isn't all plain letters)",
     );
-    chain.step('Straße: refused by the link grammar, said as a tag word; nothing read');
+    chain.step('A, U+202E, b, U+200D, c: the characters shown as U+ codes, the sentence in order');
 
     await go(page, '#/r/testnet/vitalik.eth');
     const word = page.locator('efs-files-word');
