@@ -11,6 +11,7 @@ import {
   onLocalChain,
   readConfig,
   readSettings,
+  versionsPageOf,
 } from './model.ts';
 
 const config: OperatorConfig = {
@@ -343,5 +344,55 @@ describe('dev accounts: a local test chain only', () => {
     expect(onLocalChain({ ...base, rpcs: [local, remote] })).toBe(false);
     expect(onLocalChain({ ...base, rpcs: [local, { ...remote, enabled: false }] })).toBe(true);
     expect(onLocalChain({ ...base, rpcs: [] })).toBe(false);
+  });
+});
+
+describe('devVersionsPage: a test-only Versions page size, on a local test chain only', () => {
+  const net = (rpcs: string[], devVersionsPage?: unknown) => ({
+    id: 'dev',
+    label: 'Local dev chain',
+    chainId: 3133779,
+    core: `0x${'aa'.repeat(20)}`,
+    deployment: 'deployments/dev.json',
+    release: 'deployments/dev-release.json',
+    rpcs: rpcs.map((url) => ({ url })),
+    ...(devVersionsPage === undefined ? {} : { devVersionsPage }),
+  });
+  const effective = (definition: NetworkDefinition, rpcs: string[]) => ({
+    definition,
+    rpcs: rpcs.map((url) => ({ url, enabled: true })) as never,
+    ipfsGateways: [],
+    arweaveGateways: [],
+    customized: { rpcs: false, gateways: false },
+  });
+
+  it('is kept for a local chain and applies only while every RPC in effect is local', () => {
+    const read = readConfig({
+      schema: 'efs-config/1',
+      networks: [net(['http://127.0.0.1:8545/'], 1)],
+    });
+    if (read.status !== 'OK') throw new Error('config');
+    const definition = read.config.networks[0] as NetworkDefinition;
+    expect(definition.devVersionsPage).toBe(1);
+    expect(versionsPageOf(effective(definition, ['http://127.0.0.1:8545/']))).toBe(1);
+    // The person added a remote RPC: the SDK's own page size again.
+    expect(
+      versionsPageOf(effective(definition, ['http://127.0.0.1:8545/', 'https://rpc.example.net/'])),
+    ).toBeUndefined();
+  });
+
+  it('is dropped, with an issue, for a remote network or anything but a whole number from 1', () => {
+    for (const [rpcs, value] of [
+      [['https://rpc.example.net/'], 1],
+      [['http://127.0.0.1:8545/'], 0],
+      [['http://127.0.0.1:8545/'], 1.5],
+      [['http://127.0.0.1:8545/'], '1'],
+    ] as const) {
+      const read = readConfig({ schema: 'efs-config/1', networks: [net([...rpcs], value)] });
+      expect(read.status === 'OK' && read.config.networks[0]?.devVersionsPage).toBeUndefined();
+      expect(read.status === 'OK' && read.issues.some((i) => i.includes('devVersionsPage'))).toBe(
+        true,
+      );
+    }
   });
 });

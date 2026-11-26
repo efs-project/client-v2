@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decisionLine,
   nobodyElse,
+  pageLimit,
   type ReadState,
   type ReadVersions,
   readMore,
@@ -94,9 +95,10 @@ describe('readVersions: the first click', () => {
     ]);
     const s = await readVersions(r.read, efs, FILE, { lens: LENS });
     expect(r.calls).toHaveLength(1);
-    // The Lens the file was opened under is the one read with.
+    // The Lens the file was opened under is the one read with; the SDK's own page size.
     expect(r.calls[0]?.lens).toBe(LENS);
     expect(r.calls[0]?.cursor).toBeUndefined();
+    expect(r.calls[0]?.limit).toBeUndefined();
     expect(s).toMatchObject({
       phase: 'read',
       decision: { kind: 'version', author: A },
@@ -119,8 +121,10 @@ describe('readVersions: the first click', () => {
       page({ next: cursor(150) }),
       page({ next: cursor(1) }),
     ]);
-    const s = await readVersions(r.read, efs, FILE, { lens: LENS });
+    const s = await readVersions(r.read, efs, FILE, { lens: LENS, limit: 1 });
     expect(VERSIONS_CALLS_PER_CLICK).toBe(3);
+    // A test chain's devVersionsPage goes to every call of the click.
+    expect(r.calls.map((c) => c.limit)).toEqual([1, 1, 1]);
     expect(r.calls).toHaveLength(3);
     expect(r.calls.map((c) => c.cursor)).toEqual([undefined, cursor(300), cursor(150)]);
     expect(s).toMatchObject({
@@ -327,5 +331,18 @@ describe('nobodyElse: "Nobody else has a version of this file." only when proven
     if (before.public.status !== 'present') throw new Error('expected a PRESENT tier');
     expect(before.public.next).toBeUndefined();
     expect(nobodyElse(before.public)).toBe(false);
+  });
+});
+
+describe("pageLimit: a test chain's page size, within the SDK's own bound", () => {
+  it("passes devVersionsPage only from 1 to the SDK's MAX_VERSIONS_PAGE; else the SDK's default", async () => {
+    const { MAX_VERSIONS_PAGE } = await import('@efs/sdk/files');
+    expect(pageLimit(1, MAX_VERSIONS_PAGE)).toBe(1);
+    expect(pageLimit(MAX_VERSIONS_PAGE, MAX_VERSIONS_PAGE)).toBe(MAX_VERSIONS_PAGE);
+    // Above the SDK's bound (were the SDK to lower it): none, never a MISUSE limit.
+    expect(pageLimit(MAX_VERSIONS_PAGE + 1, MAX_VERSIONS_PAGE)).toBeUndefined();
+    expect(pageLimit(10, 5)).toBeUndefined();
+    expect(pageLimit(undefined, MAX_VERSIONS_PAGE)).toBeUndefined();
+    expect(pageLimit(0, MAX_VERSIONS_PAGE)).toBeUndefined();
   });
 });

@@ -7,9 +7,10 @@
 // row's Open shows that version behind the media gate; the creator's Show doesn't (the file view's
 // own fallback opens the creator's version without it). "Versions · N" is `live`.
 //
-// Not here, and why: Load more, Refresh and the budget need a list longer than one page (150
-// entries), so versions-model.test.ts pins them; the hidden decision by a Lens author's lone no
-// waits for the SDK's planHeadNo (next pack), and is pinned there too.
+// Paging: a local test chain's config may set `devVersionsPage` (tests only; never shown), the
+// entries one read scans, so a short list pages like a long one: the paging case reads one entry
+// per call. The hidden decision by a Lens author's lone no waits for the SDK's planHeadNo (next
+// pack); versions-model.test.ts pins it meanwhile.
 
 import { AxeBuilder } from '@axe-core/playwright';
 import { link } from '@efs/sdk/links';
@@ -17,6 +18,7 @@ import { type Page, test } from '@playwright/test';
 import { type TestChain, testChain } from './chain.ts';
 import { expect, preview, SEEDED, start } from './edit-support.ts';
 import { press } from './press.ts';
+import { booted, serveConfig, serveDeployment, TEST_CONFIG } from './support.ts';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
@@ -37,6 +39,22 @@ const go = (page: Page, hash: string) =>
 
 /** Opens (or closes) the section: a plain <summary>, so a click is the person's own. */
 const toggle = (page: Page) => press(versions(page).locator('summary'));
+
+/** Whether `locator` holds focus (a wa-button's own button is inside its shadow root). */
+const focused = (locator: import('@playwright/test').Locator) =>
+  locator.evaluate((el) => el === document.activeElement || el.matches(':focus-within'));
+
+/** TEST_CONFIG on a local test chain, reading one head-authors list entry per Versions call. */
+const PAGED_CONFIG = {
+  ...TEST_CONFIG,
+  networks: [
+    {
+      ...TEST_CONFIG.networks[0],
+      rpcs: [{ url: 'http://127.0.0.1:8545/', label: 'Local test chain' }],
+      devVersionsPage: 1,
+    },
+  ],
+};
 
 /** The principal of anvil account `index`, from the SDK (kept in the transcript's ids). */
 async function principalOf(chain: TestChain, index: number): Promise<string> {
@@ -192,6 +210,83 @@ test("Versions in a Lens without the creator: the creator's row comes after the 
     await settled(page);
     await chain.idle(500);
     chain.step("Show on the creator's row: the seeded text, no gate");
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('Versions one entry per read: the 3-read budget, Load more keeping focus, then a row; a list that moves offers Refresh', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-versions-paging',
+    "readme.txt (by the fixture author, #0) gets versions of their own from #2, then #3, #4, #5, #7, #8, #9, from Node. The page is served a local test chain config with devVersionsPage 1 (one list entry per read) and opens the file by a link whose Lens is [#3, #4, #5, #7, #8, #9, #0]. Opening Versions reads #9, #8, #7 (Lens authors, skipped in the public tier): More of the list to check. Load more reads #5, #4, #3: none again, focus stays on Load more. #1 then saves a version (the list moves). Load more reads #2: a public row, focus on it, and the list changed: Refresh. Refresh reads from the newest entry: #1's row; focus on the first row.",
+  );
+  try {
+    // The list, oldest first: #0 (the seed), #2 (public), then the Lens authors.
+    for (const i of [2, 3, 4, 5, 7, 8, 9]) await chain.editAs?.(i, `Version by #${i}.\n`);
+    const p: Record<number, string> = {};
+    for (const i of [0, 1, 2, 3, 4, 5, 7, 8, 9]) p[i] = await principalOf(chain, i);
+    await chain.attach(page);
+    await serveConfig(page, PAGED_CONFIG);
+    await serveDeployment(page, chain.deployment);
+    const lens = [3, 4, 5, 7, 8, 9, 0].map((i) => p[i] as string);
+    const shared = link({
+      kind: 'object',
+      subject: chain.ids.file as never,
+      lens: { principals: lens } as never,
+    });
+    await page.goto(`./#/r/testnet/${shared}`);
+    await booted(page);
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('Version by #3.\n');
+    chain.step('The link with a Lens of six version authors and #0: #3 shows');
+
+    await toggle(page);
+    await settled(page);
+    const pub = tier(page, 'public').locator('li.efs-version');
+    const more = versions(page).locator('wa-button.efs-versions-more');
+    await expect(tier(page, 'lens').locator('li.efs-version')).toHaveCount(7);
+    await expect(versions(page).locator('summary')).toHaveText(/^\s*Versions · 8\s*$/);
+    // Three reads of one entry each, all Lens authors: no rows, and never "nobody else".
+    await expect(versions(page).locator('.efs-versions-unchecked')).toHaveText(
+      'More of the list to check.',
+    );
+    await expect(pub).toHaveCount(0);
+    await expect(versions(page).locator('.efs-versions-no-others')).toHaveCount(0);
+    await expect(more).toBeVisible();
+    chain.step('Open Versions: three reads, no public row yet: More of the list to check');
+
+    await press(more);
+    await settled(page);
+    await expect(pub).toHaveCount(0);
+    await expect(versions(page).locator('.efs-versions-unchecked')).toBeVisible();
+    // No new rows: focus stays on Load more.
+    expect(await focused(more)).toBe(true);
+    chain.step('Load more: three more reads, still no row; focus stays on Load more');
+
+    await chain.editAs?.(1, 'Version by #1.\n');
+    chain.step('#1 saves a version from Node: the list moves');
+    await press(more);
+    await settled(page);
+    await expect(pub).toHaveCount(1);
+    await expect(pub.first()).toHaveAttribute('data-author', (p[2] as string).toLowerCase());
+    // A new row: focus moves to it.
+    expect(await focused(pub.first())).toBe(true);
+    await expect(versions(page).locator('.efs-versions-changed')).toContainText(
+      'This list changed while you were reading it.',
+    );
+    await expect(versions(page).locator('.efs-versions-no-others')).toHaveCount(0);
+    chain.step("Load more: #2's public row, focus on it; the list changed: Refresh");
+
+    await press(versions(page).locator('wa-button.efs-versions-refresh'));
+    await settled(page);
+    await expect(pub.first()).toHaveAttribute('data-author', (p[1] as string).toLowerCase());
+    await expect(versions(page).locator('.efs-versions-changed')).toHaveCount(0);
+    await expect(versions(page).locator('summary')).toHaveText(/^\s*Versions · 9\s*$/);
+    // Read again in place: focus on the first row, never on body.
+    expect(await focused(versions(page).locator('li.efs-version').first())).toBe(true);
+    await chain.idle(500);
+    chain.step("Refresh: read from the newest entry, #1's row first; focus on the first row");
   } finally {
     await chain.finish();
   }

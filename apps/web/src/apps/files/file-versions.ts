@@ -14,6 +14,7 @@
 
 import type { Efs, Lens } from '@efs/sdk';
 import type { FileVersion } from '@efs/sdk/files';
+import { versionsPageOf } from '../../platform/settings/model.ts';
 import type { AppHost } from '../../shell/apps.ts';
 import { readFloorReset } from '../../shell/read-floor.ts';
 import { state } from '../../state/signals.ts';
@@ -23,6 +24,8 @@ import { readerOf } from './object-kind.ts';
 import {
   decisionLine,
   nobodyElse,
+  pageLimit,
+  type ReadOpts,
   type ReadState,
   type ReadVersions,
   readMore,
@@ -134,11 +137,24 @@ export class EfsFileVersions extends EfsElement {
     });
   }
 
-  #reader = async (): Promise<ReadVersions> => (await loadFiles()).fileVersions as ReadVersions;
+  /**
+   * fileVersions and how to call it: the opened Lens, and a local test chain's devVersionsPage
+   * (never anywhere else) within the SDK's own MAX_VERSIONS_PAGE.
+   */
+  async #reader(signal: AbortSignal): Promise<{ read: ReadVersions; opts: ReadOpts }> {
+    const files = await loadFiles();
+    const network = this.host.network.get();
+    const configured = 'network' in network ? versionsPageOf(network.network) : undefined;
+    const limit = pageLimit(configured, files.MAX_VERSIONS_PAGE);
+    return {
+      read: files.fileVersions as ReadVersions,
+      opts: { ...(this.lens ? { lens: this.lens } : {}), ...(limit ? { limit } : {}), signal },
+    };
+  }
 
   /** The first read (opening), or a whole re-read in place (Refresh, Try again). */
   async #load(busy?: 'refresh'): Promise<void> {
-    const { efs, subject, lens } = this;
+    const { efs, subject } = this;
     if (!efs || !subject) return;
     this.#controller?.abort();
     const controller = new AbortController();
@@ -148,8 +164,8 @@ export class EfsFileVersions extends EfsElement {
     else this.#state.set({ phase: 'loading' });
     this.dataset.reading = '';
     try {
-      const read = await this.#reader();
-      const next = await readVersions(read, efs, subject, { ...(lens ? { lens } : {}), signal });
+      const { read, opts } = await this.#reader(signal);
+      const next = await readVersions(read, efs, subject, opts);
       if (signal.aborted) return;
       if (busy) this.#focus = { to: 'first-row' };
       this.#state.set(next);
@@ -168,7 +184,7 @@ export class EfsFileVersions extends EfsElement {
 
   /** Load more (or its Try again): the public tier from `next`, up to the budget. */
   async #more(before: ReadState): Promise<void> {
-    const { efs, subject, lens } = this;
+    const { efs, subject } = this;
     if (!efs || !subject || before.public.status !== 'present') return;
     const controller = new AbortController();
     this.#controller?.abort();
@@ -178,11 +194,8 @@ export class EfsFileVersions extends EfsElement {
     this.#busy.set('more');
     this.dataset.reading = '';
     try {
-      const read = await this.#reader();
-      const next = await readMore(read, efs, subject, before, {
-        ...(lens ? { lens } : {}),
-        signal,
-      });
+      const { read, opts } = await this.#reader(signal);
+      const next = await readMore(read, efs, subject, before, opts);
       if (signal.aborted) return;
       const now = next.public.status === 'present' ? next.public.rows.length : had;
       // New rows: focus the first of them. None: focus stays on Load more (still there while
