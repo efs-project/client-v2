@@ -430,7 +430,18 @@ const plansOf = (page: Page, which: 'efs-preview-tag-dialog' | 'efs-topic-tag-di
 
 test('Tag from the Preview: suggestions from the word, a new tag said new, the review names what it creates; then Remove my tag', async ({
   page,
+  browserName,
 }) => {
+  // QUARANTINED in WebKit replay (2026-11-26; docs/design/writes.md "Quarantined"). On CI twice
+  // (main 9d701db, f522ce1) WebKit issued the tag plan's 4-entry reads-contract call (0xd62efcd9)
+  // again at the block after the tag landed, a call the recording has only before it: a replay
+  // miss at finish, with every assertion passing and data-plans 1 per opening (so not a re-plan of
+  // the dialog; a re-read elsewhere). Never reproduced locally (30/30). Chromium and Firefox still
+  // run it, and so does the live job. Lift it once the re-reading reader is found.
+  test.skip(
+    browserName === 'webkit' && CHAIN_MODE === 'replay',
+    'quarantined in WebKit replay: a late re-read after the tag lands (see the comment above)',
+  );
   const chain = await testChain(
     'client-tags-tagging',
     'note.txt at the root by anvil #6; c.txt tagged /cars/tesla by anvil #0.',

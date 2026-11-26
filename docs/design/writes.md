@@ -126,6 +126,10 @@ Unsaved edits (slice H). `edit-drafts.spec.ts`, against the chain like the cases
 - Two recordings of the same order have produced identical call shapes, except where the client itself runs two readers at once: in the reload test's second load, the Preview and the saves check read concurrently from an unchanging chain, so their calls can interleave either way. Replay matches calls by method and parameters, so either order replays. Any other difference is SDK nondeterminism: send the diff to the SDK dev.
 - Recordings are excluded from Biome, so no tool rewrites them.
 
+### Quarantined
+
+- **`tags.spec.ts` "Tag from the Preview…", WebKit replay only** (2026-11-26, per the PM's repeat-flake rule). Twice on CI (main 9d701db, f522ce1), WebKit re-issued the tag plan's 4-entry reads-contract call (`0xd62efcd9`) at the block after the tag landed, which the recording has only before it: a replay miss at finish, every assertion passing. The test's `data-plans` tripwire read 1 per opening both times, so the tag dialog didn't plan again: some other reader re-reads late in WebKit's timing. It never reproduced locally (30 of 30, under load). Chromium and Firefox replay it, and the live job runs it. To lift: find which component issues that read after the save (a CI trace of a failing run would name it), make it wait for the save's effect, and remove the `test.skip`.
+
 ## Bundle
 
 | Chunk | gzip | Loads when |
