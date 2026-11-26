@@ -90,7 +90,10 @@ test('a reload mid-flight is settled from the ledger, wallet-free: Saved · conf
       'Send: the wallet broadcasts, its answer is lost (AMBIGUOUS); the SDK checks the ledger once',
     );
     await expect.poll(() => sends(chain).length).toBe(1);
-    await expect(review).toContainText('Approve in your wallet, then wait for the network');
+    // The lost answer is said at once (the SDK's wallet-answer event, RESPONSE_LOST).
+    await expect(review.locator('[role="status"]')).toContainText(
+      'Checking the network for your save…',
+    );
     // Freeze the page's clock: the SDK's next ledger check waits on a timer, so it can't start.
     // Its first check (already under way) then finishes on its own answers: leave after that.
     await pauseClock(page);

@@ -9,7 +9,7 @@
 // - once the wallet has answered, the banner owns the save.
 
 import type { Efs, Lens, NameCheck } from '@efs/sdk';
-import type { EfsWriter, SequenceProgress } from '@efs/sdk/actions';
+import type { EfsWriter, SequenceOpts, SequenceProgress } from '@efs/sdk/actions';
 import type { CreateFileReview, EntryRef, FolderRef, ParentRef } from '@efs/sdk/files';
 import type { TagPlace, TagReview, TagTarget } from '@efs/sdk/tags';
 import { markEach } from '../../platform/marks.ts';
@@ -25,6 +25,7 @@ import {
   twinStanding,
 } from '../../shell/save-hold.ts';
 import {
+  answerCopy,
   feeScheduleCopy,
   type SaveOutcome,
   saveMessage,
@@ -338,6 +339,8 @@ export class EfsFolderSave extends EfsElement {
     undefined,
   );
   #phase = state<Phase>({ phase: 'closed' });
+  /** What the wallet or its node answered, while the save still checks the ledger. */
+  #answered = state<ReturnType<typeof answerCopy> | undefined>(undefined);
   #controller: AbortController | undefined;
 
   /** Keep it was focused for this removal's review (once: the person may move focus on). */
@@ -725,7 +728,17 @@ export class EfsFolderSave extends EfsElement {
     }
     let progress: SequenceProgress;
     try {
-      progress = again ? await writer.resume(again) : await writer.runSequence(plan.parts);
+      // A wallet's answer (a funds refusal, a lost connection) is said at once, before the SDK's
+      // settle wait (up to 60 s) ends.
+      this.#answered.set(undefined);
+      const opts: SequenceOpts = {
+        onProgress: (_now, event) => {
+          if (event.kind === 'wallet-answer') this.#answered.set(answerCopy(event.reason));
+        },
+      };
+      progress = again
+        ? await writer.resume(again, opts)
+        : await writer.runSequence(plan.parts, opts);
     } catch (error) {
       console.error(error);
       const thrown = thrownOutcome(error);
@@ -1843,6 +1856,7 @@ export class EfsFolderSave extends EfsElement {
         case 'review':
         case 'sending': {
           const sending = s.phase === 'sending';
+          const answered = sending ? this.#answered.get() : undefined;
           const sent = s.sent;
           const { hold, lapsed } = this.#hold(s.request, s.writer, s.plan, sent?.sequenceId);
           const prompts = s.plan.review.prompts;
@@ -1884,7 +1898,9 @@ export class EfsFolderSave extends EfsElement {
               ${
                 sending
                   ? html`<p class="wa-cluster wa-gap-xs" role="status">
-                    <wa-spinner></wa-spinner>${t('review.sending')}
+                    <wa-spinner></wa-spinner>${
+                      answered ? t(answered.id, answered.values) : t('review.sending')
+                    }
                   </p>`
                   : nothing
               }

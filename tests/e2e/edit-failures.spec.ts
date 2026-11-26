@@ -3,8 +3,8 @@
 // send and what it broadcast. Replayed on every PR (all browsers), live in CI's live-chain job,
 // recorded with `pnpm transcripts:record` (see tests/e2e/chain.ts).
 
-import { test } from '@playwright/test';
-import { CHAIN_MODE, testChain } from './chain.ts';
+import { type Page, test } from '@playwright/test';
+import { CHAIN_MODE, type TestChain, testChain } from './chain.ts';
 import {
   DOUBLE_PRESSES,
   editAndConnect,
@@ -363,53 +363,100 @@ test('the file changed under another author: told, then "save over the new versi
   }
 });
 
-test('a wallet short of funds: the gas limit is named, never a cost; funded and proven unsent, Send again saves it once', async ({
+/**
+ * The editing account at 1 wei, then an edit sent: anvil refuses it for insufficient funds after
+ * signing (AMBIGUOUS). The review says so at once, from the SDK's "wallet-answer" event, while the
+ * SDK still checks the ledger for its settle time (60 s; the page clock skips it); then the banner
+ * offers Send again. Returns the banner row.
+ */
+async function refusedForFunds(page: Page, chain: TestChain) {
+  await page.clock.install();
+  await start(page, chain);
+  await chain.control?.setBalance(chain.ids.account as string, 1n);
+  chain.step('the editing account holds 1 wei');
+  await editAndConnect(page, chain, 'Not enough for gas.\n');
+  const review = await openReview(page, chain);
+  await press(review.locator('wa-button.efs-review-send'));
+  chain.step('Send: refused for insufficient funds, after signing (AMBIGUOUS)');
+  await expect.poll(() => sendRequests(chain).length).toBe(1);
+  const gas = chain.sendGas[0];
+  expect(gas, 'the send asked for a gas limit').toBeDefined();
+  // The limit the send asked for, as the person reads it (MF2 isolates the number).
+  const limit = `\\W*${Number(gas).toLocaleString('en-US')}\\W*`;
+  const needs = `Your wallet needs enough to cover the gas limit of ${limit}; a save is charged only the gas it uses\\.`;
+  // Before the settle wait ends: the wallet's answer, said at once.
+  await expect(review.locator('[role="status"]')).toContainText(
+    new RegExp(`${needs} Checking whether it went out`),
+  );
+  await expect(review).not.toContainText('Approve in your wallet, then wait for the network');
+  await chain.idle(300);
+  await page.clock.fastForward(61_000);
+  chain.step('After 61 s: the settle wait ends; the save is IN_FLIGHT, INSUFFICIENT_FUNDS');
+  const funds = save(page, 'funds');
+  await expect(funds).toContainText(new RegExp(`${needs} Add funds, then send it again\\.`));
+  await expect(funds).not.toContainText(/Saved|costs?\b|fail|minutes/i);
+  // In flight: Send again (the same plan), and no Stop (the SDK refuses to stop it).
+  await expect(funds.locator('wa-button.efs-save-continue')).toHaveText('Send again');
+  await expect(funds.locator('wa-button.efs-save-stop')).toHaveCount(0);
+  expect(sendRequests(chain)).toHaveLength(1);
+  if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'nothing went out').toHaveLength(0);
+  return funds;
+}
+
+test('a wallet short of funds: said at once, never as a cost; after a top-up, Send again saves it once with no wait', async ({
   page,
 }) => {
   const chain = await testChain(
     'client-insufficient-funds',
-    "The editing account holds 1 wei (anvil_setBalance, marked). Send: anvil refuses the signed transaction for insufficient funds. The SDK names it (INSUFFICIENT_FUNDS, sdk-v2 4043ce7: in flight until reconcile proves it never went out) and, after its 60 s settle wait (the page clock skips it), the banner says the wallet needs enough to cover the gas limit the send asked for, never that the save costs it. Nothing went out. Then funds are added and the chain passes the plan's deadline and finalizes past it: the banner proves it never went out (EXPIRED), and Send again sends it once: Saved · confirming. Two wallet requests, one broadcast.",
+    "The editing account holds 1 wei (anvil_setBalance, marked). Send: anvil refuses the signed transaction for insufficient funds. The review says at once that the wallet needs enough to cover the gas limit the send asked for (the SDK's wallet-answer event, sdk-v2 f1c5625), never that the save costs it; after the SDK's 60 s settle wait (the page clock skips it) the banner offers Send again. Funds are added; Send again sends the same plan again: Saved · confirming. Two wallet requests, one broadcast.",
   );
   try {
-    await page.clock.install();
-    await start(page, chain);
-    await chain.control?.setBalance(chain.ids.account as string, 1n);
-    chain.step('the editing account holds 1 wei');
-    await editAndConnect(page, chain, 'Not enough for gas.\n');
-    const review = await openReview(page, chain);
-    await press(review.locator('wa-button.efs-review-send'));
-    chain.step('Send: refused for insufficient funds, after signing (AMBIGUOUS)');
-    await expect.poll(() => sendRequests(chain).length).toBe(1);
-    // The refusal came after signing, so the SDK checks the ledger every second for up to its
-    // settle time (60 s) before it answers IN_FLIGHT; until then the review says only this.
-    await expect(review).toContainText('Approve in your wallet, then wait for the network');
+    const funds = await refusedForFunds(page, chain);
+    await chain.control?.setBalance(chain.ids.account as string, 10n ** 19n);
+    chain.step('Funds added');
+    await press(funds.locator('wa-button.efs-save-continue'));
+    chain.step('Send again: the same plan, sent again');
+    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
+    expect(sendRequests(chain)).toHaveLength(2);
+    if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'one went out, once').toHaveLength(1);
+    await chain.idle(500);
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a funds refusal resent too close to its deadline waits for EXPIRED, then Send again plans it anew', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-insufficient-funds-late',
+    "As \"a wallet short of funds\", but by the time Send again is pressed the chain's clock is within a minute of the plan's deadline (control.advance 850, one block). The SDK doesn't send the same plan again (IN_FLIGHT, ALREADY_ATTEMPTED): the banner says it is too close to its deadline, with nothing to press. The chain passes the deadline and finalizes past it; the banner proves it never went out (EXPIRED), and Send again plans it anew and sends it: Saved · confirming. Two wallet requests, one broadcast.",
+  );
+  try {
+    const funds = await refusedForFunds(page, chain);
+    await chain.control?.setBalance(chain.ids.account as string, 10n ** 19n);
+    await chain.control?.advance(850);
+    await chain.control?.mine(1);
+    chain.step("Funds added; the chain is within a minute of the plan's deadline");
+    await press(funds.locator('wa-button.efs-save-continue'));
+    chain.step('Send again: too close to the deadline, the same plan is not sent again');
+    // It sends nothing, yet the SDK answers it AMBIGUOUS and checks the ledger for its settle
+    // time again (60 s; sdk-v2 f1c5625), the banner saying "Checking the network for your save…".
+    await expect(save(page, 'checking')).toBeVisible();
     await chain.idle(300);
     await page.clock.fastForward(61_000);
-    chain.step('After 61 s: the settle wait ends; the save is IN_FLIGHT, INSUFFICIENT_FUNDS');
-    const funds = save(page, 'funds');
-    await expect(funds).toBeVisible();
-    expect(sendRequests(chain)).toHaveLength(1);
-    const gas = chain.sendGas[0];
-    expect(gas, 'the send asked for a gas limit').toBeDefined();
-    // The limit the send asked for, as the person reads it (MF2 isolates the number).
-    const limit = Number(gas).toLocaleString('en-US');
-    await expect(funds).toContainText(
-      new RegExp(
-        `Your wallet needs enough to cover the gas limit of \\W*${limit}\\W*; a save is charged only the gas it uses\\.`,
-      ),
+    chain.step('After 61 s: the settle wait ends; IN_FLIGHT, ALREADY_ATTEMPTED');
+    const late = save(page, 'funds-late');
+    await expect(late).toContainText(
+      'This save is too close to its deadline to send again as it is. Checking that it never went out; then you can send it again.',
     );
-    await expect(funds).not.toContainText(/Saved|costs?\b|fail/i);
-    // In flight until reconcile proves it never went out: nothing to press, and no Stop.
-    await expect(funds.locator('wa-button')).toHaveCount(0);
+    await expect(late.locator('wa-button')).toHaveCount(0);
     // An endpoint that isn't on this computer: no test-chain wait line.
-    await expect(funds.locator('.efs-save-wait')).toHaveCount(0);
-    if (CHAIN_MODE !== 'replay') expect(chain.broadcasts, 'nothing went out').toHaveLength(0);
-    // The person adds funds. Reconcile proves it never went out once a finalized block is past the
-    // plan's deadline (its block time + 900 s): the chain's clock jumps, then 66 blocks.
-    await chain.control?.setBalance(chain.ids.account as string, 10n ** 19n);
-    await chain.control?.advance(901);
+    await expect(late.locator('.efs-save-wait')).toHaveCount(0);
+    expect(sendRequests(chain), 'the wallet was not asked again').toHaveLength(1);
+    await chain.control?.advance(120);
     await chain.control?.mine(66);
-    chain.step('Funds added; the chain passes the deadline and finalizes past it');
+    chain.step('The chain passes the deadline and finalizes past it');
     await page.clock.fastForward(5_000);
     chain.step("After 5 s: the banner's check proves it never went out (EXPIRED)");
     const expired = save(page, 'expired');

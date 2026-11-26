@@ -1,8 +1,9 @@
 import { EfsFault } from '@efs/sdk';
-import type { SequenceProgress } from '@efs/sdk/actions';
+import { type SequenceProgress, WALLET_ANSWER_CODES } from '@efs/sdk/actions';
 import { describe, expect, it } from 'vitest';
 import en from '../ui/messages/en.json' with { type: 'json' };
 import {
+  answerCopy,
   feeScheduleCopy,
   isFault,
   SAVE_MESSAGE,
@@ -71,6 +72,13 @@ const R = {
   // a batch doesn't.
   funds: { code: 'INSUFFICIENT_FUNDS', retry: 'after-reconcile', funds: { gasLimit: 1_152_000n } },
   fundsBatch: { code: 'INSUFFICIENT_FUNDS', retry: 'after-reconcile' },
+  // sdk-v2 f1c5625 (src/actions/send.ts): Send again with under 60 s before the plan's deadline.
+  fundsLate: {
+    code: 'ALREADY_ATTEMPTED',
+    retry: 'after-reconcile',
+    detail:
+      'refused for funds, with under 60 s left before its deadline: it is not sent again as the same plan; once reconcile proves it never went out (EXPIRED), Send again plans it anew',
+  },
   // sdk-v2 4043ce7 (src/actions/schedule.ts): the document's schedule, and the chain's (null: one
   // the SDK doesn't know).
   feeSchedule: {
@@ -225,7 +233,7 @@ describe('saveOutcome', () => {
     expect(saveAction(none)).toBeUndefined();
   });
 
-  it('a wallet short of funds names the gas limit, never a cost, and waits while in flight', () => {
+  it('a wallet short of funds names the gas limit, never a cost, and offers Send again', () => {
     const one = saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.funds) }));
     expect(one).toEqual({ kind: 'funds', gasLimit: 1_152_000n });
     expect(saveMessage(one)).toBe('save.funds');
@@ -235,12 +243,53 @@ describe('saveOutcome', () => {
     expect(batch).toEqual({ kind: 'funds' });
     expect(saveMessage(batch)).toBe('save.fundsNoLimit');
     expect(saveValues(batch, String, String)).toEqual({});
-    // Nothing to press: it can go again only once reconcile proves it never went out (EXPIRED).
-    expect(saveAction(one)).toBeUndefined();
-    for (const id of ['save.funds', 'save.fundsNoLimit'] as const) {
+    // Send again sends the same plan again (sdk-v2 f1c5625): after a top-up it goes at once.
+    expect(saveAction(one)).toBe('send-again');
+    expect(saveAction(batch)).toBe('send-again');
+    for (const id of [
+      'save.funds',
+      'save.fundsNoLimit',
+      'save.fundsChecking',
+      'save.fundsCheckingNoLimit',
+    ] as const) {
       expect(en[id]).toContain('a save is charged only the gas it uses');
-      expect(en[id]).not.toMatch(/costs?\b|fail/i);
+      expect(en[id]).not.toMatch(/costs?\b|fail|minutes/i);
     }
+    expect(en['save.funds']).toContain('Add funds, then send it again.');
+  });
+
+  it('Send again too close to the deadline waits for EXPIRED, with nothing to press', () => {
+    const late = saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.fundsLate) }));
+    expect(late).toEqual({ kind: 'funds-late' });
+    expect(saveMessage(late)).toBe('save.fundsLate');
+    expect(saveAction(late)).toBeUndefined();
+    // A twin still open is the network deciding about that save, not this deadline.
+    expect(saveOutcome(p({ state: 'IN_FLIGHT', reason: reason(R.alreadyAttempted) }))).toEqual({
+      kind: 'checking',
+    });
+  });
+
+  it("a wallet's answer is said at once, for exactly the SDK's four codes", () => {
+    expect([...WALLET_ANSWER_CODES].sort()).toEqual([
+      'INSUFFICIENT_FUNDS',
+      'RESPONSE_LOST',
+      'WALLET_CHAIN_DISCONNECTED',
+      'WALLET_DISCONNECTED',
+    ]);
+    expect(answerCopy(reason(R.funds))).toEqual({
+      id: 'save.fundsChecking',
+      values: { gasLimit: 1_152_000 },
+    });
+    expect(answerCopy(reason(R.fundsBatch))).toEqual({
+      id: 'save.fundsCheckingNoLimit',
+      values: {},
+    });
+    for (const code of ['WALLET_DISCONNECTED', 'WALLET_CHAIN_DISCONNECTED'] as const) {
+      expect(answerCopy({ code, retry: 'after-reconcile' } as never).id).toBe('save.walletLost');
+    }
+    expect(answerCopy({ code: 'RESPONSE_LOST', retry: 'after-reconcile' } as never).id).toBe(
+      'save.checking',
+    );
   });
 
   it("a fee schedule that is not the chain's names both, and nothing was sent", () => {

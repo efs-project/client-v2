@@ -19,6 +19,7 @@ import type { DraftStore } from './drafts.ts';
 import type { NetworkState } from './network-state.ts';
 import { heldMessage, touchesOf, twinStanding } from './save-hold.ts';
 import {
+  answerCopy,
   isFault,
   type SaveAction,
   saveAction,
@@ -87,6 +88,8 @@ export class EfsSavesBanner extends EfsElement {
   #busy = state<string | undefined>(undefined);
   /** While a continued save asks the wallet: "Approve part k of N". */
   #approving = state<{ readonly part: number; readonly total: number } | undefined>(undefined);
+  /** What the wallet or its node answered while this save still checks the ledger. */
+  #answered = state<ReturnType<typeof answerCopy> | undefined>(undefined);
   #notices = state<ReadonlyMap<string, RowNotice>>(new Map());
 
   protected override createRenderRoot() {
@@ -142,6 +145,7 @@ export class EfsSavesBanner extends EfsElement {
     } finally {
       this.#busy.set(undefined);
       this.#approving.set(undefined);
+      this.#answered.set(undefined);
     }
   }
 
@@ -150,8 +154,15 @@ export class EfsSavesBanner extends EfsElement {
       markEach('efs:send');
       return writer.resume(id, {
         onProgress: (now, event) => {
+          if (event.kind === 'wallet-answer') {
+            this.#answered.set(answerCopy(event.reason));
+            return;
+          }
           const first = event.kind === 'wallet-request' ? event.parts[0] : undefined;
-          if (first !== undefined) this.#approving.set({ part: first + 1, total: now.total });
+          if (first !== undefined) {
+            this.#answered.set(undefined);
+            this.#approving.set({ part: first + 1, total: now.total });
+          }
         },
       });
     });
@@ -226,19 +237,21 @@ export class EfsSavesBanner extends EfsElement {
       outcome.kind === 'checking' ||
       outcome.kind === 'wallet-lost' ||
       outcome.kind === 'undone-checking' ||
-      outcome.kind === 'funds';
-    // A reorg, a lost wallet connection or a wallet short of funds is worth a warning while it
-    // settles, with the warning's icon.
+      outcome.kind === 'funds-late';
+    // A reorg, a lost wallet connection or a funds refusal too late to resend is worth a warning
+    // while it settles, with the warning's icon.
     const calm =
       outcome.kind !== 'undone-checking' &&
       outcome.kind !== 'wallet-lost' &&
-      outcome.kind !== 'funds';
+      outcome.kind !== 'funds-late';
     const variant = done || (settling && calm) ? 'success' : 'warning';
     const local = 'network' in this.network && onLocalChain(this.network.network);
     const message = standing ? t(heldMessage(standing, local)) : describeSave(p, this.network, t);
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
+    const answered = this.#busy.get() === p.sequenceId ? this.#answered.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).
-    const canStop = !done && !settling && outcome.kind !== 'abandoned';
+    // A funds refusal is in flight too (Send again resends it): the SDK refuses to stop it.
+    const canStop = !done && !settling && outcome.kind !== 'abandoned' && outcome.kind !== 'funds';
     return html`<wa-callout
       variant=${variant}
       size="small"
@@ -279,11 +292,17 @@ export class EfsSavesBanner extends EfsElement {
         </div>
       </div>
       ${
-        outcome.kind === 'funds' && local
+        outcome.kind === 'funds-late' && local
           ? html`<p class="efs-save-wait">${t('save.fundsWaitLocal')}</p>`
           : nothing
       }
-      ${approving ? html`<p role="status">${t('saves.approvePart', approving)}</p>` : nothing}
+      ${
+        answered
+          ? html`<p role="status">${t(answered.id, answered.values)}</p>`
+          : approving
+            ? html`<p role="status">${t('saves.approvePart', approving)}</p>`
+            : nothing
+      }
       ${
         notice?.kind === 'confirm-abandon'
           ? html`<div class="wa-stack wa-gap-xs efs-save-confirm">
