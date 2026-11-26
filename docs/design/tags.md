@@ -56,6 +56,14 @@
 - **The review says names are public and permanent** ("anyone can see that you named this tag, and every change is kept"), then one approval. Refusals have their own words: UNCHANGED ("You already call this tag that in this language") and NOT_STATED.
 - **After the save completes,** the page reads again and the title shows the name (topicName), with the words below it. A save is held by its (tag, language), the `tags.label` effect's key.
 
+**Built (synonyms, "Same as…" and "Under…"):**
+- **A tag's page shows what the view says is the same as it** (topicSynonyms, in the view's Lens): "Also called" (places joined to this one) and "Same word elsewhere" (the words joined to each of its words, at the word level). Each is a link to its own page, never merged into this one's items: a merged read isn't built in the SDK. Each says who said it ("said by you", "said by 0x12…ab") and "through another tag" when more than one hop away.
+- **Honest about limits:** when the walk stopped at a bound (`limited`) or the index doesn't vouch for every list (not `complete`), it says "There may be more: the search stops after a few steps", and an empty result then says "No other names found so far". UNKNOWN says it can't be read, never "none". An unregistered tag shows nothing.
+- **"Same as…" and "Under…"** (connected): the other tag is picked with the tag picker, without a stance; a tag can't be joined to itself. The review says what it states and that "Saying two tags are the same (or one is under another) is public and permanent: others decide whether to follow you". "Remove mine" plans taking yours back (NOT_STATED: "You haven't said that").
+- **"This tag is under" and "Said to be under this tag"** (topicBroader, one hop each way, no closure; the same limits and words as synonyms): each a link of its own, with who said it.
+- **"Remove" on your own statement** (a "same as" one hop away, or an "under"/"over"): planned exactly as it was said, from the read's `said` (its two sides, by words via topicPath), so the release names the statement's own direction. A join two hops away is about another tag and offers nothing; neither does a row whose sides' words couldn't be read.
+- Saves hold by the tags.same / tags.broader effect's key (topic, other).
+
 **Build order:**
 - The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.
 - The file operations come first (`file-operations.md`).

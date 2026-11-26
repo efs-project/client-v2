@@ -80,6 +80,8 @@ const loadPlanners = async (): Promise<FolderPlanners> => {
     planDeny: tags.planDeny,
     planUntag: tags.planUntag,
     planLabel: tags.planLabel,
+    planSame: tags.planSame,
+    planBroader: tags.planBroader,
     planCreateFile: files.planCreateFile,
     planCreateFolder: files.planCreateFolder,
     planMoveEntries: files.planMoveEntries,
@@ -153,6 +155,17 @@ export type FolderAsk =
       readonly langName: string;
       readonly tag: string;
       readonly current?: string;
+    }
+  /**
+   * "Same as…" or "Under…" another tag, picked in the dialog. A listed statement of the person's
+   * own (`remove`: its two sides as it was said) plans its removal at once.
+   */
+  | {
+      readonly kind: 'join';
+      readonly how: 'same' | 'broader';
+      readonly place: readonly string[];
+      readonly tag: string;
+      readonly remove?: { readonly subject: readonly string[]; readonly other: readonly string[] };
     };
 
 /** An entry the person picked: what it is, and whether it's a folder. */
@@ -332,6 +345,18 @@ export class EfsFolderSave extends EfsElement {
         this.#tagPick.set(undefined);
         this.#phase.set({ phase: 'picking' });
       }
+    } else if (ask.kind === 'join') {
+      const said = ask.remove;
+      if (said) {
+        void this.#plan(
+          ask.how === 'same'
+            ? { kind: 'same', place: said.subject, other: said.other, remove: true }
+            : { kind: 'broader', place: said.subject, broader: said.other, remove: true },
+        );
+      } else {
+        this.#tagPick.set(undefined);
+        this.#phase.set({ phase: 'picking' });
+      }
     } else void this.#plan(this.#request(ask, ''));
   }
 
@@ -435,6 +460,8 @@ export class EfsFolderSave extends EfsElement {
         throw new Error('a tag is planned from the tag picker');
       case 'label':
         return { kind: 'label', place: ask.place, lang: ask.lang, text: name };
+      case 'join':
+        throw new Error('a join is planned from its picker');
     }
   }
 
@@ -464,7 +491,13 @@ export class EfsFolderSave extends EfsElement {
         this.#phase.set({
           phase: 'refused',
           request,
-          refused: [{ index: 0, code: `LABEL_${plan.code}`, name: '' }],
+          refused: [
+            {
+              index: 0,
+              code: `${request.kind === 'label' ? 'LABEL' : 'JOIN'}_${plan.code}`,
+              name: '',
+            },
+          ],
         });
       else if (plan.status === 'REFUSED')
         this.#phase.set({
@@ -510,8 +543,11 @@ export class EfsFolderSave extends EfsElement {
     const statements =
       review.kind === 'efs.tagReview'
         ? review.statements.map((x) => statementKey(review.place.id, x.thing))
-        : review.kind === 'efs.topicStatementReview' && review.purpose === 'label'
-          ? [statementKey(review.subject.id, `label:${review.lang ?? ''}`)]
+        : review.kind === 'efs.topicStatementReview'
+          ? review.purpose === 'label'
+            ? [statementKey(review.subject.id, `label:${review.lang ?? ''}`)]
+            : // The tags.same / tags.broader effect's own key (shell/save-hold.ts).
+              [statementKey(review.subject.id, `tags.${review.purpose}:${review.other?.id ?? ''}`)]
           : undefined;
     return folderHold(
       {
@@ -616,6 +652,78 @@ export class EfsFolderSave extends EfsElement {
       console.warn('could not drop an unsent save', sequenceId, error);
       void this.host.saving.refresh();
     }
+  }
+
+  /**
+   * "Same as…" / "Under…": the other tag, picked as a tag's place is (suggestions from its last
+   * word), with no stance. Review plans the statement; "Remove mine" plans taking yours back.
+   */
+  #joinPicking(ask: Extract<FolderAsk, { kind: 'join' }>) {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const reader = this.host.saving.availability.get().status === 'READY';
+    const words = this.#tagPick.get()?.words;
+    const self =
+      words !== undefined &&
+      words.length === ask.place.length &&
+      words.every((w, i) => w === ask.place[i]);
+    const ready = reader && words !== undefined && !self;
+    const plan = (remove: boolean) => {
+      if (!words || self) return;
+      void this.#plan(
+        ask.how === 'same'
+          ? { kind: 'same', place: ask.place, other: words, ...(remove ? { remove } : {}) }
+          : { kind: 'broader', place: ask.place, broader: words, ...(remove ? { remove } : {}) },
+      );
+    };
+    return html`<efs-files-tag-picker
+        .efs=${this.efs}
+        .translator=${this.host.translator}
+        .stances=${false}
+        .pathLabel=${t(ask.how === 'same' ? 'files.join.samePath' : 'files.join.underPath', {
+          tag: ask.tag,
+        })}
+        @efs-tag-change=${(event: Event) =>
+          this.#tagPick.set((event as CustomEvent<TagPick>).detail)}
+      ></efs-files-tag-picker>
+      ${self ? html`<p class="efs-folder-name-error" role="alert">${t('files.join.self')}</p>` : nothing}
+      ${
+        reader
+          ? nothing
+          : html`<wa-callout variant="neutral" size="small">
+              <span slot="icon">${appIcon('wallet')}</span>
+              <p>${t('files.save.connect')}</p>
+            </wa-callout>`
+      }
+      <wa-button slot="footer" appearance="outlined" @click=${() => this.#close()}
+        >${t('review.cancel')}</wa-button
+      >
+      ${
+        reader
+          ? html`<wa-button
+                slot="footer"
+                appearance="outlined"
+                variant="danger"
+                class="efs-join-remove"
+                ?disabled=${!ready}
+                @click=${() => plan(true)}
+                >${t('files.join.removeMine')}</wa-button
+              >
+              <wa-button
+                slot="footer"
+                variant="brand"
+                class="efs-join-review"
+                ?disabled=${!ready}
+                @click=${() => plan(false)}
+                >${t('files.save.review')}</wa-button
+              >`
+          : html`<wa-button
+              slot="footer"
+              variant="brand"
+              class="efs-folder-connect"
+              @click=${() => this.host.saving.requestWallet()}
+              >${t('files.save.connectButton')}</wa-button
+            >`
+      }`;
   }
 
   /** The tag picker: where the tag goes, and whether it applies; Review plans it. */
@@ -1124,6 +1232,29 @@ export class EfsFolderSave extends EfsElement {
         <p class="efs-quiet efs-hide-reach">${t('files.hide.reach')}</p>`;
       }
       case 'efs.topicStatementReview': {
+        if (ask.kind === 'join') {
+          // A link between tags: what it says (or that yours goes), and that others decide.
+          const same = r.purpose === 'same';
+          const args = {
+            tag: pathText(r.subject.kind === 'topic' ? r.subject.words : []),
+            other: pathText(r.other?.words ?? []),
+          };
+          return html`<p class="efs-label-says">
+              ${t(
+                r.remove
+                  ? same
+                    ? 'files.join.sameRemoveReview'
+                    : 'files.join.underRemoveReview'
+                  : same
+                    ? 'files.join.sameReview'
+                    : 'files.join.underReview',
+                args,
+              )}
+            </p>
+            <p class="efs-quiet efs-label-public">
+              ${t(same ? 'files.join.samePublic' : 'files.join.underPublic')}
+            </p>`;
+        }
         // A tag's name: what it says (or that it goes), and that names are public.
         if (ask.kind !== 'label') return nothing;
         const args = { tag: ask.tag, lang: ask.langName };
@@ -1183,7 +1314,11 @@ export class EfsFolderSave extends EfsElement {
                         ? 'files.tag.title'
                         : ask?.kind === 'label'
                           ? 'files.label.title'
-                          : 'files.remove.title';
+                          : ask?.kind === 'join'
+                            ? ask.how === 'same'
+                              ? 'files.join.sameTitle'
+                              : 'files.join.underTitle'
+                            : 'files.remove.title';
     const many = (ask?.kind === 'remove' || ask?.kind === 'move') && ask.entries.length > 1;
     const first =
       ask?.kind === 'remove' || ask?.kind === 'move' ? ask.entries[0]?.entry : undefined;
@@ -1214,6 +1349,7 @@ export class EfsFolderSave extends EfsElement {
         case 'picking':
           if (ask.kind === 'move') body = this.#picking(ask);
           else if (ask.kind === 'tag') body = this.#tagPicking(ask);
+          else if (ask.kind === 'join') body = this.#joinPicking(ask);
           break;
         case 'planning':
           body = html`<p class="wa-cluster wa-gap-xs" role="status">
@@ -1438,9 +1574,16 @@ export class EfsFolderSave extends EfsElement {
                                   ? s.request.kind === 'label' && s.request.remove
                                     ? 'files.label.remove'
                                     : 'files.label.yes'
-                                  : s.plan.review.kind === 'efs.tagReview'
-                                    ? TAG_SEND[tagStance(s.plan.review)]
-                                    : 'review.send',
+                                  : ask.kind === 'join'
+                                    ? (s.request.kind === 'same' || s.request.kind === 'broader') &&
+                                      s.request.remove
+                                      ? 'files.join.removeMine'
+                                      : ask.how === 'same'
+                                        ? 'files.join.sameYes'
+                                        : 'files.join.underYes'
+                                    : s.plan.review.kind === 'efs.tagReview'
+                                      ? TAG_SEND[tagStance(s.plan.review)]
+                                      : 'review.send',
                       )}</wa-button
                     >`
             }`;

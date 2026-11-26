@@ -63,11 +63,25 @@ export class EfsTagPicker extends EfsElement {
     efs: { attribute: false },
     translator: { attribute: false },
     view: { attribute: false },
+    stances: { attribute: false },
+    pathLabel: { attribute: false },
   };
   declare efs: Efs | undefined;
   declare translator: Translator;
   /** Unused today: suggestions show the global figure only (Lens counts wait for the SDK). */
   declare view: TopicView | undefined;
+  /**
+   * Whether to offer "Applies" / "Not this" (a tag); off when picking another tag for "Same as…"
+   * or "Under…", where the stance is the action itself. Default on.
+   */
+  declare stances: boolean;
+  /** The path field's label in place of "Tag path" (a message already translated). */
+  declare pathLabel: string | undefined;
+
+  constructor() {
+    super();
+    this.stances = true;
+  }
 
   #text = state('');
   #stance = state<'tag' | 'deny'>('tag');
@@ -177,7 +191,7 @@ export class EfsTagPicker extends EfsElement {
     return html`<div class="wa-stack wa-gap-s efs-tag-picker">
       <wa-input
         class="efs-tag-path"
-        label=${t('files.tag.pathLabel')}
+        label=${this.pathLabel ?? t('files.tag.pathLabel')}
         hint=${t('files.tag.pathHint')}
         autocomplete="off"
         spellcheck="false"
@@ -226,7 +240,12 @@ export class EfsTagPicker extends EfsElement {
               ? html`<p class="efs-quiet">${t('files.tag.suggestionsUnavailable')}</p>`
               : nothing
       }
-      <wa-radio-group
+      ${this.stances ? this.#stanceGroup(t) : nothing}
+    </div>`;
+  }
+
+  #stanceGroup(t: Translator['t']) {
+    return html`<wa-radio-group
         class="efs-tag-stance"
         label=${t('files.tag.stanceLabel')}
         orientation="horizontal"
@@ -240,7 +259,6 @@ export class EfsTagPicker extends EfsElement {
       >
         <wa-radio value="tag">${t('files.tag.applies')}</wa-radio>
         <wa-radio value="deny">${t('files.tag.notThis')}</wa-radio>
-      </wa-radio-group>
-    </div>`;
+      </wa-radio-group>`;
   }
 }

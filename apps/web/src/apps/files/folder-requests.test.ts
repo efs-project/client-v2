@@ -109,6 +109,8 @@ describe('planRequest', () => {
     planUnhideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planHideEntries: vi.fn(async () => ({ status: 'PLANNED' })),
     planLabel: vi.fn(async () => ({ status: 'PLANNED' })),
+    planSame: vi.fn(async () => ({ status: 'PLANNED' }) as unknown),
+    planBroader: vi.fn(async () => ({ status: 'PLANNED' })),
     planTag: vi.fn(async () => ({ status: 'PLANNED' })),
     planDeny: vi.fn(async () => ({ status: 'PLANNED' })),
     planUntag: vi.fn(async () => ({ status: 'PLANNED' })),
@@ -194,6 +196,62 @@ describe('planRequest', () => {
     expect(calls[1]?.[2]).toEqual({ topic: place, lang: 'en', remove: true });
     expect(placesOf({ kind: 'label', place, lang: 'en', text: 'x' })).toEqual([]);
     expect(withoutIndices({ kind: 'label', place, lang: 'en', text: 'x' }, [0])).toBeUndefined();
+  });
+
+  it('"Same as…" and "Under…" plan the statement as picked; a plain removal only as stated', async () => {
+    const p = planners();
+    const place = ['cars', 'tesla'];
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'same', place, other: ['auto', 'tesla'] },
+      lens,
+      signal,
+    );
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'broader', place, broader: ['vehicles'] },
+      lens,
+      signal,
+    );
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'same', place, other: ['x'], remove: true },
+      lens,
+      signal,
+    );
+    const same = p.planSame.mock.calls as unknown as unknown[][];
+    expect(same[0]?.[2]).toEqual({ topic: place, other: ['auto', 'tesla'] });
+    expect(same[1]?.[2]).toEqual({ topic: place, other: ['x'], remove: true });
+    expect(same).toHaveLength(2);
+    expect((p.planBroader.mock.calls as unknown as unknown[][])[0]?.[2]).toEqual({
+      topic: place,
+      broader: ['vehicles'],
+    });
+    expect(placesOf({ kind: 'same', place, other: ['x'] })).toEqual([]);
+  });
+
+  it('a listed removal is planned once, exactly as it was said (no guessing the direction)', async () => {
+    const p = planners();
+    await planRequest(
+      p as unknown as FolderPlanners,
+      efs,
+      writer,
+      { kind: 'same', place: ['auto', 'tesla'], other: ['cars', 'tesla'], remove: true },
+      lens,
+      signal,
+    );
+    expect(p.planSame).toHaveBeenCalledTimes(1);
+    expect((p.planSame.mock.calls as unknown as unknown[][])[0]?.[2]).toEqual({
+      topic: ['auto', 'tesla'],
+      other: ['cars', 'tesla'],
+      remove: true,
+    });
   });
 
   it("Block hides someone else's entry through planHideEntries, in the view's Lens", async () => {
@@ -378,6 +436,8 @@ describe('copy', () => {
     // A tag's name: its own words, never a tag's.
     expect(refusalMessage('LABEL_UNCHANGED')).toBe('files.label.unchanged');
     expect(refusalMessage('LABEL_NOT_STATED')).toBe('files.label.notStated');
+    expect(refusalMessage('JOIN_UNCHANGED')).toBe('files.join.unchanged');
+    expect(refusalMessage('JOIN_NOT_STATED')).toBe('files.join.notStated');
     // The tag release's restore and unhide refusals.
     expect(refusalMessage('NEVER_BOUND')).toBe('files.refused.neverBound');
     expect(refusalMessage('HISTORY_UNKNOWN')).toBe('files.refused.historyUnknown');

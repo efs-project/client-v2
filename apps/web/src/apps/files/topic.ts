@@ -42,6 +42,7 @@ import {
   readFileNames,
   readMyLabel,
   readTopicName,
+  readWords,
 } from './names.ts';
 import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
@@ -49,15 +50,20 @@ import { readerOf } from './object-kind.ts';
 import type { LinkState } from './target.ts';
 import {
   aboutCount,
+  type BroaderState,
   badWord,
   DEFAULT_TOPIC_VIEW,
   emptyLine,
   filedBelow,
+  fromBroader,
   fromPlacesPage,
+  fromSynonyms,
   fromTopicPage,
+  type JoinRow,
   type PlacesState,
   pathText,
   rowWho,
+  type SynonymsState,
   sections,
   shownPlaces,
   TOPIC_VIEWS,
@@ -199,6 +205,10 @@ export class EfsFilesTopic extends EfsElement {
    * them): a string, null when they have none, undefined until read (or not connected).
    */
   #mine = state<string | null | undefined>(undefined);
+  /** Tags said to be the same as this one, under the view's Lens (topicSynonyms), when read. */
+  #synonyms = state<SynonymsState | undefined>(undefined);
+  /** "Under" and "Over" (topicBroader), under the view's Lens, when read. */
+  #broader = state<BroaderState | undefined>(undefined);
   /** "Tags under this one": newest first (the junk rule and the Lens tiers wait on the SDK). */
   #children = state<PlacesState | undefined>(undefined);
   #showAll = state(false);
@@ -324,6 +334,8 @@ export class EfsFilesTopic extends EfsElement {
     this.#showAll.set(false);
     this.#segments.set(undefined);
     this.#mine.set(undefined);
+    this.#synonyms.set(undefined);
+    this.#broader.set(undefined);
     this.#names.set(new Map());
     if (place.status === 'home') {
       void loadChecksum()
@@ -390,6 +402,8 @@ export class EfsFilesTopic extends EfsElement {
           const mine = await readMyLabel(efs, place.segments, reader, this.#lang(), signal);
           if (!signal.aborted) this.#mine.set(mine);
         }
+        if (!signal.aborted) await this.#readSynonyms(efs, place.segments, lens, signal);
+        if (!signal.aborted) await this.#readBroader(efs, place.segments, lens, signal);
       }
     } catch (error) {
       if (signal.aborted) return;
@@ -553,6 +567,230 @@ export class EfsFilesTopic extends EfsElement {
                 : nothing
             : nothing
       }
+    </section>`;
+  }
+
+  /**
+   * "Also called" and "Same word elsewhere": the tags the Lens says are the same as this one, and
+   * each joined place's words (topicPath), one read after another.
+   */
+  async #readSynonyms(
+    efs: Efs,
+    words: readonly string[],
+    lens: Lens | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { topicPath, topicSynonyms } = await import('@efs/sdk/tags');
+    const result = await topicSynonyms(efs, words, { ...(lens ? { lens } : {}), signal }).catch(
+      () => undefined,
+    );
+    if (signal.aborted) return;
+    if (!result) {
+      this.#synonyms.set({ phase: 'unknown' });
+      return;
+    }
+    const found =
+      result.status === 'PRESENT'
+        ? await readWords(
+            efs,
+            topicPath,
+            [
+              ...result.places.map((p) => p.id),
+              ...result.places.flatMap((p) => [p.said.subject, p.said.other]),
+            ],
+            signal,
+          )
+        : new Map();
+    if (signal.aborted) return;
+    this.#synonyms.set(fromSynonyms(result, found));
+  }
+
+  /** "Under" and "Over": the tags this one is said to be under, and those said to be under it. */
+  async #readBroader(
+    efs: Efs,
+    words: readonly string[],
+    lens: Lens | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { topicBroader, topicPath } = await import('@efs/sdk/tags');
+    const result = await topicBroader(efs, words, { ...(lens ? { lens } : {}), signal }).catch(
+      () => undefined,
+    );
+    if (signal.aborted) return;
+    if (!result) {
+      this.#broader.set({ phase: 'unknown' });
+      return;
+    }
+    const rows = result.status === 'PRESENT' ? [...result.broader, ...result.narrower] : [];
+    const found = await readWords(
+      efs,
+      topicPath,
+      rows.flatMap((r) => [r.id, r.said.subject, r.said.other]),
+      signal,
+    );
+    if (signal.aborted) return;
+    this.#broader.set(fromBroader(result, found));
+  }
+
+  /** Who said two tags are the same: you, or their author's short form. */
+  #saidBy(author: string, t: Translator['t']) {
+    const efs = verifiedEfs(this.host.reader.get());
+    const reader = readerOf(this.host);
+    const mine =
+      efs && reader && efs.lens.principalOf(reader as never).toLowerCase() === author.toLowerCase();
+    return mine
+      ? t('files.synonyms.saidByYou')
+      : t('files.synonyms.saidBy', { who: authorLabel(efs, author) });
+  }
+
+  /** A tag's link, as a row: opens that tag's own page (nothing is merged into this one). */
+  #synonymLink(words: readonly string[] | null, id: string) {
+    const label = words ? pathText(words) : shortId(id);
+    if (!words) {
+      return html`<span class="efs-entry-open">
+        ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="ltr">${label}</span>
+      </span>`;
+    }
+    return html`<button
+      type="button"
+      class="efs-entry-open"
+      @click=${() => {
+        try {
+          this.host.openLink(linkOf({ kind: 'topic', segments: words, words }));
+        } catch (error) {
+          console.error(error);
+        }
+      }}
+    >
+      ${appIcon('tag')} <span class="efs-entry-name" translate="no" dir="auto">${label}</span>
+    </button>`;
+  }
+
+  /**
+   * "Remove" on a statement of the person's own, one hop away (one two hops away is about another
+   * tag): planned exactly as it was said (`said`, both sides by words).
+   */
+  #removeJoin(
+    place: Extract<PlaceLink, { status: 'topic' }>,
+    how: 'same' | 'broader',
+    row: JoinRow,
+    t: Translator['t'],
+  ) {
+    const efs = verifiedEfs(this.host.reader.get());
+    const reader = readerOf(this.host);
+    const mine =
+      efs &&
+      reader &&
+      efs.lens.principalOf(reader as never).toLowerCase() === row.author.toLowerCase();
+    if (!mine || row.hops !== 1 || !row.said || this.host.saving.hosting.shared) return nothing;
+    const said = row.said;
+    const shown = row.words ? pathText(row.words) : shortId(row.id);
+    return html`<wa-button
+      size="s"
+      appearance="plain"
+      class="efs-synonym-remove"
+      @click=${() => this.#join(place, how, said)}
+      >${appIcon(
+        'xmark',
+        t(how === 'same' ? 'files.join.removeFor' : 'files.join.removeUnderFor', { other: shown }),
+      )}</wa-button
+    >`;
+  }
+
+  /** One related tag's row: its link, who said it, and Remove when it's yours. */
+  #joinRow(
+    place: Extract<PlaceLink, { status: 'topic' }>,
+    how: 'same' | 'broader',
+    row: JoinRow,
+    t: Translator['t'],
+  ) {
+    return html`<li class="efs-entry efs-synonym" data-hops=${row.hops}>
+      ${this.#synonymLink(row.words, row.id)}
+      <span class="efs-entry-meta efs-quiet">
+        <span>${this.#saidBy(row.author, t)}</span>
+        ${row.hops > 1 ? html`<span>${t('files.synonyms.through')}</span>` : nothing}
+      </span>
+      ${this.#removeJoin(place, how, row, t)}
+    </li>`;
+  }
+
+  /** "Under" and "Over", each a link of its own (one hop: no closure). */
+  #broaderSection(place: Extract<PlaceLink, { status: 'topic' }>, t: Translator['t']) {
+    const s = this.#broader.get();
+    if (!s) return nothing;
+    if (s.phase === 'unknown') {
+      return html`<section class="wa-stack wa-gap-2xs efs-topic-broader" data-section="broader">
+        <p class="efs-quiet">${t('files.broader.unknown')}</p>
+      </section>`;
+    }
+    if (s.broader.length === 0 && s.narrower.length === 0) {
+      return s.more
+        ? html`<section class="wa-stack wa-gap-2xs efs-topic-broader" data-section="broader">
+            <p class="efs-quiet efs-broader-more">${t('files.broader.noneYet')}</p>
+          </section>`
+        : nothing;
+    }
+    const group = (
+      kind: 'under' | 'over',
+      heading: 'files.broader.under' | 'files.broader.over',
+      rows: readonly JoinRow[],
+    ) =>
+      rows.length === 0
+        ? nothing
+        : html`<div class="wa-stack wa-gap-3xs" data-group=${kind}>
+            <h4 class="efs-topic-heading">${t(heading)}</h4>
+            <ul class="efs-entries" role="list">
+              ${rows.map((r) => this.#joinRow(place, 'broader', r, t))}
+            </ul>
+          </div>`;
+    return html`<section class="wa-stack wa-gap-2xs efs-topic-broader" data-section="broader">
+      ${group('under', 'files.broader.under', s.broader)}
+      ${group('over', 'files.broader.over', s.narrower)}
+      ${s.more ? html`<p class="efs-quiet efs-broader-more">${t('files.broader.more')}</p>` : nothing}
+    </section>`;
+  }
+
+  #synonymsSection(place: Extract<PlaceLink, { status: 'topic' }>, t: Translator['t']) {
+    const s = this.#synonyms.get();
+    if (!s) return nothing;
+    if (s.phase === 'unknown') {
+      return html`<section class="wa-stack wa-gap-2xs efs-topic-synonyms" data-section="synonyms">
+        <p class="efs-quiet">${t('files.synonyms.unknown')}</p>
+      </section>`;
+    }
+    if (s.places.length === 0 && s.words.length === 0) {
+      // Nothing found: said only when the search couldn't prove there's nothing.
+      return s.more
+        ? html`<section class="wa-stack wa-gap-2xs efs-topic-synonyms" data-section="synonyms">
+            <p class="efs-quiet efs-synonyms-more">${t('files.synonyms.noneYet')}</p>
+          </section>`
+        : nothing;
+    }
+    return html`<section class="wa-stack wa-gap-2xs efs-topic-synonyms" data-section="synonyms">
+      ${
+        s.places.length > 0
+          ? html`<h4 class="efs-topic-heading">${t('files.synonyms.title')}</h4>
+              <ul class="efs-entries" role="list">
+                ${s.places.map((p) => this.#joinRow(place, 'same', p, t))}
+              </ul>`
+          : nothing
+      }
+      ${
+        s.words.length > 0
+          ? html`<h4 class="efs-topic-heading">${t('files.synonyms.words')}</h4>
+              ${s.words.map(
+                (w) => html`<div class="wa-stack wa-gap-3xs efs-synonym-word">
+                  <p class="efs-quiet">
+                    ${t('files.synonyms.wordIs', { word: w.word })}
+                  </p>
+                  <ul class="efs-entries" role="list">
+                    ${w.synonyms.map((x) => this.#joinRow(place, 'same', x, t))}
+                  </ul>
+                </div>`,
+              )}`
+          : nothing
+      }
+      ${s.more ? html`<p class="efs-quiet efs-synonyms-more">${t('files.synonyms.more')}</p>` : nothing}
     </section>`;
   }
 
@@ -881,7 +1119,37 @@ export class EfsFilesTopic extends EfsElement {
         @click=${() => this.#name(place)}
         ><span slot="start">${appIcon('pen-to-square')}</span>${t('files.label.button')}</wa-button
       >
+      <wa-button
+        size="s"
+        appearance="outlined"
+        class="efs-topic-same"
+        @click=${() => this.#join(place, 'same')}
+        >${t('files.join.sameButton')}</wa-button
+      >
+      <wa-button
+        size="s"
+        appearance="outlined"
+        class="efs-topic-under"
+        @click=${() => this.#join(place, 'broader')}
+        >${t('files.join.underButton')}</wa-button
+      >
     </div>`;
+  }
+
+  /** "Same as…" / "Under…": another tag, picked in the dialog (planSame / planBroader). */
+  #join(
+    place: Extract<PlaceLink, { status: 'topic' }>,
+    how: 'same' | 'broader',
+    remove?: JoinRow['said'],
+  ): void {
+    const dialog = this.querySelector<EfsFolderSave>('efs-files-folder-save.efs-topic-tag-dialog');
+    dialog?.open({
+      kind: 'join',
+      how,
+      place: place.segments,
+      tag: pathText(place.segments),
+      ...(remove ? { remove } : {}),
+    });
   }
 
   #controls(place: PlaceLink, t: Translator['t']) {
@@ -930,6 +1198,8 @@ export class EfsFilesTopic extends EfsElement {
         notice ??
         html`${this.#controls(place, t)}
           ${place.status === 'topic' ? this.#childrenSection(place, t) : nothing}
+          ${place.status === 'topic' ? this.#synonymsSection(place, t) : nothing}
+          ${place.status === 'topic' ? this.#broaderSection(place, t) : nothing}
           ${s ? this.#list(s, place, t) : nothing}`
       }
     </div>`;

@@ -19,7 +19,10 @@ export type FolderPlanners = Pick<
   | 'planUnhideEntries'
   | 'planHideEntries'
 > &
-  Pick<typeof import('@efs/sdk/tags'), 'planTag' | 'planDeny' | 'planUntag' | 'planLabel'>;
+  Pick<
+    typeof import('@efs/sdk/tags'),
+    'planTag' | 'planDeny' | 'planUntag' | 'planLabel' | 'planSame' | 'planBroader'
+  >;
 
 export type FolderRequest =
   | { readonly kind: 'createFolder'; readonly folder: ParentRef; readonly name: string }
@@ -81,6 +84,23 @@ export type FolderRequest =
       readonly place: readonly string[];
       readonly lang: string;
       readonly text?: string;
+      readonly remove?: boolean;
+    }
+  /**
+   * "Same as…": this tag is the same as `other` (or, with `remove`, the person's own statement of
+   * it goes; a listed one is named as it was said, `said` in the read).
+   */
+  | {
+      readonly kind: 'same';
+      readonly place: readonly string[];
+      readonly other: readonly string[];
+      readonly remove?: boolean;
+    }
+  /** "Under…": this tag is narrower than `broader` (or, with `remove`, that statement goes). */
+  | {
+      readonly kind: 'broader';
+      readonly place: readonly string[];
+      readonly broader: readonly string[];
       readonly remove?: boolean;
     };
 
@@ -146,7 +166,9 @@ export function placesOf(
       return known(r.entries.map((e) => at(e.folder, e.name)));
     case 'tag':
     case 'label':
-      // A tag (or a tag's name) is a statement about a tag or an address, never a folder entry:
+    case 'same':
+    case 'broader':
+      // A tag (or a tag's name, or a link between tags) is a statement about a tag or an address, never a folder entry:
       // it holds no name.
       return [];
   }
@@ -237,6 +259,20 @@ export function planRequest(
           : { topic: r.place, lang: r.lang, text: r.text ?? '' },
         o,
       );
+    case 'same':
+      return planners.planSame(
+        efs,
+        writer,
+        { topic: r.place, other: r.other, ...(r.remove ? { remove: true } : {}) },
+        o,
+      );
+    case 'broader':
+      return planners.planBroader(
+        efs,
+        writer,
+        { topic: r.place, broader: r.broader, ...(r.remove ? { remove: true } : {}) },
+        o,
+      );
   }
 }
 
@@ -294,6 +330,9 @@ const REFUSAL: Readonly<Record<string, MessageId>> = {
   // A tag's name (planLabel answers with these codes, named apart from a tag's own).
   LABEL_UNCHANGED: 'files.label.unchanged',
   LABEL_NOT_STATED: 'files.label.notStated',
+  // "Same as…" and "Under…".
+  JOIN_UNCHANGED: 'files.join.unchanged',
+  JOIN_NOT_STATED: 'files.join.notStated',
 };
 
 /** The words for a refusal code; an unknown code is shown raw, never as success. */

@@ -103,6 +103,27 @@ export async function readMyLabel(
   return answer?.status === 'ABSENT_PROVEN' ? null : undefined;
 }
 
+/**
+ * Each topic's words (topicPath), read once per id and one after another (replays keep one order):
+ * null where they couldn't be read.
+ */
+export async function readWords(
+  efs: Efs,
+  topicPath: typeof import('@efs/sdk/tags').topicPath,
+  ids: readonly string[],
+  signal: AbortSignal,
+): Promise<Map<string, readonly string[] | null>> {
+  const found = new Map<string, readonly string[] | null>();
+  for (const raw of ids) {
+    const id = raw.toLowerCase();
+    if (found.has(id)) continue;
+    const path = await topicPath(efs, raw as never, { signal }).catch(() => undefined);
+    if (signal.aborted) break;
+    found.set(id, path?.status === 'PRESENT' ? path.words : null);
+  }
+  return found;
+}
+
 /** A language's name in the reader's own language ("English"), else its tag ("en"). */
 export function languageName(lang: string, locale: string): string {
   try {
