@@ -762,3 +762,92 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     await chain.finish();
   }
 });
+
+test('Kind filter on a tag and its word page: Files, Folders, Addresses and Other, each said with what it left out', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-kinds',
+    'At /cars/models, anvil #0 tags c.txt (a file), pics/ (a folder) and anvil #5 (an address).',
+  );
+  const kind = (value: string) => page.locator(`wa-option[value="${value}"]`);
+  const names = () => topic(page).locator('.efs-topic-row .efs-entry-name').allTextContents();
+  try {
+    await chain.actAs?.(5, async ({ account }) => ({ account5: account }));
+    const five = chain.ids.account5 as `0x${string}`;
+    await chain.actAs?.(0, async ({ files, root, lens, writer, efs, save }) => {
+      const tags = await import('@efs/sdk/tags');
+      const file = (
+        (await save(
+          await files.planCreateFile(efs, writer, {
+            folder: root,
+            name: 'c.txt',
+            content: new TextEncoder().encode('c\n'),
+            lens,
+          }),
+        )) as { file: { subject: `0x${string}` } }
+      ).file;
+      const pics = (
+        (await save(
+          await files.planCreateFolder(efs, writer, { folder: root, name: 'pics', lens }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      await save(
+        await tags.planTag(efs, writer, {
+          topic: ['cars', 'models'],
+          targets: [
+            { kind: 'file', subject: file.subject },
+            pics,
+            { kind: 'address', address: five },
+          ],
+        }),
+      );
+    });
+    await open(page, chain, './#/r/testnet/cars/models');
+    await expect(topic(page).locator('.efs-topic-row')).toHaveCount(3);
+    await settled(page);
+    chain.step('/cars/models: a file, a folder and an address, all shown');
+
+    await topic(page).locator('wa-select.efs-topic-kind').click();
+    await kind('file').click();
+    await expect(topic(page).locator('.efs-topic-row')).toHaveCount(1);
+    await expect(topic(page).locator('.efs-topic-filtered')).toContainText(
+      /2\W+other entries hidden by the filter/,
+    );
+    await settled(page);
+    chain.step('Files: only the file; the other two are said as hidden by the filter');
+
+    await topic(page).locator('wa-select.efs-topic-kind').click();
+    await kind('address').click();
+    await expect(topic(page).locator('.efs-topic-row')).toHaveCount(1);
+    expect(await names()).toEqual([expect.stringMatching(/^0x/)]);
+    await settled(page);
+    chain.step('Addresses: only the address, its own choice');
+
+    await topic(page).locator('wa-select.efs-topic-kind').click();
+    await kind('other').click();
+    await expect(topic(page).locator('.efs-topic-filtered')).toContainText(
+      /3\W+other entries hidden by the filter/,
+    );
+    await expect(topic(page).locator('.efs-topic-row')).toHaveCount(0);
+    // Things were left out: never "Nothing is tagged here".
+    await expect(topic(page).locator('.efs-topic-empty')).toHaveCount(0);
+    await settled(page);
+    chain.step('Other: nothing of another app here; said as filtered, never as "nothing tagged"');
+
+    // The word page's groups take the same filter.
+    await go(page, '#/r/testnet/models');
+    const group = page.locator('efs-files-word .efs-word-group', { hasText: '/cars/models' });
+    await expect(group.locator('.efs-entry')).toHaveCount(3);
+    await settled(page);
+    await page.locator('efs-files-word wa-select.efs-topic-kind').click();
+    await kind('folder').click();
+    await expect(group.locator('.efs-entry')).toHaveCount(1);
+    await expect(group.locator('.efs-entry')).toContainText('pics');
+    await settled(page);
+    await chain.idle(500);
+    chain.step('The word page models: its /cars/models group, filtered to Folders, shows pics');
+  } finally {
+    await chain.finish();
+  }
+});
