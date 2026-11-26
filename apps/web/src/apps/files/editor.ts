@@ -43,6 +43,7 @@ import {
   twinStanding,
 } from '../../shell/save-hold.ts';
 import {
+  answerCopy,
   feeScheduleCopy,
   type SaveOutcome,
   saveMessage,
@@ -98,6 +99,8 @@ type Phase =
       readonly plan: Planned;
       readonly writer: EfsWriter;
       readonly approving?: { readonly part: number; readonly total: number };
+      /** What the wallet or its node answered, while the save still checks the ledger. */
+      readonly answer?: ReturnType<typeof answerCopy>;
     }
   /** The send threw: it may or may not have gone out. The banner settles it. */
   | { readonly phase: 'unconfirmed'; readonly noJournal: boolean }
@@ -424,6 +427,11 @@ export class EfsFileEditor extends EfsElement {
   #progressOpts(plan: Planned, writer: EfsWriter): SequenceOpts {
     return {
       onProgress: (now, event) => {
+        // Said at once, before the SDK's settle wait (up to 60 s) ends.
+        if (event.kind === 'wallet-answer') {
+          this.#phase.set({ phase: 'sending', plan, writer, answer: answerCopy(event.reason) });
+          return;
+        }
         const first = event.kind === 'wallet-request' ? event.parts[0] : undefined;
         if (first !== undefined && now.total > 1) {
           this.#phase.set({
@@ -853,7 +861,11 @@ export class EfsFileEditor extends EfsElement {
         ${
           s.phase === 'sending'
             ? html`<p class="wa-cluster wa-gap-xs" role="status"><wa-spinner></wa-spinner>${
-                s.approving ? t('saves.approvePart', s.approving) : t('review.sending')
+                s.answer
+                  ? t(s.answer.id, s.answer.values)
+                  : s.approving
+                    ? t('saves.approvePart', s.approving)
+                    : t('review.sending')
               }</p>`
             : nothing
         }

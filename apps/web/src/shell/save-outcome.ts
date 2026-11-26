@@ -11,7 +11,7 @@
 // Continue is offered only when the same plan can go on: by code (a declined part, a wallet
 // switched away) or, for codes this version doesn't name, by retry "transient"/"after-reconcile".
 
-import type { SequenceProgress } from '@efs/sdk/actions';
+import type { SequenceProgress, WalletAnswerReason } from '@efs/sdk/actions';
 import type { MessageId } from '../ui/i18n.ts';
 
 export type SaveOutcome =
@@ -78,11 +78,17 @@ export type SaveOutcome =
     }
   /**
    * The wallet can't cover the transaction's gas limit (INSUFFICIENT_FUNDS, sdk-v2 4043ce7). The
-   * refusal comes after signing, so the save stays in flight until reconcile proves it never went
-   * out; then it is EXPIRED and Send again resumes it. `gasLimit` is set for a single send, never
+   * save stays in flight, and Send again sends the same plan again (sdk-v2 f1c5625), so it can
+   * never land twice: after a top-up it goes at once. `gasLimit` is set for a single send, never
    * for a batch. A save is charged only the gas it uses: never say it costs `gasLimit`.
    */
   | { readonly kind: 'funds'; readonly gasLimit?: bigint }
+  /**
+   * Send again after a funds refusal, with under a minute left before the plan's deadline: the
+   * same plan isn't sent again (IN_FLIGHT, ALREADY_ATTEMPTED, no twin). It waits until reconcile
+   * proves it never went out (EXPIRED); then Send again plans it anew. Nothing to press meanwhile.
+   */
+  | { readonly kind: 'funds-late' }
   /**
    * The deployment document's fee schedule isn't this chain's (UNSUPPORTED_PROFILE with
    * `reason.feeSchedule`). Nothing was sent. `chain` is null for a schedule the SDK doesn't know.
@@ -141,7 +147,9 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
             ? reason?.funds
               ? { kind: 'funds', gasLimit: reason.funds.gasLimit }
               : { kind: 'funds' }
-            : { kind: 'checking' };
+            : code === 'ALREADY_ATTEMPTED' && !reason?.twin
+              ? { kind: 'funds-late' }
+              : { kind: 'checking' };
     case 'ABANDONED':
       return { kind: 'abandoned' };
     case 'PARTIAL':
@@ -218,6 +226,30 @@ function otherwise(p: SequenceProgress, code: string, retry: string | undefined)
     : { kind: 'not-sent', code, canRetry: sameAgain(retry) };
 }
 
+/**
+ * What a "wallet-answer" progress event says while the save still checks the ledger (sdk-v2
+ * f1c5625): the wallet or its node answered and the send may have gone out. Shown at once, in
+ * place of "Approve in your wallet, then wait for the network…", before the settle wait (up to
+ * 60 s) ends. Exactly the SDK's WALLET_ANSWER_CODES.
+ */
+export function answerCopy(reason: WalletAnswerReason): {
+  readonly id: MessageId;
+  readonly values: Record<string, string | number>;
+} {
+  switch (reason.code) {
+    case 'INSUFFICIENT_FUNDS':
+      return reason.funds
+        ? { id: 'save.fundsChecking', values: { gasLimit: Number(reason.funds.gasLimit) } }
+        : { id: 'save.fundsCheckingNoLimit', values: {} };
+    case 'WALLET_DISCONNECTED':
+    case 'WALLET_CHAIN_DISCONNECTED':
+      return { id: 'save.walletLost', values: {} };
+    default:
+      // RESPONSE_LOST, and any code a later SDK adds to the list: it may have gone out.
+      return { id: 'save.checking', values: {} };
+  }
+}
+
 /** The copy that names both fee schedules (a send refused, or a plan that never was). */
 export function feeScheduleCopy(fee: {
   readonly document: string;
@@ -271,6 +303,7 @@ export const SAVE_MESSAGE: Readonly<Record<SaveOutcome['kind'], MessageId>> = {
   'wallet-mismatch': 'save.walletMismatch',
   'too-large': 'save.tooLarge',
   funds: 'save.funds',
+  'funds-late': 'save.fundsLate',
   'fee-schedule': 'save.feeSchedule',
   busy: 'save.busy',
   'no-journal': 'save.noJournal',
@@ -349,6 +382,7 @@ export function saveAction(o: SaveOutcome): SaveAction | undefined {
     case 'undone':
     case 'expired':
     case 'not-through':
+    case 'funds':
       return 'send-again';
     case 'changed':
     case 'stale':
