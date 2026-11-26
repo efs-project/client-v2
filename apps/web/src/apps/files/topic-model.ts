@@ -19,6 +19,7 @@ import type {
   Related,
   SynonymsResult,
   TopicCursor,
+  TopicItemsOpts,
   TopicPage,
   TopicRow,
   TopicView,
@@ -27,6 +28,46 @@ import type {
 /** The views, in the order the control offers them. Everyone is the default for tags (D11). */
 export const TOPIC_VIEWS: readonly TopicView[] = ['mine', 'everyone', 'raw'];
 export const DEFAULT_TOPIC_VIEW: TopicView = 'everyone';
+
+/** What a tag's row is (the SDK's ThingKind, through the options it's asked by). */
+type ThingKind = NonNullable<TopicItemsOpts['kinds']>[number];
+
+/**
+ * A tag's list, by what its things are (the SDK filters: a short page may read on). Files take a
+ * file's versions too (a tag on one version is a tag on the file; the row says "this version");
+ * Other is another app's subjects and tags. Addresses stand on their own: tagging an address, and
+ * attaching to one, are first-class.
+ */
+export type TopicKindFilter = 'all' | 'file' | 'folder' | 'address' | 'other';
+
+export const TOPIC_KIND_FILTERS: readonly TopicKindFilter[] = [
+  'all',
+  'file',
+  'folder',
+  'address',
+  'other',
+];
+
+/** topicItems' options for a filter: its kinds, with the exact tier where subjects must be told apart. */
+export function topicKindOpts(filter: TopicKindFilter): {
+  readonly kinds?: readonly ThingKind[];
+  readonly kindsExact?: true;
+} {
+  switch (filter) {
+    case 'all':
+      return {};
+    case 'file':
+      // "file" turns the exact tier on: a created subject counts only if it is a file.
+      return { kinds: ['file', 'revision'] };
+    case 'folder':
+      return { kinds: ['folder'] };
+    case 'address':
+      return { kinds: ['address'] };
+    case 'other':
+      // Exact, so a created subject that is a file isn't counted as another app's.
+      return { kinds: ['other', 'topic'], kindsExact: true };
+  }
+}
 
 export type TopicListState =
   | { readonly phase: 'loading' }
@@ -39,6 +80,8 @@ export type TopicListState =
       readonly next?: TopicCursor;
       /** Past the cursor's memory, repeats may slip through: said, never hidden. */
       readonly dedupBounded: boolean;
+      /** Things the kind filter left out, over every page read (counts.filtered). */
+      readonly filtered: number;
       readonly more: 'idle' | 'loading' | 'failed';
     }
   /** Nothing decided: never an empty list. */
@@ -68,6 +111,7 @@ export function fromTopicPage(page: TopicPage, before?: Page): TopicListState {
       finished: page.finished,
       ...(page.next && !page.finished ? { next: page.next } : {}),
       dedupBounded: (before?.dedupBounded ?? false) || page.dedup.state === 'BOUNDED',
+      filtered: (before?.filtered ?? 0) + (page.counts.filtered ?? 0),
       more: 'idle',
     };
   }
@@ -105,6 +149,8 @@ export function sections(rows: readonly TopicRow[]): TopicSections {
  */
 export function emptyLine(s: TopicListState): 'none' | 'noneYet' | undefined {
   if (s.phase !== 'page' || s.rows.length > 0) return undefined;
+  // Things the filter left out: "nothing is tagged here" would be false; the filter's note says it.
+  if (s.finished && s.filtered > 0) return undefined;
   return s.finished ? 'none' : 'noneYet';
 }
 

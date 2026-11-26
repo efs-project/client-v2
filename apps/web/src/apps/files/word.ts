@@ -29,6 +29,7 @@ import type { FolderNav } from './navigation.ts';
 import { readerNotice } from './notice.ts';
 import { readerOf } from './object-kind.ts';
 import {
+  kindControl,
   openThing,
   type PlaceLink,
   type PlaceOpened,
@@ -46,7 +47,9 @@ import {
   type PlacesState,
   pathText,
   sections,
+  type TopicKindFilter,
   type TopicListState,
+  topicKindOpts,
 } from './topic-model.ts';
 
 const loadTags = async () => import('@efs/sdk/tags');
@@ -77,6 +80,8 @@ export class EfsFilesWord extends EfsElement {
   declare plain: { set(canonical: string | undefined): void };
 
   #view = state<TopicView>(DEFAULT_TOPIC_VIEW);
+  /** What kind of things each place's items show (the tag page's filter, per group). */
+  #kind = state<TopicKindFilter>('all');
   #places = state<PlacesState | undefined>(undefined);
   #groups = state<ReadonlyMap<string, Group>>(new Map());
   #refused = state<Extract<TopicListState, { phase: 'badWord' }> | undefined>(undefined);
@@ -96,8 +101,9 @@ export class EfsFilesWord extends EfsElement {
       const efs = verifiedEfs(this.host.reader.get());
       const place = this.place.get();
       const view = this.#view.get();
+      const kind = this.#kind.get();
       const reader = readerOf(this.host);
-      const key = efs && place ? `${place.canonical}|${view}|${reader ?? ''}` : undefined;
+      const key = efs && place ? `${place.canonical}|${view}|${kind}|${reader ?? ''}` : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => void this.#load(efs, place, view, reader));
@@ -181,7 +187,14 @@ export class EfsFilesWord extends EfsElement {
         .topicItems(
           efs,
           { kind: 'topic', id: row.topic },
-          { view, ...(lens ? { lens } : {}), below: true, rows: GROUP_ROWS, signal },
+          {
+            view,
+            ...(lens ? { lens } : {}),
+            below: true,
+            rows: GROUP_ROWS,
+            ...topicKindOpts(this.#kind.get()),
+            signal,
+          },
         )
         .catch(() => undefined);
       if (signal.aborted) return;
@@ -444,7 +457,12 @@ export class EfsFilesWord extends EfsElement {
         }`;
     }
     return html`<div class="wa-stack wa-gap-s efs-topic efs-word">
-      ${header} ${viewControl(t, this.#view.get(), (view) => this.#view.set(view))} ${body}
+      ${header}
+      <div class="wa-cluster wa-gap-m efs-topic-controls">
+        ${viewControl(t, this.#view.get(), (view) => this.#view.set(view))}
+        ${kindControl(t, this.#kind.get(), (kind) => this.#kind.set(kind))}
+      </div>
+      ${body}
     </div>`;
   }
 }

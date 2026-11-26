@@ -66,8 +66,11 @@ import {
   type SynonymsState,
   sections,
   shownPlaces,
+  TOPIC_KIND_FILTERS,
   TOPIC_VIEWS,
+  type TopicKindFilter,
   type TopicListState,
+  topicKindOpts,
 } from './topic-model.ts';
 import { authorLabel, shortId } from './who.ts';
 
@@ -83,6 +86,34 @@ export interface PlaceOpened {
 
 const loadTags = async () => import('@efs/sdk/tags');
 const loadChecksum = async () => (await import('@efs/sdk')).checksumAddress;
+
+const KIND_LABEL: Readonly<Record<TopicKindFilter, MessageId>> = {
+  all: 'files.filter.all',
+  file: 'files.filter.files',
+  folder: 'files.filter.folders',
+  address: 'files.filter.addresses',
+  other: 'files.filter.other',
+};
+
+/** "Kind": the same control as a folder's filter, with addresses as their own choice. */
+export function kindControl(
+  t: Translator['t'],
+  kind: TopicKindFilter,
+  onChange: (kind: TopicKindFilter) => void,
+) {
+  return html`<wa-select
+    class="efs-entries-filter efs-topic-kind"
+    size="s"
+    label=${t('files.filter.label')}
+    .value=${kind}
+    @change=${(event: Event) => {
+      const value = (event.target as HTMLSelectElement).value as TopicKindFilter;
+      if (TOPIC_KIND_FILTERS.includes(value) && value !== kind) onChange(value);
+    }}
+  >
+    ${TOPIC_KIND_FILTERS.map((k) => html`<wa-option value=${k}>${t(KIND_LABEL[k])}</wa-option>`)}
+  </wa-select>`;
+}
 
 /** What a row's line says about who it's from (empty for an address's own rows). */
 export function whoLine(
@@ -192,6 +223,8 @@ export class EfsFilesTopic extends EfsElement {
 
   #view = state<TopicView>(DEFAULT_TOPIC_VIEW);
   #below = state(true);
+  /** What kind of things the list shows (the SDK filters; `all` asks for none). */
+  #kind = state<TopicKindFilter>('all');
   #state = state<TopicListState | undefined>(undefined);
   #count = state<CountState | undefined>(undefined);
   /** Each topic a roll-up row was filed under, by id: its words, or null if they couldn't be read. */
@@ -231,8 +264,10 @@ export class EfsFilesTopic extends EfsElement {
       const place = this.place.get();
       const view = this.#view.get();
       const below = this.#below.get();
+      const kind = this.#kind.get();
       const reader = readerOf(this.host);
-      const key = efs && place ? `${place.canonical}|${view}|${below}|${reader ?? ''}` : undefined;
+      const key =
+        efs && place ? `${place.canonical}|${view}|${below}|${kind}|${reader ?? ''}` : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => void this.#load(efs, place, view, below, reader));
@@ -373,6 +408,7 @@ export class EfsFilesTopic extends EfsElement {
           view,
           ...(lens ? { lens } : {}),
           ...(rollup ? { below: true } : {}),
+          ...topicKindOpts(this.#kind.get()),
           signal,
         }),
         count(false),
@@ -438,6 +474,8 @@ export class EfsFilesTopic extends EfsElement {
         view,
         ...(lens ? { lens } : {}),
         ...(below ? { below: true } : {}),
+        // The filter is part of the listing (its cursor): the same one, page after page.
+        ...topicKindOpts(this.#kind.get()),
         cursor: s.next,
         signal: run.signal,
       });
@@ -921,6 +959,12 @@ export class EfsFilesTopic extends EfsElement {
       <span class="efs-entry-meta efs-quiet">
         <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined, this.host.names.get())}</span>
         ${filed}
+        ${
+          // A tag on one version is a tag on the file: said, so it isn't mistaken for the file's HEAD.
+          row.kind === 'revision'
+            ? html`<span class="efs-topic-version">${t('files.topic.thisVersion')}</span>`
+            : nothing
+        }
       </span>
     </li>`;
   }
@@ -978,6 +1022,13 @@ export class EfsFilesTopic extends EfsElement {
           ${
             s.dedupBounded
               ? html`<p class="efs-quiet efs-topic-repeats">${t('files.topic.repeats')}</p>`
+              : nothing
+          }
+          ${
+            s.filtered > 0
+              ? html`<p class="efs-quiet efs-topic-filtered">
+                  ${t('files.filter.hidden', { count: s.filtered })}
+                </p>`
               : nothing
           }
           ${
@@ -1161,6 +1212,7 @@ export class EfsFilesTopic extends EfsElement {
   #controls(place: PlaceLink, t: Translator['t']) {
     return html`<div class="wa-cluster wa-gap-m efs-topic-controls">
       ${viewControl(t, this.#view.get(), (view) => this.#view.set(view))}
+      ${kindControl(t, this.#kind.get(), (kind) => this.#kind.set(kind))}
       ${
         place.status === 'topic'
           ? html`<wa-radio-group

@@ -64,6 +64,14 @@
 - **"Remove" on your own statement** (a "same as" one hop away, or an "under"/"over"): planned exactly as it was said, from the read's `said` (its two sides, by words via topicPath), so the release names the statement's own direction. A join two hops away is about another tag and offers nothing; neither does a row whose sides' words couldn't be read.
 - Saves hold by the tags.same / tags.broader effect's key (topic, other).
 
+**Built (kind filter on a tag and its word page, sdk-v2 141729a):**
+- **"Kind"**, the same control as a folder's filter: All, Files, Folders, Addresses, Other. The SDK filters (`kinds`; the chain lists every kind), so a short page may read on, and the filter is part of the listing's cursor.
+  - **Files** = files and their versions (`file`, `revision`; the exact tier, so a created subject counts only when its creator's HEAD names a Files revision). A tag on one version is a tag on the file; its row says "this version".
+  - **Addresses** stand on their own: tagging an address ("this address is a phishing site") and attaching to one are first-class.
+  - **Other** = another app's things and tags (`other`, `topic`, exact).
+- **What it left out is said** as a folder's filter says it: "N other entries hidden by the filter" (`counts.filtered`, over every page read). A finished list the filter emptied never reads "Nothing is tagged here".
+- **The word page** applies the same filter to each place's items.
+
 **Build order:**
 - The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.
 - The file operations come first (`file-operations.md`).

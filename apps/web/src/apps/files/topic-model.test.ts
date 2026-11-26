@@ -22,6 +22,7 @@ import {
   sections,
   shownPlaces,
   type TopicListState,
+  topicKindOpts,
 } from './topic-model.ts';
 
 const PLACE = `0x${'aa'.repeat(32)}`;
@@ -41,7 +42,10 @@ const row = (n: number, decider: TopicRow['decider'], topic = PLACE): TopicRow =
     entry: BigInt(n),
   }) as TopicRow;
 
-const page = (rows: TopicRow[], o: { finished?: boolean; bounded?: boolean } = {}): TopicPage =>
+const page = (
+  rows: TopicRow[],
+  o: { finished?: boolean; bounded?: boolean; filtered?: number } = {},
+): TopicPage =>
   ({
     kind: 'efs.topicPage',
     status: 'PRESENT',
@@ -53,7 +57,7 @@ const page = (rows: TopicRow[], o: { finished?: boolean; bounded?: boolean } = {
     ...(o.finished ? {} : { next: { v: 1, query: '0x', next: '0x', seen: [], bounded: false } }),
     coverage: 'PARTIAL',
     dedup: { state: o.bounded ? 'BOUNDED' : 'COMPLETE', dropped: 0 },
-    counts: {},
+    counts: o.filtered === undefined ? {} : { filtered: o.filtered },
   }) as unknown as TopicPage;
 
 const unknown = { kind: 'efs.topicPage', status: 'UNKNOWN', reason: { code: 'RPC_ERROR' } };
@@ -352,5 +356,26 @@ describe('synonyms and "Under": shown as links, never merged; honest about where
     });
     const unknown = { kind: 'efs.broader', status: 'UNKNOWN' } as unknown as BroaderResult;
     expect(fromBroader(unknown, new Map())).toEqual({ phase: 'unknown' });
+  });
+});
+
+describe('the kind filter: the SDK filters, and the page says what it left out', () => {
+  it('maps each choice to its kinds: files take versions, other is exact, addresses stand alone', () => {
+    expect(topicKindOpts('all')).toEqual({});
+    expect(topicKindOpts('file')).toEqual({ kinds: ['file', 'revision'] });
+    expect(topicKindOpts('folder')).toEqual({ kinds: ['folder'] });
+    expect(topicKindOpts('address')).toEqual({ kinds: ['address'] });
+    expect(topicKindOpts('other')).toEqual({ kinds: ['other', 'topic'], kindsExact: true });
+  });
+
+  it('counts what the filter left out over every page, and never calls a filtered list empty', () => {
+    const first = fromTopicPage(page([], { finished: false, filtered: 2 }));
+    expect(first.phase === 'page' && first.filtered).toBe(2);
+    expect(emptyLine(first)).toBe('noneYet');
+    const both = fromTopicPage(page([], { finished: true, filtered: 3 }), first as never);
+    expect(both.phase === 'page' && both.filtered).toBe(5);
+    // Finished with things left out: "nothing is tagged here" would be false.
+    expect(emptyLine(both)).toBeUndefined();
+    expect(emptyLine(fromTopicPage(page([], { finished: true })))).toBe('none');
   });
 });
