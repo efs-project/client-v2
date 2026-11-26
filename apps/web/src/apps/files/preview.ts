@@ -1070,9 +1070,16 @@ function badWordReason(detail: string | undefined, t: Translator['t']) {
     : nothing;
 }
 
+// parseLink's `detail` names (sdk-v2 754f6d2): its word grammar's, then the fold's.
 const BAD_WORD_REASONS: Readonly<Record<string, MessageId>> = {
   unfolded: 'files.badWord.unfolded',
   slash: 'files.badWord.slash',
   dot: 'files.badWord.dot',
   control: 'files.badWord.control',
+  'refused-character': 'files.badWord.refusedCharacter',
+  'forbidden-ascii': 'files.badWord.forbiddenAscii',
+  'malformed-utf8': 'files.badWord.malformed',
+  length: 'files.badWord.length',
+  'reserved-tilde': 'files.badWord.reservedTilde',
+  'address-shaped': 'files.badWord.addressShaped',
 };

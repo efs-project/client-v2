@@ -27,6 +27,7 @@ import {
   type TopicListState,
   topicKindOpts,
   viaLine,
+  wordText,
 } from './topic-model.ts';
 
 const PLACE = `0x${'aa'.repeat(32)}`;
@@ -445,5 +446,13 @@ describe('"Include tags that mean the same": a merged page, where each row came 
     expect(
       viaLine({ place: BELOW as `0x${string}`, how: 'same', hops: 1 }, asked, null),
     ).toBeUndefined();
+  });
+});
+
+describe('tag words as shown (wordText, pathText)', () => {
+  it('shows what a word must not hold, never applies it: a bidi override, a zero-width joiner', () => {
+    expect(wordText('a\u202Eb')).toBe('a[U+202E]b');
+    expect(pathText(['cars', 'a\u202Eb\u200Dc'])).toBe('/cars/a[U+202E]b[U+200D]c');
+    expect(pathText(['cars', 'tesla'])).toBe('/cars/tesla');
   });
 });
