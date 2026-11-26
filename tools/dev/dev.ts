@@ -23,6 +23,7 @@ import { type DemoLinks, seedDemo } from './demo.ts';
 import { devIdentity } from './identity.ts';
 import { isSameProcess, processFacts } from './ownership.ts';
 import { type Persona, readyPersonas } from './personas.ts';
+import { startBlockTicker } from './ticker.ts';
 
 const ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
 const STATE_DIR = join(ROOT, '.efs-dev');
@@ -195,6 +196,9 @@ async function start(demo = false): Promise<void> {
     chain = await startFixtureChain(options);
   }
 
+  // A block a second as well as one per transaction, so what waits on later blocks (a save
+  // turning final, 64 blocks behind on anvil; a held save's deadline) moves on a quiet chain.
+  const stopTicker = startBlockTicker(chain.rpcUrl);
   const ledger = String((chain.deployment as { ledger?: unknown }).ledger ?? '');
   // Every persona can send: anvil's unlocked ten, and the rest impersonated and funded.
   const personas = await readyPersonas(chain.rpcUrl, chain.accounts.unlocked);
@@ -227,6 +231,7 @@ async function start(demo = false): Promise<void> {
   try {
     await server.listen();
   } catch (error) {
+    stopTicker();
     await chain.stop();
     throw error;
   }
@@ -248,6 +253,7 @@ async function start(demo = false): Promise<void> {
     if (stopping) return;
     stopping = true;
     console.log('\nStopping…');
+    stopTicker();
     // The chain first: it's the part that would outlive this process.
     await chain.stop().catch((error: unknown) => console.error('the chain did not stop', error));
     await server.close().catch(() => undefined);
@@ -300,6 +306,9 @@ Or add this network to your wallet:
 Import this account (it authored the seeded files, so your edits show in the default view):
   Address:     ${account.address}
   Private key: ${account.privateKey}   <- public test key, never use elsewhere
+
+The chain mines a block a second as well as one per transaction, so a save turns final
+("Saved") about a minute after it confirms.
 
 The chain is fresh on every start. If your wallet then shows stale nonces or activity,
 clear it for this network (MetaMask: Settings > Advanced > Clear activity tab data).
