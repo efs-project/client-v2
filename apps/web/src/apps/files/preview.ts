@@ -1,7 +1,7 @@
 // The Preview pane: one file's verified contents and the evidence for them. All logic is in
 // preview-model.ts; this element only renders its states and the reader session's.
 
-import type { Efs, Lens } from '@efs/sdk';
+import type { Efs, Lens, WordDetail } from '@efs/sdk';
 import type { OpenedFile } from '@efs/sdk/files';
 import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
@@ -1057,15 +1057,13 @@ export class EfsFilesPreview extends EfsElement {
       return html`<wa-callout variant="warning" class="efs-preview-invalid" data-rule=${link.rule}>
         <span slot="icon">${appIcon('triangle-exclamation')}</span>
         ${
-          link.rule === 'bad-word' && link.word !== undefined
+          link.rule === 'bad-word'
             ? html`<p>
                 ${t('files.preview.badWordNamed')}
                 <bdi translate="no" class="efs-bad-word">${visible(wordParts(link.word), t)}</bdi>
                 ${badWordNote(link.detail, t)}
               </p>`
-            : link.rule === 'bad-word'
-              ? html`<p>${t('files.preview.badWordLink')}</p>`
-              : html`<p>
+            : html`<p>
                 ${t('files.preview.invalidLink')}
                 <code translate="no" dir="ltr">${link.rule}</code>
               </p>`
@@ -1131,11 +1129,7 @@ export class EfsFilesPreview extends EfsElement {
   }
 }
 
-/** Why the grammar refused a tag word, from parseLink's `detail` (unknown ones shown as given). */
-function badWordNote(detail: string | undefined, t: Translator['t']) {
-  const id = badWordReason(detail);
-  if (id) return html`<span>(${t(id)})</span>`;
-  return detail
-    ? html`<span>(<code translate="no" dir="ltr">${visible(wordParts(detail), t)}</code>)</span>`
-    : nothing;
+/** Why the grammar refused a tag word, from parseLink's `detail` (a closed WordDetail). */
+function badWordNote(detail: WordDetail, t: Translator['t']) {
+  return html`<span>(${t(badWordReason(detail))})</span>`;
 }
