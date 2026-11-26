@@ -862,3 +862,84 @@ test('Kind filter on a tag and its word page: Files, Folders, Addresses and Othe
     await chain.finish();
   }
 });
+
+test('Include tags that mean the same: off by default; on, rows from related tags say which, a "not this" here wins, and Unfiltered stays its own', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-merged',
+    'anvil #0 (the default view): a.txt at /cars/tesla; b.txt and stray.txt at /autos/tesla, said the same as /cars/tesla, with "not this" for stray.txt at /cars/tesla; c.txt at /cars/tsla, with the word tesla the same as tsla.',
+  );
+  const rows = () => topic(page).locator('.efs-topic-row');
+  const rowFor = (name: string) =>
+    topic(page).locator('.efs-topic-row', {
+      has: page.locator('.efs-entry-name', { hasText: name }),
+    });
+  try {
+    await chain.actAs?.(0, async ({ files, root, lens, writer, efs, save }) => {
+      const tags = await import('@efs/sdk/tags');
+      const file = async (name: string) =>
+        (
+          (await save(
+            await files.planCreateFile(efs, writer, {
+              folder: root,
+              name,
+              content: new TextEncoder().encode(`${name}\n`),
+              lens,
+            }),
+          )) as { file: { subject: `0x${string}` } }
+        ).file;
+      const as = (f: { subject: `0x${string}` }) => ({ kind: 'file', subject: f.subject }) as const;
+      const a = await file('a.txt');
+      const b = await file('b.txt');
+      const c = await file('c.txt');
+      const stray = await file('stray.txt');
+      await save(await tags.planTag(efs, writer, { topic: ['cars', 'tesla'], targets: [as(a)] }));
+      await save(
+        await tags.planTag(efs, writer, { topic: ['autos', 'tesla'], targets: [as(b), as(stray)] }),
+      );
+      await save(await tags.planTag(efs, writer, { topic: ['cars', 'tsla'], targets: [as(c)] }));
+      await save(
+        await tags.planSame(efs, writer, { topic: ['autos', 'tesla'], other: ['cars', 'tesla'] }),
+      );
+      await save(await tags.planSame(efs, writer, { topic: ['tesla'], other: ['tsla'] }));
+      await save(
+        await tags.planDeny(efs, writer, { topic: ['cars', 'tesla'], targets: [as(stray)] }),
+      );
+    });
+    await open(page, chain, './#/r/testnet/cars/tesla');
+    await expect(rows()).toHaveCount(1);
+    await expect(rowFor('a.txt')).toHaveCount(1);
+    await expect(topic(page).locator('wa-switch.efs-topic-merged')).not.toHaveAttribute('checked');
+    await settled(page);
+    chain.step("/cars/tesla, off by default: the tag's own list (a.txt)");
+
+    await topic(page).locator('wa-switch.efs-topic-merged').click();
+    await expect(rowFor('b.txt')).toHaveCount(1, { timeout: 20_000 });
+    await expect(rowFor('c.txt')).toHaveCount(1);
+    await expect(rowFor('a.txt').locator('.efs-topic-via')).toHaveCount(0);
+    await expect(rowFor('b.txt').locator('.efs-topic-via')).toContainText(
+      /same as\W+\/autos\/tesla/,
+    );
+    await expect(rowFor('c.txt').locator('.efs-topic-via')).toContainText(/same word:\W+tsla/);
+    // A "not this" at the page asked for wins over the related tag's yes.
+    await expect(rowFor('stray.txt')).toHaveCount(0);
+    await expect(topic(page).locator('.efs-topic-merged-missing')).toHaveCount(0);
+    await settled(page);
+    chain.step(
+      'On: b.txt (same as /autos/tesla) and c.txt (same word: tsla) join; stray.txt stays out',
+    );
+
+    await radio(page, 'view', 'raw').click();
+    await expect(topic(page).locator('wa-switch.efs-topic-merged')).toHaveAttribute('disabled');
+    await expect(topic(page).locator('.efs-topic-merged-raw')).toContainText(
+      "Unfiltered shows this tag's own list only.",
+    );
+    await expect(rowFor('b.txt')).toHaveCount(0);
+    await settled(page);
+    await chain.idle(500);
+    chain.step("Unfiltered: no merge (no Lens, so no synonyms); the tag's own list");
+  } finally {
+    await chain.finish();
+  }
+});

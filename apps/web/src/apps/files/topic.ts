@@ -17,6 +17,7 @@
 import type { Address, Efs, Lens, Reason } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
 import type {
+  MergedRow,
   SegmentName,
   TagPlace,
   TagTarget,
@@ -56,9 +57,11 @@ import {
   emptyLine,
   filedBelow,
   fromBroader,
+  fromMergedPage,
   fromPlacesPage,
   fromSynonyms,
   fromTopicPage,
+  isMergedCursor,
   type JoinRow,
   type PlacesState,
   pathText,
@@ -71,6 +74,7 @@ import {
   type TopicKindFilter,
   type TopicListState,
   topicKindOpts,
+  viaLine,
 } from './topic-model.ts';
 import { authorLabel, shortId } from './who.ts';
 
@@ -225,6 +229,13 @@ export class EfsFilesTopic extends EfsElement {
   #below = state(true);
   /** What kind of things the list shows (the SDK filters; `all` asks for none). */
   #kind = state<TopicKindFilter>('all');
+  /**
+   * "Include tags that mean the same" (topicItemsMerged): off by default, the tag's own list being
+   * the default view. Never in Unfiltered (no Lens, so no synonyms), never at an address.
+   */
+  #merged = state(false);
+  /** The merge's lists' words (topicPath), by place id: what a row's "same as" names. */
+  #viaWords = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
   #state = state<TopicListState | undefined>(undefined);
   #count = state<CountState | undefined>(undefined);
   /** Each topic a roll-up row was filed under, by id: its words, or null if they couldn't be read. */
@@ -265,9 +276,12 @@ export class EfsFilesTopic extends EfsElement {
       const view = this.#view.get();
       const below = this.#below.get();
       const kind = this.#kind.get();
+      const merged = this.#merged.get();
       const reader = readerOf(this.host);
       const key =
-        efs && place ? `${place.canonical}|${view}|${below}|${kind}|${reader ?? ''}` : undefined;
+        efs && place
+          ? `${place.canonical}|${view}|${below}|${kind}|${merged}|${reader ?? ''}`
+          : undefined;
       if (key === this.#loaded) return;
       this.#loaded = key;
       queueMicrotask(() => void this.#load(efs, place, view, below, reader));
@@ -403,14 +417,19 @@ export class EfsFilesTopic extends EfsElement {
         tags
           .placeCount(efs, target, { ...(below ? { below: true } : {}), signal })
           .catch(() => undefined);
-      const [page, here, deeper] = await Promise.all([
-        tags.topicItems(efs, target, {
-          view,
-          ...(lens ? { lens } : {}),
-          ...(rollup ? { below: true } : {}),
-          ...topicKindOpts(this.#kind.get()),
-          signal,
-        }),
+      const opts = {
+        ...(lens ? { lens } : {}),
+        ...(rollup ? { below: true } : {}),
+        ...topicKindOpts(this.#kind.get()),
+        signal,
+      };
+      const merge = this.#mergedOn(place, view);
+      const [next, here, deeper] = await Promise.all([
+        merge
+          ? tags
+              .topicItemsMerged(efs, target, { view: merge, ...opts })
+              .then((p) => fromMergedPage(p))
+          : tags.topicItems(efs, target, { view, ...opts }).then((p) => fromTopicPage(p)),
         count(false),
         rollup ? count(true) : Promise.resolve(undefined),
       ]);
@@ -424,12 +443,18 @@ export class EfsFilesTopic extends EfsElement {
             }
           : { status: 'unknown' },
       );
-      const next = fromTopicPage(page);
+      this.#viaWords.set(new Map());
       this.#state.set(next);
       // A tag's first rows (or an honest empty or unknown) are on screen: the budget's end point.
       if (place.status === 'topic') markOnce('efs:topic-listed');
       // One after the other, so the reads keep one order (replays depend on it).
       await this.#readPaths(efs, next, signal);
+      if (next.phase === 'page' && next.merged && !signal.aborted) {
+        const { topicPath } = tags;
+        const lists = next.merged.lists.filter((l) => l.how !== 'self').map((l) => l.place);
+        const words = await readWords(efs, topicPath, lists, signal);
+        if (!signal.aborted) this.#viaWords.set(words);
+      }
       if (place.status === 'topic' && !signal.aborted)
         await this.#readChildren(efs, target, signal);
       if (!signal.aborted) await this.#readNames(efs, next, lens, signal);
@@ -469,18 +494,33 @@ export class EfsFilesTopic extends EfsElement {
     this.#state.set({ ...s, more: 'loading' });
     this.dataset.reading = '';
     try {
-      const { topicItems } = await loadTags();
-      const page = await topicItems(efs, this.#target(place), {
-        view,
+      const { topicItems, topicItemsMerged } = await loadTags();
+      const opts = {
         ...(lens ? { lens } : {}),
         ...(below ? { below: true } : {}),
         // The filter is part of the listing (its cursor): the same one, page after page.
         ...topicKindOpts(this.#kind.get()),
-        cursor: s.next,
         signal: run.signal,
-      });
-      if (run.signal.aborted) return;
-      const next = fromTopicPage(page, s);
+      };
+      // A merged listing reads on with its own cursor (its frozen set of lists).
+      const merge = s.merged ? this.#mergedOn(place, view) : undefined;
+      const next =
+        merge && isMergedCursor(s.next)
+          ? fromMergedPage(
+              await topicItemsMerged(efs, this.#target(place), {
+                view: merge,
+                ...opts,
+                cursor: s.next,
+              }),
+              s,
+            )
+          : isMergedCursor(s.next)
+            ? undefined
+            : fromTopicPage(
+                await topicItems(efs, this.#target(place), { view, ...opts, cursor: s.next }),
+                s,
+              );
+      if (run.signal.aborted || !next) return;
       this.#state.set(next);
       await this.#readPaths(efs, next, run.signal);
       if (!run.signal.aborted) await this.#readNames(efs, next, lens, run.signal);
@@ -959,6 +999,7 @@ export class EfsFilesTopic extends EfsElement {
       <span class="efs-entry-meta efs-quiet">
         <span class="efs-topic-who">${whoLine(t, efs, row, me, owner, place.status === 'home' ? [place.address] : undefined, this.host.names.get())}</span>
         ${filed}
+        ${this.#viaLabel(row, place, t)}
         ${
           // A tag on one version is a tag on the file: said, so it isn't mistaken for the file's HEAD.
           row.kind === 'revision'
@@ -1022,6 +1063,18 @@ export class EfsFilesTopic extends EfsElement {
           ${
             s.dedupBounded
               ? html`<p class="efs-quiet efs-topic-repeats">${t('files.topic.repeats')}</p>`
+              : nothing
+          }
+          ${
+            s.merged && s.merged.missing > 0
+              ? html`<p class="efs-quiet efs-topic-merged-missing" role="status">
+                  ${t('files.merged.missing', { count: s.merged.missing })}
+                </p>`
+              : nothing
+          }
+          ${
+            s.merged?.limited
+              ? html`<p class="efs-quiet efs-topic-merged-limited">${t('files.merged.limited')}</p>`
               : nothing
           }
           ${
@@ -1209,10 +1262,50 @@ export class EfsFilesTopic extends EfsElement {
     });
   }
 
+  /** A merged row from another tag: which one ("same as /autos", or "same word: car"). */
+  #viaLabel(row: TopicRow, place: PlaceLink, t: Translator['t']) {
+    if (!('via' in row) || place.status !== 'topic') return nothing;
+    const via = (row as MergedRow).via;
+    const line = viaLine(via, place.segments, this.#viaWords.get().get(via.place.toLowerCase()));
+    if (!line) return nothing;
+    return html`<span class="efs-topic-via" data-how=${via.how}
+      >${
+        line.kind === 'word'
+          ? t('files.merged.viaWord', { word: line.word })
+          : t('files.merged.viaSame', { path: line.path })
+      }</span
+    >`;
+  }
+
+  /** The merged listing's view, when "Include tags that mean the same" applies here; else none. */
+  #mergedOn(place: PlaceLink, view: TopicView): 'mine' | 'everyone' | undefined {
+    if (!this.#merged.get() || place.status !== 'topic' || view === 'raw') return undefined;
+    return view;
+  }
+
   #controls(place: PlaceLink, t: Translator['t']) {
+    const raw = this.#view.get() === 'raw';
     return html`<div class="wa-cluster wa-gap-m efs-topic-controls">
       ${viewControl(t, this.#view.get(), (view) => this.#view.set(view))}
       ${kindControl(t, this.#kind.get(), (kind) => this.#kind.set(kind))}
+      ${
+        place.status === 'topic'
+          ? html`<div class="wa-stack wa-gap-3xs">
+              <wa-switch
+                class="efs-topic-merged"
+                size="s"
+                ?checked=${this.#merged.get() && !raw}
+                ?disabled=${raw}
+                @change=${(event: Event) => {
+                  const on = (event.target as HTMLInputElement).checked;
+                  if (on !== this.#merged.get()) this.#merged.set(on);
+                }}
+                >${t('files.merged.switch')}</wa-switch
+              >
+              ${raw ? html`<p class="efs-quiet efs-topic-merged-raw">${t('files.merged.rawOff')}</p>` : nothing}
+            </div>`
+          : nothing
+      }
       ${
         place.status === 'topic'
           ? html`<wa-radio-group

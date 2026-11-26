@@ -72,6 +72,13 @@
 - **What it left out is said** as a folder's filter says it: "N other entries hidden by the filter" (`counts.filtered`, over every page read). A finished list the filter emptied never reads "Nothing is tagged here".
 - **The word page** applies the same filter to each place's items.
 
+**Built ("Include tags that mean the same", topicItemsMerged, sdk-v2 2fec7e2):**
+- **A switch on a tag's page, off by default:** the tag's own list stays the default view. On, the list merges the tags the view's Lens says are the same (its "same as" joins, and word swaps of the path by a word's synonyms), newest first, one row per thing.
+- **Each row from another tag says which:** "same as /autos/tesla", or for a word swap "same word: tsla" (the words of each list from topicPath). Rows from the tag itself say nothing extra.
+- **A "not this" at the page asked for wins:** a thing someone in the Lens (up to the deciding author) says isn't here stays out, even where a related tag lists it; the SDK enforces it.
+- **Honest about limits:** lists that couldn't be read are always said ("2 related tags couldn't be read, so their items aren't shown"); a bound that cut the set is "There may be more related tags". The kind filter applies to the merged list too, and "Keep looking" reads on with the merge's own cursor.
+- **Not in Unfiltered** (no Lens, so no synonyms): the switch is off there, saying "Unfiltered shows this tag's own list only"; never at an address.
+
 **Build order:**
 - The tag views are built once the SDK's tag reads land on the contracts release, with no stand-in before then.
 - The file operations come first (`file-operations.md`).
