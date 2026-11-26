@@ -19,7 +19,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { FixtureChain } from '@efs/fixture';
 import { createRecorder, createReplay, type RpcTranscript } from '@efs/sdk/testing';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 type FetchLike = Parameters<typeof createRecorder>[0];
 
@@ -266,6 +266,34 @@ async function startChain(): Promise<FixtureChain> {
 
 /** The test chain for one case (`name` keys its transcript). */
 export async function testChain(name: string, note: string): Promise<TestChain> {
+  const startedAt = Date.now();
+  /**
+   * A plain await (not a Playwright call) that names itself if it would outlive the test. A
+   * Playwright call cut by the test timeout reports itself; a plain promise gives only a bare "Test
+   * timeout", and a hang in a `finally` hides even that it was the cleanup (read-floor case (b) on
+   * CI, 2026-11-26). This rejects 1.5 s before the test's own timeout, saying what was waited on.
+   */
+  const within = async <T>(label: string, work: Promise<T>): Promise<T> => {
+    const { timeout } = test.info();
+    if (timeout === 0) return work;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stuck = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `still waiting on ${label} ${Date.now() - startedAt} ms into the test (timeout ${timeout} ms): a plain await, not a Playwright call`,
+            ),
+          ),
+        Math.max(0, timeout - (Date.now() - startedAt) - 1500),
+      );
+    });
+    try {
+      return await Promise.race([work, stuck]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const calls: string[] = [];
   const steps: string[] = [];
   /** Failures of the test's own chain or wallet plumbing: any one fails the test in finish(). */
@@ -359,7 +387,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       return lines;
     };
   } else {
-    const chain = await startChain();
+    const chain = await within('starting the fixture chain (anvil, deploy, seed)', startChain());
     const rpc = anvilRpc(chain.rpcUrl);
     const account = (chain.accounts.unlocked[EDITOR_INDEX] as string).toLowerCase();
     const readme = chain.seed.files.find((f) => f.name === 'readme.txt');
@@ -444,7 +472,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         await rpc('anvil_mine', [`0x${blocks.toString(16)}`]);
       },
       lagBefore: async (tx) => {
-        const receipt = (await rpc('eth_getTransactionReceipt', [tx])) as {
+        const receipt = (await within(
+          `control.lagBefore: the receipt of ${tx}`,
+          rpc('eth_getTransactionReceipt', [tx]),
+        )) as {
           blockNumber?: string;
         } | null;
         if (!receipt?.blockNumber) throw new Error(`no receipt for ${tx}: not mined yet`);
@@ -544,7 +575,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         writeFileSync(`${TRANSCRIPTS}${name}.json`, `${JSON.stringify(transcript, null, 2)}\n`);
         writeFileSync(`${TRANSCRIPTS}${name}.deployment.json`, deployment);
       } finally {
-        await chain.stop();
+        await within('stopping the fixture chain (finish)', chain.stop());
       }
     };
   }
@@ -554,7 +585,18 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     deployment,
     ids,
     walletCalls: calls,
-    control,
+    control: control
+      ? (() => {
+          const c = control;
+          return {
+            automine: (on: boolean) => within(`control.automine(${on})`, c.automine(on)),
+            mine: (blocks: number) => within(`control.mine(${blocks})`, c.mine(blocks)),
+            // Its receipt read is named inside; the rest is synchronous.
+            lagBefore: (tx: string) => c.lagBefore(tx),
+            catchUp: () => c.catchUp(),
+          };
+        })()
+      : undefined,
     dropNextSendResponse() {
       drop.drop = true;
     },
@@ -567,7 +609,12 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
     holdNextSend() {
       let reached: () => void = () => {};
       let release: () => void = () => {};
-      const reachedP = new Promise<void>((resolve) => (reached = resolve));
+      const reachedP = within(
+        'holdNextSend(): a send reaching the wallet',
+        new Promise<void>((resolve) => (reached = resolve)),
+      );
+      // Unobserved until the test awaits it: never an unhandled rejection meanwhile.
+      reachedP.catch(() => undefined);
       const released = new Promise<void>((resolve) => (release = resolve));
       hold = { reached, released };
       holdState = 'armed';
@@ -581,17 +628,31 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
         (window as unknown as { __efsBreakJournal?: boolean }).__efsBreakJournal = false;
       });
     },
-    editAs,
-    actAs,
+    editAs: editAs
+      ? (index, content, opts) =>
+          within(
+            `editAs #${index}`,
+            (editAs as NonNullable<TestChain['editAs']>)(index, content, opts),
+          )
+      : undefined,
+    actAs: actAs
+      ? (index, act) =>
+          within(`actAs #${index}`, (actAs as NonNullable<TestChain['actAs']>)(index, act))
+      : undefined,
     broadcasts,
     rpcSends,
-    seedDemo: () => seedDemo(),
+    seedDemo: () => within('seedDemo (the demo content, from Node)', seedDemo()),
     async idle(ms = 300) {
-      for (;;) {
-        const quiet = Date.now() - lastRpc;
-        if (inFlight === 0 && quiet >= ms) return;
-        await new Promise((resolve) => setTimeout(resolve, Math.max(20, ms - quiet)));
-      }
+      await within(
+        `chain.idle(${ms}): the page's RPC going quiet`,
+        (async () => {
+          for (;;) {
+            const quiet = Date.now() - lastRpc;
+            if (inFlight === 0 && quiet >= ms) return;
+            await new Promise((resolve) => setTimeout(resolve, Math.max(20, ms - quiet)));
+          }
+        })(),
+      );
     },
     step(text) {
       steps.push(text);
