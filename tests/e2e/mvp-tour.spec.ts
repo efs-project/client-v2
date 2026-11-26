@@ -134,6 +134,12 @@ test('the MVP tour: folders and files, a tag from the Preview, an address, kind 
     // 2. A tag from the Preview, typed as "My Notes": saved as /my_notes, then taken back.
     await row(page, 'todo.txt').getByRole('link').click();
     await expect(preview(page).locator('.efs-preview-text')).toContainText('Try the demo');
+    // The file's Tags, open before tagging: they read again once the tag is saved (no reload).
+    const fileTags = preview(page).locator('efs-files-file-tags');
+    const fileTag = (path: string) => fileTags.locator('.efs-file-tag', { hasText: path });
+    await fileTags.locator('summary').click();
+    await expect(fileTag('/notes/todo')).toHaveCount(1);
+    await expect(fileTag('/my_notes')).toHaveCount(0);
     await preview(page).locator('wa-button.efs-preview-tag').click();
     const tagDialog = page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
     await tagDialog.locator('wa-input.efs-tag-path input').fill('My Notes');
@@ -145,25 +151,38 @@ test('the MVP tour: folders and files, a tag from the Preview, an address, kind 
     await tagDialog.locator('wa-button.efs-folder-send').click();
     await expect(tagDialog).not.toHaveAttribute('open');
     await saved('Tag /my_notes');
-    chain.step('Tag todo.txt from the Preview: "My Notes" is saved as /my_notes');
+    const tagged = preview(page).locator('.efs-preview-tagged');
+    await expect(tagged).toContainText(/Tagged\W+\/my_notes/);
+    await expect(fileTag('/my_notes')).toHaveCount(1);
+    await expect(fileTag('/notes/todo')).toHaveCount(1);
+    chain.step(
+      'Tag todo.txt from the Preview: "My Notes" is saved as /my_notes; "Tagged /my_notes", and the open Tags list shows it',
+    );
 
-    await go('#/r/testnet/my_notes');
-    const plain = page.locator('efs-files-word .efs-word-group[data-root="yes"]');
-    await expect(plain).toContainText(/\/my_notes/);
-    await settled();
-    await plain.locator('wa-button.efs-word-open').click();
+    // The notice's "Open the tag": the tag's own list (one word, so not its word's page).
+    await tagged.locator('wa-button.efs-tagged-open').click();
+    await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/my_notes');
     await settled();
     const mine = topic.locator('[data-section="lens"]');
     await expect(mine.locator('.efs-entry-name')).toHaveText('todo.txt');
     await expect(mine).toContainText('tagged by you');
+    // Opened from the list, the file shows beside it with its Tags; taking the tag back there
+    // reads them again too.
+    await mine.locator('.efs-topic-row button.efs-entry-open').first().click();
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('Try the demo');
+    await fileTags.locator('summary').click();
+    await expect(fileTag('/my_notes')).toHaveCount(1);
     await mine.locator('wa-button.efs-topic-untag').click();
     const untag = page.locator('efs-files-folder-save.efs-topic-tag-dialog wa-dialog');
     await expect(untag.locator('.efs-tag-untag')).toContainText('Your tag goes');
     await untag.locator('wa-button.efs-folder-send').click();
     await expect(untag).not.toHaveAttribute('open');
-    await expect(topic.locator('.efs-topic-empty')).toBeVisible({ timeout: 20_000 });
     await saved('Remove my tag');
-    chain.step('The word page my_notes, its plain tag: todo.txt tagged by you; Remove my tag');
+    await expect(fileTag('/my_notes')).toHaveCount(0);
+    await expect(fileTag('/notes/todo')).toHaveCount(1);
+    chain.step(
+      'Open the tag: todo.txt tagged by you; opened beside it, Remove my tag; its Tags no longer list /my_notes',
+    );
 
     // 3. A file at an address: Hal Finney's.
     await go(`#/r/testnet/${ids['demo.address']}`);

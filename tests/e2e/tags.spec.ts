@@ -571,6 +571,44 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
   }
 });
 
+test("a tag saved in another tab shows in the file's open Tags once this tab is visible again", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-tags-other-tab',
+    'note.txt at the root by anvil #6, opened with its Tags open (none yet). Then #6 tags it /later from Node, standing in for another tab, and this tab becomes visible again: its Tags read again and list /later.',
+  );
+  try {
+    await fileAtRoot(chain, 6, 'note.txt', 'note\n');
+    await openRoot(page, chain);
+    await row(page, 'note.txt').locator('.efs-entry-open').click();
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('note');
+    const fileTags = preview(page).locator('efs-files-file-tags');
+    await fileTags.locator('summary').click();
+    await expect(fileTags.locator('.efs-file-tags-empty')).toBeVisible();
+    await settled(page);
+    chain.step("note.txt's Tags, open: none yet");
+
+    // Another tab (here: Node, as the same account) tags the file.
+    await chain.actAs?.(6, async ({ efs, writer, save: done }) => {
+      const tags = await import('@efs/sdk/tags');
+      await done(
+        await tags.planTag(efs, writer, {
+          topic: ['later'],
+          targets: [{ kind: 'file', subject: chain.ids['note.txt@6'] as `0x${string}` }],
+        }),
+      );
+    });
+    // Coming back to this tab: it reads its open tag lists again.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(fileTags.locator('.efs-file-tag', { hasText: '/later' })).toHaveCount(1);
+    await settled(page);
+    chain.step('Tagged /later elsewhere; this tab visible again: its Tags list /later, no reload');
+  } finally {
+    await chain.finish();
+  }
+});
+
 test('Name this tag: your name in your language, said public in the review; the title shows it; then remove it', async ({
   page,
 }) => {
