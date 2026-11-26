@@ -193,3 +193,18 @@ describe('directories: children and a word page', () => {
     expect(aboutCount(place(1, 2n, 3n))).toBe(5n);
   });
 });
+
+describe('names are keyed by the row they were read for (file and tagger)', () => {
+  it("a name read for one tagger's row is never shown on another's row of the same file", async () => {
+    const { nameKey, nameOf } = await import('./names.ts');
+    const file = `0x${'f0'.repeat(32)}`;
+    const byAlice = { thing: file, decider: { kind: 'lens', index: 0, author: ALICE, number: 0 } };
+    const pub = { thing: file.toUpperCase().replace('0X', '0x'), decider: { kind: 'public' } };
+    expect(nameKey(byAlice as never)).not.toBe(nameKey(pub as never));
+    const names = new Map([
+      [nameKey(byAlice as never), { name: { text: "alice's name" } } as never],
+    ]);
+    expect(nameOf(names, byAlice as never)).toBe("alice's name");
+    expect(nameOf(names, pub as never)).toBeUndefined();
+  });
+});

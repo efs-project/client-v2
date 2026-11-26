@@ -20,8 +20,18 @@ const NAMES_PER_CALL = 32;
 export type NameRead = FileNameRow | null;
 
 /**
- * Names for the rows' things that aren't in `known` yet, by thing (lowercase). The row's Lens
- * decider is its tagger; public and Raw rows have none.
+ * A row's name key: the thing and its tagger (the row's Lens decider, if any). A name read for one
+ * tagger's row is never shown on another's: the tagger's own entry is the first choice, so the
+ * same file can be named differently in two rows.
+ */
+export function nameKey(row: Pick<TopicRow, 'thing' | 'decider'>): string {
+  const tagger = row.decider.kind === 'lens' ? row.decider.author.toLowerCase() : '';
+  return `${row.thing.toLowerCase()}|${tagger}`;
+}
+
+/**
+ * Names for the rows not in `known` yet, by nameKey. The row's Lens decider is its tagger; public
+ * and Raw rows have none.
  */
 export async function readFileNames(
   efs: Efs,
@@ -33,38 +43,38 @@ export async function readFileNames(
   const out = new Map<string, NameRead>();
   const wanted = new Map<string, TopicRow>();
   for (const row of rows) {
-    const id = row.thing.toLowerCase();
-    if (!known.has(id) && !wanted.has(id)) wanted.set(id, row);
+    const key = nameKey(row);
+    if (!known.has(key) && !wanted.has(key)) wanted.set(key, row);
   }
   if (wanted.size === 0) return out;
   const { fileNames } = await loadTags();
-  const list = [...wanted.values()];
+  const list = [...wanted.entries()];
   for (let i = 0; i < list.length; i += NAMES_PER_CALL) {
     const batch = list.slice(i, i + NAMES_PER_CALL);
     const answer = await fileNames(
       efs,
-      batch.map((row) => ({
+      batch.map(([, row]) => ({
         file: row.thing,
         ...(row.decider.kind === 'lens' ? { tagger: row.decider.author } : {}),
       })),
       { ...(lens ? { lens } : {}), signal },
     ).catch(() => undefined);
     if (signal.aborted) return out;
-    if (answer?.status === 'PRESENT') {
-      for (const r of answer.rows) out.set(r.file.toLowerCase(), r);
-    }
-    // A failed batch names nothing (null): the rows keep their short ids, never "no name".
-    for (const row of batch) {
-      const id = row.thing.toLowerCase();
-      if (!out.has(id)) out.set(id, null);
-    }
+    // One answer row per input, in order (checked by file): a mismatch names nothing.
+    batch.forEach(([key, row], at) => {
+      const r = answer?.status === 'PRESENT' ? answer.rows[at] : undefined;
+      out.set(key, r && r.file.toLowerCase() === row.thing.toLowerCase() ? r : null);
+    });
   }
   return out;
 }
 
 /** What a row shows for its thing: its name when one was found, else undefined (its short id). */
-export function nameOf(names: ReadonlyMap<string, NameRead>, thing: string): string | undefined {
-  return names.get(thing.toLowerCase())?.name?.text;
+export function nameOf(
+  names: ReadonlyMap<string, NameRead>,
+  row: Pick<TopicRow, 'thing' | 'decider'>,
+): string | undefined {
+  return names.get(nameKey(row))?.name?.text;
 }
 
 /** The reader's languages for labels, most preferred first (BCP 47, lowercased, at most 8). */
