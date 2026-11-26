@@ -26,6 +26,28 @@ import type { MessageId } from '../../ui/i18n.ts';
 /** The most fileVersions calls one click (opening the section, or Load more) makes. */
 export const VERSIONS_CALLS_PER_CLICK = 3;
 
+/** How a click reads: the opened Lens, its abort signal, and (tests only) the entries per call. */
+export interface ReadOpts {
+  readonly lens?: Lens;
+  readonly signal?: AbortSignal;
+  /** fileVersions `limit` (1 to MAX_VERSIONS_PAGE; the SDK's most when absent): see pageLimit. */
+  readonly limit?: number;
+}
+
+/**
+ * The `limit` a click passes: a test chain's devVersionsPage when it is within the SDK's own most
+ * (`max`, MAX_VERSIONS_PAGE, read where the SDK is loaded); else none, the SDK's default. Never a
+ * limit the SDK would refuse as MISUSE, whatever bound the SDK takes up later.
+ */
+export function pageLimit(configured: number | undefined, max: number): number | undefined {
+  return configured !== undefined &&
+    Number.isInteger(configured) &&
+    configured >= 1 &&
+    configured <= max
+    ? configured
+    : undefined;
+}
+
 /** fileVersions, injected so tests can answer it. */
 export type ReadVersions = (
   efs: Efs,
@@ -93,7 +115,7 @@ async function scan(
   read: ReadVersions,
   efs: Efs,
   subject: string,
-  o: { readonly lens?: Lens; readonly signal?: AbortSignal },
+  o: ReadOpts,
   cursor: FileVersionsCursor | undefined,
 ): Promise<Scan> {
   const rows: FileVersion[] = [];
@@ -107,6 +129,7 @@ async function scan(
       { kind: 'file', subject },
       {
         ...(o.lens ? { lens: o.lens } : {}),
+        ...(o.limit ? { limit: o.limit } : {}),
         ...(next ? { cursor: next } : {}),
         ...(o.signal ? { signal: o.signal } : {}),
       },
@@ -149,7 +172,7 @@ export async function readVersions(
   read: ReadVersions,
   efs: Efs,
   subject: string,
-  o: { readonly lens?: Lens; readonly signal?: AbortSignal } = {},
+  o: ReadOpts = {},
 ): Promise<VersionsState> {
   const click = await scan(read, efs, subject, o, undefined);
   const { first, failed } = click;
@@ -189,7 +212,7 @@ export async function readMore(
   efs: Efs,
   subject: string,
   before: ReadState,
-  o: { readonly lens?: Lens; readonly signal?: AbortSignal } = {},
+  o: ReadOpts = {},
 ): Promise<ReadState> {
   const pub = before.public;
   if (pub.status !== 'present' || !pub.next) return before;

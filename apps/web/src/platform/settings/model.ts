@@ -52,6 +52,14 @@ export interface NetworkDefinition {
    * never offer them.
    */
   readonly devAccounts?: readonly DevAccount[];
+  /**
+   * Tests only: the most head-authors list entries one Versions read scans (fileVersions `limit`),
+   * so a short list pages like a long one. Kept only for a network whose RPCs are all on this
+   * computer, as devAccounts; never shown, never in the person's settings. Its upper bound is the
+   * SDK's own MAX_VERSIONS_PAGE, applied where the SDK is loaded (versions-model `pageLimit`): this
+   * module is startup code, which never imports the SDK.
+   */
+  readonly devVersionsPage?: number;
 }
 
 /** The user's replacements for one network's endpoint lists. Absent list = use the defaults. */
@@ -270,6 +278,33 @@ function readDevAccounts(
   return out.length > 0 ? out : undefined;
 }
 
+/** A network's test-only Versions page size, kept only on a local test chain (as devAccounts). */
+function readDevVersionsPage(
+  value: unknown,
+  rpcs: readonly Endpoint[],
+  issues: string[],
+  where: string,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!allLocal(rpcs)) {
+    issues.push(`${where}.devVersionsPage: ignored (only for a local test chain)`);
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    issues.push(`${where}.devVersionsPage: ignored (a whole number, 1 or more)`);
+    return undefined;
+  }
+  return value;
+}
+
+/**
+ * The Versions page size a network asks for now: its test-only one, while every RPC in effect is
+ * on this computer; else undefined (the SDK's own, the most).
+ */
+export function versionsPageOf(network: EffectiveNetwork): number | undefined {
+  return onLocalChain(network) ? network.definition.devVersionsPage : undefined;
+}
+
 /**
  * The dev accounts a network offers right now: its own, while every RPC in effect (the person's
  * edits included) is on this computer; else none. Where they are sent from: the first RPC on.
@@ -399,6 +434,12 @@ export function readConfig(raw: unknown): ConfigRead {
       networks[networks.length - 1] = {
         ...(networks.at(-1) as NetworkDefinition),
         devAccounts: dev,
+      };
+    const page = readDevVersionsPage(item.devVersionsPage, rpcs, issues, item.id);
+    if (page !== undefined)
+      networks[networks.length - 1] = {
+        ...(networks.at(-1) as NetworkDefinition),
+        devVersionsPage: page,
       };
   }
   const defaultNetwork =
