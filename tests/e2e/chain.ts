@@ -19,7 +19,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { FixtureChain } from '@efs/fixture';
 import { createRecorder, createReplay, type RpcTranscript } from '@efs/sdk/testing';
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 type FetchLike = Parameters<typeof createRecorder>[0];
 
@@ -41,6 +41,56 @@ const RPC_ORIGIN = /^(https:\/\/rpc\.example\.net|http:\/\/127\.0\.0\.1:8545)\//
 const EDITOR_INDEX = 6;
 
 type Rpc = (method: string, params?: readonly unknown[]) => Promise<unknown>;
+
+/** One gate of a replay (a recorded write or mark), named so a miss decodes itself. */
+interface Gate {
+  readonly seq: number;
+  readonly label: string;
+  /** Who makes it: the page (its wallet or its RPC), or the test (a Node-side actor, a mine). */
+  readonly owner: string;
+}
+
+const WALLET_WRITES = new Set(['eth_sendTransaction', 'wallet_sendCalls']);
+const RPC_WRITES = new Set(['eth_sendRawTransaction']);
+
+/**
+ * The replay's gates in the order createReplay serves them (sdk-v2 e229ea3, testing/replay.js):
+ * every call, wallet request and mark sorted by `seq` (stable), keeping the wallet's and the RPC's
+ * writes and the marks. finish() checks the count against the SDK's own misses.
+ */
+function gatesOf(t: RpcTranscript): Gate[] {
+  if (!t.calls.some((c) => c.seq !== undefined)) return [];
+  const events: Gate[] = [];
+  t.calls.forEach((c, i) => {
+    for (const req of [c.request].flat() as { method?: string }[]) {
+      if (req?.method && RPC_WRITES.has(req.method)) {
+        events.push({ seq: c.seq ?? i, label: `rpc ${req.method}`, owner: 'the page (its RPC)' });
+      }
+    }
+  });
+  (t.wallet ?? []).forEach((c, i) => {
+    if (!WALLET_WRITES.has(c.method)) return;
+    const from = (c.params as readonly { from?: string }[] | undefined)?.[0]?.from ?? '?';
+    events.push({
+      seq: c.seq ?? i,
+      label: `wallet ${c.method} from ${from}`,
+      owner: 'the page (its wallet request)',
+    });
+  });
+  for (const m of t.marks ?? []) {
+    events.push({
+      seq: m.seq,
+      label: `mark ${JSON.stringify(m.label)}`,
+      owner:
+        m.label === 'rpc eth_sendTransaction'
+          ? "the page (a dev account's RPC send)"
+          : /^(mine|automine)\b/.test(m.label)
+            ? 'the test (chain control)'
+            : 'the test (a Node-side actor)',
+    });
+  }
+  return events.sort((a, b) => a.seq - b.seq);
+}
 
 interface WalletRequest {
   readonly method: string;
@@ -217,6 +267,8 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
   const drop: WalletBehaviour = { drop: false, refuse: new Set(), sends: 0 };
   /** The send to hold, and how to let it go. */
   let hold: { reached: () => void; released: Promise<void> } | undefined;
+  /** Where the last holdNextSend() got to: a stuck test says which side stopped. */
+  let holdState: 'none' | 'armed' | 'reached' | 'released' = 'none';
   /** Pages whose journal breaks once the next send is answered. */
   const breakAfterSend = new Set<Page>();
   const broadcasts: string[] = [];
@@ -252,16 +304,45 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       automine: async (on) => replay.mark(`automine ${on}`),
       mine: async (blocks) => replay.mark(`mine ${blocks}`),
     };
+    const gates = gatesOf(transcript);
     finish = async () => {
       // Every gate never served (a missing write or mark) is a miss too.
+      const served = replay.epoch;
       const misses = replay.finish();
       const extra = Object.values(replay.extraReads).reduce((a, b) => a + b, 0);
       if (extra > 0) console.log(`${name}: ${extra} extra reads forgiven by replay`);
-      if (misses.length > 0) {
-        throw new Error(
-          `replay misses (re-record with pnpm transcripts:record if the client's calls changed):\n${misses.join('\n')}`,
+      // Soft, so the test's own error stays reported beside it (see finish() below).
+      expect
+        .soft(
+          misses.length,
+          `replay misses (re-record with pnpm transcripts:record if the client's calls changed):\n${misses.join('\n')}\n${decode(served, misses).join('\n')}`,
+        )
+        .toBe(0);
+    };
+    /** What a miss needs to be decoded without a trace: which gate, whose, and how far the test got. */
+    const decode = (served: number, misses: readonly string[]): string[] => {
+      const unserved = gates.slice(served);
+      const lines = unserved.map(
+        (g, i) =>
+          `unserved gate ${served + i + 1} of ${gates.length}: seq ${g.seq}, ${g.label}; made by ${g.owner}`,
+      );
+      const never = misses.filter((m) => m.startsWith('never served')).length;
+      if (never !== unserved.length) {
+        lines.push(
+          `(gate list out of step with the SDK's: ${unserved.length} here, ${never} there)`,
         );
       }
+      lines.push(
+        `steps reached: ${steps.length} of ${transcript.steps.length} recorded; last: ${JSON.stringify(steps.at(-1) ?? '(none)')}`,
+      );
+      if (holdState === 'armed') {
+        lines.push(
+          'holdNextSend(): armed, but no eth_sendTransaction reached the wallet (never sent)',
+        );
+      } else if (holdState === 'reached') {
+        lines.push('holdNextSend(): a send reached the wallet and was never released');
+      }
+      return lines;
     };
   } else {
     const chain = await startChain();
@@ -434,6 +515,7 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       const reachedP = new Promise<void>((resolve) => (reached = resolve));
       const released = new Promise<void>((resolve) => (release = resolve));
       hold = { reached, released };
+      holdState = 'armed';
       return { reached: reachedP, release };
     },
     async breakJournalAfterSend(page) {
@@ -460,13 +542,16 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
       steps.push(text);
     },
     async finish() {
-      try {
-        if (harnessErrors.length > 0) {
-          throw new Error(`the test chain failed:\n${harnessErrors.map(String).join('\n')}`);
-        }
-      } finally {
-        await finish();
-      }
+      // Soft, never thrown: finish() runs in a test's `finally`, and a throw there would replace
+      // the test's own error (a stuck click's call log, an expect's diff), the one clue that says
+      // which step stopped and why. Both are reported; either fails the test.
+      expect
+        .soft(
+          harnessErrors.length,
+          `the test chain failed:\n${harnessErrors.map(String).join('\n')}`,
+        )
+        .toBe(0);
+      await finish();
     },
     async attach(page) {
       await page.route(RPC_ORIGIN, async (route) => {
@@ -508,8 +593,10 @@ export async function testChain(name: string, note: string): Promise<TestChain> 
           if (r.method === 'eth_sendTransaction' && hold) {
             const held = hold;
             hold = undefined;
+            holdState = 'reached';
             held.reached();
             await held.released;
+            holdState = 'released';
           }
           const result = await askWallet(r);
           if (r.method === 'eth_sendTransaction') {

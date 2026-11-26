@@ -113,7 +113,7 @@ The failure cases, all in one tab (slice D). Each asserts what the wallet was as
 6. **Own version changed before Send (E_CAS).** The same account saves the file elsewhere between Review and Send. The ledger refuses before the wallet is asked; the editor says the person's own version changed and offers "Review and save anyway". One send in all.
 7. **A declined part.** A two-part (150 KiB) edit; the wallet declines part 2. The banner says "You declined part 2", and Continue finishes it. Each part is broadcast once.
 8. **The finishing part loses a race (PARTIAL + E_CAS).** The same account saves the file elsewhere before Send. Part 1 (content) lands; the bind is refused. The banner says the file changed while saving, and "Review changes" stops the old save and reopens the editor with the person's text.
-9. **Two tabs.** Tab 1's wallet request stays open; tab 2's Review re-lists the journal, finds tab 1's save in flight and waits. Tab 2 sends nothing.
+9. **Two tabs.** Tab 1's wallet request stays open. Tab 2's own journal check lists tab 1's save in flight as the tab loads, so once connected its Review already waits (disabled, "waiting") before it's pressed. Tab 2 sends nothing. The editor's re-list at Review and at Send, for a save that opens after that check, isn't driven by this case (probed 2026-11-26: Review disabled at connect in 10 of 10 runs, Chromium and WebKit).
 10. **Wallet switched networks before Send.** NOT_SENT (WALLET_MISMATCH): "Switch your wallet to … on Testnet". The wallet switches back; Send again continues the same save. One broadcast.
 11. **Another author changed the file.** Review finds BASE_CHANGED; "Save my edit over the new version" plans from the new head. One send.
 
@@ -147,6 +147,16 @@ Unsaved edits (slice H). `edit-drafts.spec.ts`, against the chain like the cases
 - The harness records with `createRecorder` and replays with `createReplay` (`tests/e2e/chain.ts`). RPC calls, wallet calls and marks share one sequence, and every recorded answer belongs to the epoch it was recorded in: the number of gates before it. A gate is a page wallet write, an `eth_sendRawTransaction`, or a mark for a head move the page didn't make (`editAs #n`, `actAs #n`, `mine n`, `automine on|off`).
 - So a page that reads "latest" more often than the recording did gets the same head again, never the one a later write produced, and a pending receipt stays null until its `mine` is marked. `chain.editAs`, `actAs` and `control` exist in every mode: in replay they only mark. Writes stay strict (an unrecorded or repeated write, or a mark out of order, is a miss), and `finish()` turns any gate never served into a miss. Reads replay forgave are counted per case and printed (`extraReads`).
 - **Lifted:** the WebKit quarantine on `tags.spec.ts` "Tag from the Preview…" (2026-11-26). Its cause was the old replay's ordering: in about 1 run in 40 under load, WebKit read the latest block once more around Review than the recording did, the extra read took Send's answer, and the tag was planned at the block it lands in. Not a second save (that real bug, a second activation before the re-render, is fixed separately above).
+
+### Watch
+
+- **2026-11-26, WebKit, `edit-failures.spec.ts` "a second tab waits for the first tab's save, and never sends meanwhile" (case 9).** It failed once in a full run (491 passed) at the 30 s test timeout. Tab 1's `eth_sendTransaction` (gate seq 34, "From tab one.") was never served. Since then it has passed 60 of 60 alone in WebKit at 8 workers, and the next full run was clean. The trace was overwritten.
+  - **Decoded from the log alone.** A bare "Test timeout" with `finish()`'s error after it is the shape of a Playwright action outliving the test timeout (there is no `actionTimeout`, so a click waits that long). `finish()`'s throw in the `finally` then replaced that action's call log. It was not the plain `await held.reached`: a promise that never settles never lets the `finally` run, so nothing would have followed the timeout.
+  - **Two cases remain, which the log can't tell apart.** Either tab 1's Send never became clickable, so nothing was sent; or one of tab 2's actions stalled after the send reached the hold, so the send was held and never released.
+  - **The next occurrence decodes itself** (`tests/e2e/chain.ts`):
+    - `finish()` reports misses and harness errors softly, beside the test's own error, so a stuck action's call log (which locator, "not enabled" or "not stable") survives.
+    - It names each unserved gate: its seq, its label and who makes it (the page's wallet or RPC, or the test's actor or chain control).
+    - It gives the steps reached against the recorded count, and where `holdNextSend()` got to: "armed" (never sent) or "reached" (never released).
 
 ## Bundle
 
