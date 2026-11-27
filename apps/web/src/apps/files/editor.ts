@@ -848,7 +848,14 @@ export class EfsFileEditor extends EfsElement {
         else this.#cancelReview();
       }}
     >
-      <div class="wa-stack wa-gap-s">
+      <!-- A long review scrolls the dialog's body: its words are a named region with a tab stop,
+        so a keyboard can reach and scroll them (WCAG 2.1.1; axe scrollable-region-focusable). -->
+      <div
+        class="wa-stack wa-gap-s efs-review-body"
+        role="region"
+        aria-label=${t('review.details')}
+        tabindex="0"
+      >
         ${
           r.visibleInLens
             ? nothing
@@ -887,7 +894,16 @@ export class EfsFileEditor extends EfsElement {
           ${
             'guard' in r
               ? html`<dt>${t('review.protection')}</dt>
-                  <dd>${t(r.guard === 'own-head' ? 'review.guardOwn' : 'review.guardLens')}</dd>`
+                  <dd>${t(
+                    // Your own version is always checked when this lands. Another author's is
+                    // checked by the chain only with the read-set guard (chainChecked, sdk-v2
+                    // 9a44046); without it, only now.
+                    r.guard === 'own-head'
+                      ? 'review.guardOwn'
+                      : r.chainChecked
+                        ? 'review.guardLens'
+                        : 'review.guardLensUnchecked',
+                  )}</dd>`
               : nothing
           }
         </dl>

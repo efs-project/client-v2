@@ -55,6 +55,11 @@ test('edit, review, one approval: Saved · confirming, and Show my version reads
       "Open docs/readme.txt by object link with the sharer's Lens: pin, openFile, readBytes",
     );
     const review = await editAndReview(page, chain, text, true);
+    // The fixture author's version is the base, and the fixture Realm has the read-set guard: the
+    // chain checks it when this lands (chainChecked, sdk-v2 9a44046), and the review says so.
+    await expect(review).toContainText(
+      "it's refused if what you're editing changes before it lands",
+    );
     await press(review.locator('wa-button.efs-review-send'));
     chain.step('Send: runSequence (one part, one eth_sendTransaction)');
     await expect(save(page, 'confirming')).toContainText('Saved · confirming');

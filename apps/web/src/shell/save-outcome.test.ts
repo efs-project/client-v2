@@ -46,6 +46,16 @@ const R = {
     retry: 'after-replan',
     revert: { selector: '0x12345678', error: 'E_CAS', args: [1n, 2n] },
   },
+  // sdk-v2 9a44046: on a Realm with the read-set guard, a moved head is refused before the CAS.
+  guardStale: {
+    code: 'STALE',
+    retry: 'after-replan',
+    revert: {
+      selector: '0x381bf267',
+      error: 'E_READSET_STALE',
+      args: [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`],
+    },
+  },
   staleOther: {
     code: 'STALE',
     retry: 'after-replan',
@@ -350,6 +360,18 @@ describe('saveOutcome', () => {
     expect(saveAction(lost)).toBe('reopen');
     expect(saveMessage(lost)).toBe('save.changedPartly');
     expect(saveOutcome(p({ reason: reason(R.cas) }))).toEqual({ kind: 'changed', committed: 0 });
+  });
+
+  it('the read-set guard refusing a moved head (E_READSET_STALE) is the same race: "changed"', () => {
+    expect(saveOutcome(p({ reason: reason(R.guardStale) }))).toEqual({
+      kind: 'changed',
+      committed: 0,
+    });
+    const lost = saveOutcome(
+      p({ state: 'PARTIAL', committed: 1, total: 2, reason: reason(R.guardStale) }),
+    );
+    expect(lost).toEqual({ kind: 'changed', committed: 1 });
+    expect(saveAction(lost)).toBe('reopen');
   });
 
   it('decides the race on the structured revert only, never on the detail text', () => {

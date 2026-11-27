@@ -518,3 +518,9 @@ wa-breadcrumb-item.efs-crumb-text::part(label) {
 .efs-crumb-words {
   color: var(--wa-color-text-quiet);
 }
+
+/* The edit review's words (editor.ts): a focusable region, so a long review scrolls by keyboard. */
+.efs-review-body:focus-visible {
+  outline: var(--wa-focus-ring);
+  outline-offset: var(--wa-focus-ring-offset);
+}

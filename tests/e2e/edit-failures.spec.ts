@@ -81,10 +81,12 @@ test('storage lost right after a send: "couldn\'t confirm", saving paused, never
   }
 });
 
-test('my own version changed before Send (E_CAS): told first, then one send', async ({ page }) => {
+test('my own version changed before Send (E_READSET_STALE: the read-set guard, before the CAS): told first, then one send', async ({
+  page,
+}) => {
   const chain = await testChain(
     'client-cas-before-send',
-    "Edit as anvil #6 and review; meanwhile #6 saves this file elsewhere. Send is refused before the wallet (E_CAS); planned again under \"you first\", #6's own newer version is the view's head: the editor says the person's own version changed and offers to save over it: one eth_sendTransaction in all.",
+    "Edit as anvil #6 and review; meanwhile #6 saves this file elsewhere. Send is refused before the wallet (E_READSET_STALE: the read-set guard, before the CAS); planned again under \"you first\", #6's own newer version is the view's head: the editor says the person's own version changed and offers to save over it: one eth_sendTransaction in all.",
   );
   try {
     await start(page, chain);
@@ -93,7 +95,7 @@ test('my own version changed before Send (E_CAS): told first, then one send', as
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
     await press(review.locator('wa-button.efs-review-send'));
     chain.step(
-      'Send: refused before the wallet (E_CAS); dropped; planned again: own version changed',
+      'Send: refused before the wallet (E_READSET_STALE: the read-set guard, before the CAS); dropped; planned again: own version changed',
     );
     const changed = editor(page).locator('.efs-edit-base-changed');
     await expect(changed).toContainText(
@@ -193,12 +195,12 @@ test('"Continue to finish" pressed twice before the banner catches up resumes on
   }
 });
 
-test('the finishing part loses a race (PARTIAL + E_CAS): "changed", Review changes brings the edit back', async ({
+test('the finishing part loses a race (PARTIAL + E_READSET_STALE): "changed", Review changes brings the edit back', async ({
   page,
 }) => {
   const chain = await testChain(
     'client-partial-cas',
-    "A two-part edit as anvil #6, reviewed; then #6 saves this file elsewhere before Send. Part 1 (content only) lands; part 2, the HEAD bind, is refused (E_CAS): the banner says the file changed while saving. Review changes stops the old save and reopens the editor with the person's text.",
+    "A two-part edit as anvil #6, reviewed; then #6 saves this file elsewhere before Send. Part 1 (content only) lands; part 2, the HEAD bind, is refused (E_READSET_STALE: the read-set guard, before the CAS): the banner says the file changed while saving. Review changes stops the old save and reopens the editor with the person's text.",
   );
   try {
     await start(page, chain);
@@ -210,7 +212,9 @@ test('the finishing part loses a race (PARTIAL + E_CAS): "changed", Review chang
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
     await press(review.locator('wa-button.efs-review-send'));
-    chain.step('Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_CAS)');
+    chain.step(
+      'Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_READSET_STALE: the read-set guard, before the CAS)',
+    );
     const changed = save(page, 'changed');
     await expect(changed).toContainText('This file changed while your edit was saving');
     await press(changed.locator('wa-button.efs-save-reopen'));
