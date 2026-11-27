@@ -1,6 +1,13 @@
 // Shows an app's panes. On wide containers they sit side by side in nested <wa-split-panel>s
 // (keyboard-resizable dividers); on narrow ones a tab per pane shows one at a time. Each view
 // element is created once and moved between the two arrangements, so its state survives.
+//
+// Never while a dialog is open in a pane (PM, 2026-11-27: a phone rotated mid-review). Moving an
+// open <wa-dialog> takes its native dialog out of the top layer, and Web Awesome stops its
+// rendered-watcher and Escape handling on disconnect and never restarts them: the review would
+// sit hidden in a background tab, or shown but not modal, with no Escape. So the arrangement
+// holds while a pane's dialog is open (the modal covers the page anyway), and switches once it
+// closes: the pane that held it comes to the front, and focus stays where it was.
 
 import { createScope, type OwnerScope } from '../platform/scope.ts';
 import { state } from '../state/signals.ts';
@@ -42,6 +49,12 @@ export class EfsPaneHost extends EfsElement {
   /** The link whose view was last brought to the front. */
   #fronted: string | undefined;
   #observer: ResizeObserver | undefined;
+  /** Whether the last render was side by side (so a switch to tabs is a move). */
+  #shownWide: boolean | undefined;
+  /** The pane whose open dialog held the arrangement: it comes to the front once it closes. */
+  #held: number | undefined;
+  /** The element focused before a switch, to put focus back if the move dropped it. */
+  #focused: Element | null = null;
 
   protected override createRenderRoot() {
     return this;
@@ -60,10 +73,34 @@ export class EfsPaneHost extends EfsElement {
       if (entry) this.#wide.set(fits(entry.contentRect.width));
     });
     this.#observer.observe(this);
+    // A dialog closing may let a held switch happen (after its own focus return, queued first).
+    this.addEventListener('wa-after-hide', this.#onDialogClosed);
+  }
+
+  #onDialogClosed = (): void => {
+    setTimeout(() => this.requestUpdate());
+  };
+
+  /**
+   * The pane holding an open dialog, or undefined: the one with focus first (several may), else
+   * the first. Views render in light DOM, so a pane's dialogs are its descendants.
+   */
+  #openDialogPane(): number | undefined {
+    const panes = this.panes ?? [];
+    let first: number | undefined;
+    for (const [i, pane] of panes.entries()) {
+      const element = this.#elements.get(pane.view);
+      const dialog = element?.querySelector('wa-dialog[open]');
+      if (!dialog) continue;
+      if (element?.contains(document.activeElement)) return i;
+      first ??= i;
+    }
+    return first;
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.removeEventListener('wa-after-hide', this.#onDialogClosed);
     this.#observer?.disconnect();
     this.#scope?.dispose();
     this.#scope = undefined;
@@ -72,6 +109,7 @@ export class EfsPaneHost extends EfsElement {
 
   /** A new link: its view comes to the front (once; the person's tab choice stands after that). */
   override willUpdate(): void {
+    this.#focused = this.contains(document.activeElement) ? document.activeElement : null;
     if (this.frontKey === this.#fronted) return;
     this.#fronted = this.frontKey;
     if (this.frontKey === undefined || this.frontView === undefined) return;
@@ -111,10 +149,32 @@ export class EfsPaneHost extends EfsElement {
     </wa-split-panel>`;
   }
 
+  /** After a switch, focus goes back to what had it if moving the panes dropped it. */
+  override updated(): void {
+    const focused = this.#focused;
+    this.#focused = null;
+    if (!focused?.isConnected || this.contains(document.activeElement)) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (focused as HTMLElement).focus?.();
+  }
+
   override render() {
     const panes = this.panes ?? [];
     if (panes.length === 0) return nothing;
-    if (this.#wide.get() || panes.length === 1) return this.#split(panes);
+    let wide = this.#wide.get() || panes.length === 1;
+    if (!wide && this.#shownWide) {
+      // Narrowed while side by side: hold while a pane's dialog is open, then front that pane.
+      const held = this.#openDialogPane();
+      if (held !== undefined) {
+        this.#held = held;
+        wide = true;
+      } else if (this.#held !== undefined) {
+        this.#active = this.#held;
+        this.#held = undefined;
+      }
+    }
+    this.#shownWide = wide;
+    if (wide) return this.#split(panes);
     const active = Math.min(this.#active, panes.length - 1);
     return html`<wa-tab-group
       class="efs-pane-tabs"

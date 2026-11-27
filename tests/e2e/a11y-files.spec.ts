@@ -458,6 +458,44 @@ test('a long tag review at 320 px scrolls by keyboard: its words are a named reg
   }
 });
 
+test('a review open while the window narrows to a phone stays open, modal and focused; once it closes, its pane is in front', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-a11y-narrow-mid-review',
+    'mine.txt by anvil #6 at the root; its removal reviewed, then the window narrows to 320 px.',
+  );
+  try {
+    await fileAtRoot(chain, 6, 'mine.txt', 'mine\n');
+    await start(page, chain);
+    const remove = row(page, 'mine.txt').locator('wa-button.efs-entry-remove');
+    await activate(page, remove);
+    const keep = dialog(page).locator('wa-button.efs-folder-keep');
+    await expect(keep).toBeFocused();
+    // A phone rotated (or a window narrowed) mid-review (PM, 2026-11-27).
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.waitForTimeout(300);
+    // Still shown, still the focus, still modal (Escape below closes it), and axe clean.
+    await expect(dialog(page)).toHaveAttribute('open', '');
+    await expect(keep).toBeVisible();
+    await expect(keep).toBeFocused();
+    expect(await axe(page), 'review after narrowing').toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    // Then the panes are tabs, the review's pane (Entries) in front, and focus kept there.
+    await expect(page.getByRole('tab', { name: 'Entries' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(remove).toBeFocused();
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(500);
+    chain.step('Remove reviewed; narrowed to 320 px: the review stays; Escape: Entries in front');
+  } finally {
+    await chain.finish();
+  }
+});
+
 test('a removal opens on Keep it unless the person moves: focus put elsewhere without their input goes back to Keep it, so Enter keeps', async ({
   page,
 }) => {
