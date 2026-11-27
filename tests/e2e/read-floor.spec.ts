@@ -132,7 +132,7 @@ async function holdRefreshHead(page: Page, release: Promise<unknown>) {
   return state;
 }
 
-test('an endpoint that falls behind during the refresh after a save leaves it BEHIND until Try again', async ({
+test('an endpoint that falls behind during the refresh after a save leaves it BEHIND, then it reads itself again once the endpoint catches up', async ({
   page,
 }) => {
   // The save's own check comes every 12 s; this case waits for one after the catch-up.
@@ -163,25 +163,17 @@ test('an endpoint that falls behind during the refresh after a save leaves it BE
     // Never a version read from before the save; and BEHIND has no "Show my version".
     await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
     await expect(preview(page).locator('wa-button.efs-edit-show-mine')).toHaveCount(0);
-    // The endpoint catches up. The page's own next check comes and goes (the save's, every 12 s),
-    // and the save is still "Saved · confirming".
+    // The endpoint catches up. Nothing reads for the Preview's sake, but the page's own next read
+    // (the save's check, every 12 s) is served at or above the floor: the SDK's onCaughtUp fires
+    // (sdk-v2 a61b2e8), and the Preview reads itself again, once, with nobody pressing anything.
     chain.control?.catchUp();
-    const before = rpc.seen;
-    await expect
-      .poll(() => rpc.seen, {
-        message: "the page's next check after the catch-up",
-        timeout: 20_000,
-      })
-      .toBeGreaterThan(before);
-    await chain.idle();
-    await expect(save(page, 'confirming')).toContainText('Saved · confirming');
-    // The Preview doesn't leave BEHIND by itself: nothing reads it again until the person acts,
-    // and its notice says so ("Try again in a moment", with Try again).
-    await expect(outcome).toContainText(BEHIND);
-    await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
-    await press(outcome.locator('wa-button.efs-outcome-retry'));
     // This view's version (the fixture's: its Lens doesn't include the person), then theirs.
-    await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED);
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText(SEEDED, {
+      timeout: 20_000,
+    });
+    await expect(preview(page).locator('efs-outcome', { hasText: BEHIND })).toHaveCount(0);
+    await chain.idle();
+    await expect(save(page, 'confirming').or(save(page, 'saved'))).toBeVisible();
     await press(preview(page).locator('wa-button.efs-edit-show-mine'));
     await expect(preview(page).locator('.efs-preview-text')).toHaveText(text);
     await expect(preview(page).locator('.efs-viewing-mine')).toBeVisible();
