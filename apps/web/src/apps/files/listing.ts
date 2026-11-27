@@ -24,6 +24,7 @@ import { link } from '@efs/sdk/links';
 import { formatRealmRoute } from '../../boot/route.ts';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { draftKey } from '../../shell/drafts.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { placeKey, touchesOf } from '../../shell/save-hold.ts';
 import { saveOutcome } from '../../shell/save-outcome.ts';
@@ -475,6 +476,21 @@ export class EfsFilesListing extends EfsElement {
     return this.#load(efs, folder, kind);
   }
 
+  /**
+   * Whether this tab keeps an unsaved edit of the row's file: the editor's own store, under the
+   * editor's own key (the file's object-link route, drafts.ts `draftKey`), never guessed from a
+   * time. Reads the store's count so a keep or a discard re-renders the row.
+   */
+  #hasDraft(row: FolderRow): boolean {
+    const location = this.host.location.get();
+    if (location.kind !== 'realm' || row.target?.kind !== 'file') return false;
+    this.host.saving.drafts.count.get();
+    const kept = this.host.saving.drafts.get(
+      draftKey(location.realm, link({ kind: 'object', subject: row.target.subject })),
+    );
+    return kept !== undefined && !('create' in kept);
+  }
+
   /** "yours", "0x12…ab's", or nothing for the folder owner's own rows. */
   #whose(row: FolderRow, owner: string | undefined) {
     const t = this.host.translator.t.bind(this.host.translator);
@@ -508,6 +524,11 @@ export class EfsFilesListing extends EfsElement {
           : nothing
       }
       ${this.#whose(row, folder.owner)}
+      ${
+        this.#hasDraft(row)
+          ? html`<span class="efs-entry-unsaved-note efs-entry-draft">${t('files.list.unsavedEdit')}</span>`
+          : nothing
+      }
       ${saving ? html`<span class="efs-entry-saving" role="status">${t('files.pending')}</span>` : nothing}
     </span>`;
     // Rename and Remove only on the person's own entries (another author's is theirs to change).
