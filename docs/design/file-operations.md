@@ -124,7 +124,7 @@ Draft flows and copy for the integration owner's (PM's) review. Revised for the 
 - **Opening.**
   - A folder opens its listing.
   - A file opens in the Preview, by its object link. That keeps the permanent link in the address bar, and keeps the Preview's existing verified-read path.
-- **The tree** (the navigation pane) shows folders only, loaded one level at a time when expanded, never recursively (#36 hard case 5: folders form a graph, not a tree).
+- **The tree** (the navigation pane) shows folders only, loaded one level at a time when expanded, never recursively (#36 hard case 5: folders form a graph, not a tree). A cycle is legitimate (any author may write an entry in any folder, and a Lens shows several authors), so the tree's nodes are keyed by their path of names and each turn round a cycle is a new node, read only when the person expands it: `folder-writes.spec.ts` builds one on the fixture (the SDK's tests-only `planFolderEntry`, sdk-v2 a61b2e8) and expands it five levels, one level per expand, nothing read below.
 - **Phone.** Choosing an entry moves to the next pane (`shell.md`'s planned drill-in, which arrives with real data).
 
 ## Filter by kind

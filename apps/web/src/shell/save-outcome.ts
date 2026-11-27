@@ -11,6 +11,7 @@
 // Continue is offered only when the same plan can go on: by code (a declined part, a wallet
 // switched away) or, for codes this version doesn't name, by retry "transient"/"after-reconcile".
 
+import type { Reason } from '@efs/sdk';
 import type { SequenceProgress, WalletAnswerReason } from '@efs/sdk/actions';
 import type { MessageId } from '../ui/i18n.ts';
 
@@ -106,6 +107,27 @@ export type SaveOutcome =
    */
   | { readonly kind: 'nothing-new' }
   /**
+   * RESPLIT (sdk-v2 a03ba84): a part turned out too large for one transaction, and cutting it
+   * needs more wallet approvals than the review said (`before`; `now`). Nothing more was sent,
+   * and the save asks first: "This save now needs N approvals (it was M). Continue?" Continue
+   * resumes; "Not now" leaves it, PARTIAL (`committed` of `total` saved) or not started, listed,
+   * with Continue. `later`: the person said "Not now" (the caller's record, never the SDK's).
+   */
+  | {
+      readonly kind: 'resplit';
+      readonly committed: number;
+      readonly total: number;
+      readonly before?: number;
+      readonly now?: number;
+      readonly later?: boolean;
+    }
+  /**
+   * The save's record doesn't match what it recorded (EfsFault INVARIANT, sdk-v2 a03ba84):
+   * corrupted, or written by another version. Nothing was sent; never offered again (no retry
+   * loop).
+   */
+  | { readonly kind: 'damaged' }
+  /**
    * Held back (ALREADY_ATTEMPTED): the same publication is already on its way, an earlier attempt
    * (`twin`) still open or committed and not yet final. This call sent nothing, and the twin may
    * land or have landed, so never "nothing was saved". Whether it's the same save again or another
@@ -125,9 +147,82 @@ export type Twin = NonNullable<NonNullable<SequenceProgress['reason']>['twin']>;
 const isCasRace = (reason: SequenceProgress['reason']): boolean =>
   reason?.revert?.error === 'E_CAS';
 
+/** Every reason code the SDK names, without the open-ended `string` it also admits. */
+type Named<T> = T extends string ? (string extends T ? never : T) : never;
+export type KnownReasonCode = Named<NonNullable<Reason['code']>>;
+
+/**
+ * The codes a stopped save (PARTIAL or NOT_STARTED) has an outcome of its own for: the cases of
+ * `saveOutcome`'s inner switch. Every other code the SDK names is said generically, by its retry
+ * class (`otherwise`).
+ */
+export const OWN_STOP_CODES = [
+  'REORGED',
+  'REORGED_DROPPED',
+  'EXPIRED',
+  'JOURNAL_UNAVAILABLE',
+  'WALLET_MISMATCH',
+  'USER_REJECTED',
+  'BUSY',
+  'OVER_TX_GAS_CAP',
+  'UNSUPPORTED_PROFILE',
+  'ALREADY_ATTEMPTED',
+  'STALE',
+  'RESPLIT',
+] as const satisfies readonly KnownReasonCode[];
+type OwnStopCode = (typeof OWN_STOP_CODES)[number];
+
+/**
+ * Every other code the SDK names, said generically. Keyed by the SDK's own union, so a code a new
+ * SDK adds is a type error until it is placed: here, or in OWN_STOP_CODES with a case of its own
+ * (as RESPLIT was, sdk-v2 a03ba84).
+ */
+export const GENERIC_STOP_CODES: Readonly<Record<Exclude<KnownReasonCode, OwnStopCode>, true>> = {
+  RPC_UNAVAILABLE: true,
+  RPC_ERROR: true,
+  CHAIN_MISMATCH: true,
+  BASIS_STALE: true,
+  LIMIT_EXCEEDED: true,
+  NOT_VERIFIED_DEPLOYMENT: true,
+  GATEWAY_UNAVAILABLE: true,
+  DIGEST_MISMATCH: true,
+  POLICY_BLOCKED: true,
+  INVALID_RESUME_TOKEN: true,
+  TOO_LARGE: true,
+  WALLET_UNAUTHORIZED: true,
+  WALLET_UNSUPPORTED: true,
+  WALLET_INVALID_PARAMS: true,
+  WALLET_DISCONNECTED: true,
+  WALLET_CHAIN_DISCONNECTED: true,
+  INSUFFICIENT_FUNDS: true,
+  NOT_YET_DECIDABLE: true,
+  BEHIND: true,
+  // Named since sdk-v2 a61b2e8 (returned before): none has words of its own when a save stops.
+  IN_FLIGHT: true,
+  RESPONSE_LOST: true,
+  ABORTED: true,
+  CANCELLED: true,
+  INVALID: true,
+  NOT_IN_JOURNAL: true,
+};
+
+/**
+ * Whether the same plan may go again (Continue, Send again), by the SDK's retry class, for codes
+ * said generically. Keyed by the SDK's union, so a new class is a type error until decided.
+ * `after-review` (RESPLIT) goes on only once the person has seen what changed: its own ask, never
+ * an unexplained Continue.
+ */
+const SAME_AGAIN: Readonly<Record<Reason['retry'], boolean>> = {
+  transient: true,
+  'after-reconcile': true,
+  'after-replan': false,
+  'after-review': false,
+  never: false,
+};
+
 /** The same plan may go again: the SDK says so for codes this version doesn't name. */
 const sameAgain = (retry: string | undefined): boolean =>
-  retry === undefined || retry === 'transient' || retry === 'after-reconcile';
+  retry === undefined || (Object.hasOwn(SAME_AGAIN, retry) && SAME_AGAIN[retry as Reason['retry']]);
 
 export function saveOutcome(p: SequenceProgress): SaveOutcome {
   const reason = p.reason;
@@ -195,6 +290,15 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
             ? { kind: 'held', committed: p.committed, total: p.total, twin }
             : { kind: 'held', committed: p.committed, total: p.total };
         }
+        case 'RESPLIT': {
+          const prompts = reason?.prompts;
+          return {
+            kind: 'resplit',
+            committed: p.committed,
+            total: p.total,
+            ...(prompts ? { before: prompts.before, now: prompts.now } : {}),
+          };
+        }
         case 'STALE': {
           if (isCasRace(reason)) return { kind: 'changed', committed: p.committed };
           const error = reason?.revert?.error;
@@ -217,6 +321,17 @@ export function saveOutcome(p: SequenceProgress): SaveOutcome {
     default:
       return { kind: 'not-sent', code: String(p.state), canRetry: false };
   }
+}
+
+/**
+ * A save's outcome as this tab shows it: a RESPLIT ask the person answered "Not now" is said as
+ * waiting, with Continue, and asks no more (`later`, the saves session's record of the answer).
+ */
+export function shownOutcome(p: SequenceProgress, later?: ReadonlySet<string>): SaveOutcome {
+  const outcome = saveOutcome(p);
+  return outcome.kind === 'resplit' && later?.has(p.sequenceId.toLowerCase())
+    ? { ...outcome, later: true }
+    : outcome;
 }
 
 /** A code this version doesn't name: partial saves continue, others retry, as `retry` says. */
@@ -311,6 +426,8 @@ export const SAVE_MESSAGE: Readonly<Record<SaveOutcome['kind'], MessageId>> = {
   'not-sent': 'save.notSent',
   'nothing-new': 'save.nothingNew',
   held: 'save.held',
+  resplit: 'save.resplit',
+  damaged: 'save.damaged',
 };
 
 /** The message for an outcome, with the detail some outcomes add. */
@@ -327,6 +444,11 @@ export function saveMessage(o: SaveOutcome): MessageId {
   }
   if (o.kind === 'funds' && o.gasLimit === undefined) return 'save.fundsNoLimit';
   if (o.kind === 'fee-schedule') return feeScheduleCopy(o).id;
+  if (o.kind === 'resplit') {
+    // Put off: a partial save is said as partial; one not started says it's waiting.
+    if (o.later) return o.committed > 0 ? 'save.partial' : 'save.resplitLater';
+    return o.now === undefined || o.before === undefined ? 'save.resplitMore' : 'save.resplit';
+  }
   return SAVE_MESSAGE[o.kind];
 }
 
@@ -357,6 +479,13 @@ export function saveValues(
       return o.gasLimit === undefined ? {} : { gasLimit: Number(o.gasLimit) };
     case 'fee-schedule':
       return feeScheduleCopy(o).values;
+    case 'resplit':
+      return {
+        committed: o.committed,
+        total: o.total,
+        ...(o.now === undefined ? {} : { now: o.now }),
+        ...(o.before === undefined ? {} : { before: o.before }),
+      };
     case 'wallet-mismatch':
       return o.account
         ? {
@@ -378,6 +507,7 @@ export function saveAction(o: SaveOutcome): SaveAction | undefined {
       return o.canContinue ? 'continue' : 'abandon';
     case 'declined':
     case 'wallet-mismatch':
+    case 'resplit':
       return 'continue';
     case 'undone':
     case 'expired':
@@ -419,10 +549,20 @@ export function thrownOutcome(error: unknown): ThrownOutcome {
   const noJournal = isFault(error, 'JOURNAL_UNAVAILABLE');
   const fault =
     error instanceof Error && error.name === 'EfsFault' ? (error as Error & ThrownSave) : undefined;
+
   if (fault?.mayHaveSent !== false) {
     return fault?.sequenceId
       ? { kind: 'unconfirmed', noJournal, sequenceId: fault.sequenceId }
       : { kind: 'unconfirmed', noJournal };
+  }
+  // A plan or a save record that isn't what it recorded (RECORD_DAMAGED, sdk-v2 a61b2e8: an
+  // altered plan, a resume whose parts don't hash to the recorded ones, a funds resend's stored
+  // plan): nothing was sent, and the same record can't go as it stands, so it's said as damaged,
+  // with Discard and never Send again. Every other fault, INVARIANT included, is as before.
+  if (isFault(error, 'RECORD_DAMAGED')) {
+    return fault.sequenceId
+      ? { kind: 'again', outcome: { kind: 'damaged' }, sequenceId: fault.sequenceId }
+      : { kind: 'again', outcome: { kind: 'damaged' } };
   }
   const code = (fault as { code?: unknown }).code;
   const outcome: SaveOutcome = noJournal

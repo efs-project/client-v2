@@ -425,6 +425,12 @@ test('a wallet short of funds: said at once, never as a cost; after a top-up, Se
   }
 });
 
+/** Moves the page's clock (installed) `seconds` ahead without firing any timer, as the chain's moved. */
+async function advancePageClock(page: Page, seconds: number): Promise<void> {
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.setSystemTime(now + seconds * 1000);
+}
+
 test('a funds refusal resent too close to its deadline waits for EXPIRED, then Send again plans it anew', async ({
   page,
 }) => {
@@ -437,6 +443,9 @@ test('a funds refusal resent too close to its deadline waits for EXPIRED, then S
     await chain.control?.setBalance(chain.ids.account as string, 10n ** 19n);
     await chain.control?.advance(850);
     await chain.control?.mine(1);
+    // This device's clock moves with the chain's (no timers fire): the SDK refuses a basis block
+    // more than 900 s ahead of the device's clock (sdk-v2 a03ba84), as a lying endpoint's would be.
+    await advancePageClock(page, 850);
     chain.step("Funds added; the chain is within a minute of the plan's deadline");
     await press(funds.locator('wa-button.efs-save-continue'));
     // It sends nothing, so the SDK answers at once, with no settle wait (sdk-v2 9ec7860):
@@ -454,6 +463,7 @@ test('a funds refusal resent too close to its deadline waits for EXPIRED, then S
     expect(sendRequests(chain), 'the wallet was not asked again').toHaveLength(1);
     await chain.control?.advance(120);
     await chain.control?.mine(66);
+    await advancePageClock(page, 120);
     chain.step('The chain passes the deadline and finalizes past it');
     await page.clock.fastForward(5_000);
     chain.step("After 5 s: the banner's check proves it never went out (EXPIRED)");

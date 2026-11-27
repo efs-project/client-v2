@@ -953,6 +953,72 @@ test('the folder tree: read as it opens, follows the trail both ways, leaves onl
   }
 });
 
+test('a folder cycle in the tree is opened one level per expand, five levels round, never on its own', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-folder-cycle',
+    "anvil #6 (the wallet) makes loop/ and loop/b/; anvil #0 puts its own entry a in loop/b/ pointing back at loop/ (the SDK's tests-only planFolderEntry). In the place Lens (#6, then #0) that's a cycle, loop → b → a → b → … The tree opens it one level per expand, five levels, and reads nothing below what was opened.",
+  );
+  /** A tree node by its path of names from the root (tree-model.ts treeKey). */
+  const node = (names: readonly string[]) =>
+    page.locator(
+      `efs-files-tree wa-tree-item.efs-tree-folder[data-key="${names.map((n) => `/${n}`).join('')}"]`,
+    );
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save }) => {
+      const made = async (parent: import('@efs/sdk/files').FolderRef, name: string) =>
+        (
+          (await save(
+            await files.planCreateFolder(efs, writer, { folder: parent, name, lens }),
+          )) as {
+            created: import('@efs/sdk/files').FolderRef;
+          }
+        ).created;
+      const loop = await made(root, 'loop');
+      const b = await made(loop, 'b');
+      return { loop: loop.directory as string, b: b.directory as string };
+    });
+    await chain.actAs?.(0, async ({ efs, writer, save }) => {
+      const { planFolderEntry } = await import('@efs/sdk/testing');
+      await save(
+        await planFolderEntry(efs, writer, {
+          folder: { kind: 'folder', directory: chain.ids.b as never },
+          name: 'a',
+          target: { kind: 'folder', directory: chain.ids.loop as never },
+        }),
+      );
+    });
+    chain.step('#6 makes loop/ and loop/b/; #0 puts a in loop/b/, pointing back at loop/');
+    await openRoot(page, chain);
+    // The wallet dialog openRoot closed with Escape holds focus until it has finished closing.
+    await expect(page.locator('wa-dialog.efs-wallet-dialog')).not.toHaveAttribute('open');
+    await expect(node(['loop'])).toBeVisible();
+    // Round the cycle: loop → b → a → b → a → b. Each expand reads that one folder and shows its
+    // one child; the child itself is unread (no folders of its own shown) until it is expanded.
+    const path = ['loop', 'b', 'a', 'b', 'a', 'b'];
+    for (let depth = 1; depth < path.length; depth++) {
+      const here = path.slice(0, depth);
+      const next = path.slice(0, depth + 1);
+      await node(here).focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(node(here)).toHaveAttribute('expanded', '');
+      await expect(node(next)).toBeVisible();
+      await expect(node(next).locator('wa-tree-item.efs-tree-folder')).toHaveCount(0);
+      await expect(
+        page.locator('efs-files-tree wa-tree-item.efs-tree-folder[data-key^="/loop"]'),
+      ).toHaveCount(depth + 1);
+      await chain.idle(300);
+      chain.step(`Expand ${here.join('/')}: one level read, ${next.join('/')} shown and unread`);
+    }
+    // Still on the root (expanding never navigates), and the page answers.
+    await expect(row(page, 'loop')).toBeVisible();
+    await chain.idle(500);
+  } finally {
+    await chain.finish();
+  }
+});
+
 const overview = (page: Page) => page.locator('efs-files-overview');
 
 test("the Overview shows a folder's README formatted (verified text only), links kept safe; without one, its summary", async ({

@@ -57,6 +57,12 @@ export interface SavesSession {
   track(progress: SequenceProgress, draft?: Draft): void;
   /** Hides a finished ("Saved") save. */
   dismiss(sequenceId: Hex): void;
+  /**
+   * Saves whose RESPLIT ask the person answered "Not now" (sdk-v2 a03ba84), in this tab: shown
+   * as waiting with Continue, no longer asking. A record of the person's answer, never the SDK's.
+   */
+  readonly later: ReadonlySignal<ReadonlySet<string>>;
+  putOff(sequenceId: Hex): void;
   /** The edit a save was made from, while this tab still holds it. */
   draftOf(sequenceId: Hex): Draft | undefined;
   /** "Review changes": the draft to put back in the editor once its file is on screen. */
@@ -127,6 +133,7 @@ export function createSavesSession(
 ): SavesSession {
   const current = state<SavesState>({ status: 'IDLE' });
   const reopening = state<Draft | undefined>(undefined);
+  const later = state<ReadonlySet<string>>(new Set());
   let run: OwnerScope | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active: Efs | undefined;
@@ -331,6 +338,11 @@ export function createSavesSession(
   return {
     state: current,
     reopening,
+    later,
+    putOff(sequenceId) {
+      const id = sequenceId.toLowerCase();
+      if (!later.get().has(id)) later.set(new Set([...later.get(), id]));
+    },
     refresh({ settle = true, timeoutMs = 15_000 } = {}) {
       if (!active) return Promise.resolve<CheckResult>('failed');
       check(active, settle);

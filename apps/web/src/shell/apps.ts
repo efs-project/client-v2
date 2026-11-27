@@ -67,6 +67,11 @@ export interface SavingHost {
    * the person's edit, kept in memory so "Review changes" can bring it back.
    */
   track(progress: SequenceProgress, draft?: Draft): void;
+  /**
+   * "Not now" on a RESPLIT ask (a save that now needs more approvals): from here it's listed as
+   * waiting, with Continue, and asks no more in this tab.
+   */
+  putOff(sequenceId: `0x${string}`): void;
   /** A draft the banner asked to reopen ("Review changes"). */
   readonly reopening: ReadonlySignal<Draft | undefined>;
   /** Takes the pending reopen when its file (`link`) is the one on screen. */

@@ -29,7 +29,7 @@ import type { DraftStore } from './drafts.ts';
 import { OPEN_SETTINGS_EVENT } from './network-indicator.ts';
 import type { OsState } from './os-state.ts';
 import type { ReaderSession } from './reader-state.ts';
-import { saveOutcome } from './save-outcome.ts';
+import { shownOutcome } from './save-outcome.ts';
 import { describeSave } from './saves-banner.ts';
 import type { SavesSession } from './saves-state.ts';
 import type { EfsSettingsPanel } from './settings-panel.ts';
@@ -125,9 +125,13 @@ export class EfsShell extends EfsElement {
       const next = new Map<string, string>();
       let spoken: string | undefined;
       for (const p of saves) {
-        const kind = saveOutcome(p).kind;
+        const later = this.saves.later.get();
+        const outcome = shownOutcome(p, later);
+        const kind = outcome.kind === 'resplit' && outcome.later ? 'resplit-later' : outcome.kind;
         next.set(p.sequenceId, kind);
-        if (this.#announced.get(p.sequenceId) !== kind) spoken = describeSave(p, network, t);
+        if (this.#announced.get(p.sequenceId) !== kind) {
+          spoken = describeSave(p, network, t, later);
+        }
       }
       this.#announced = next;
       if (spoken !== undefined) {
@@ -286,6 +290,7 @@ export class EfsShell extends EfsElement {
       unconfirmed: saves.unconfirmed,
       markUnconfirmed: (u) => saves.markUnconfirmed(u),
       track: (progress, draft) => saves.track(progress, draft),
+      putOff: (sequenceId) => saves.putOff(sequenceId),
       reopening: saves.reopening,
       takeReopen: (link) => saves.takeReopen(link),
       drafts: this.drafts,

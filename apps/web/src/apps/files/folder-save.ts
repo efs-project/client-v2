@@ -237,7 +237,12 @@ const TAG_SEND: Readonly<Record<'tag' | 'deny' | 'untag', MessageId>> = {
   deny: 'files.tag.sendDeny',
   untag: 'files.tag.sendUntag',
 };
-type NotSent = { readonly outcome: SaveOutcome; readonly sequenceId?: `0x${string}` };
+type NotSent = {
+  readonly outcome: SaveOutcome;
+  readonly sequenceId?: `0x${string}`;
+  /** The save as runSequence/resume returned it, when the review may hand it over (RESPLIT). */
+  readonly progress?: SequenceProgress;
+};
 
 type Phase =
   | { readonly phase: 'closed' }
@@ -494,6 +499,13 @@ export class EfsFolderSave extends EfsElement {
     this.#controller?.abort();
     const s = this.#phase.get();
     if (s.phase === 'sending') return;
+    // A RESPLIT ask closed is "Not now": nothing is cancelled, the save stays (sdk-v2 a03ba84).
+    const progress = s.phase === 'review' ? s.sent?.progress : undefined;
+    if (s.phase === 'review' && s.sent?.outcome.kind === 'resplit' && progress) {
+      this.host.saving.putOff(progress.sequenceId);
+      this.#handOff(progress, s.request);
+      return;
+    }
     if (s.phase === 'review' && s.sent?.sequenceId) void this.#drop(s.writer, s.sent.sequenceId);
     this.#phase.set({ phase: 'closed' });
   }
@@ -785,10 +797,14 @@ export class EfsFolderSave extends EfsElement {
         );
         return;
       }
-      back({ sent: { outcome, sequenceId: progress.sequenceId } });
+      back({ sent: { outcome, sequenceId: progress.sequenceId, progress } });
       return;
     }
-    // The wallet answered: the banner owns the save from here.
+    this.#handOff(progress, request);
+  }
+
+  /** The wallet answered (or the person said "Not now" to a RESPLIT ask): the banner owns it. */
+  #handOff(progress: SequenceProgress, request: FolderRequest): void {
     this.host.saving.track(progress);
     this.dispatchEvent(
       new CustomEvent(FOLDER_SAVED_EVENT, {
@@ -1874,7 +1890,10 @@ export class EfsFolderSave extends EfsElement {
             sent.outcome.kind === 'busy' ||
             sent.outcome.kind === 'wallet-mismatch' ||
             sent.outcome.kind === 'nothing-new' ||
+            sent.outcome.kind === 'resplit' ||
             (sent.outcome.kind === 'not-sent' && sent.outcome.canRetry);
+          // RESPLIT: the save now needs more approvals; Continue resumes it, "Not now" leaves it.
+          const resplit = sent?.outcome.kind === 'resplit';
           const prepareAgain = sent?.outcome.kind === 'stale' || hold?.kind === 'account';
           const holdLine =
             hold?.kind === 'paused'
@@ -1933,11 +1952,19 @@ export class EfsFolderSave extends EfsElement {
             <wa-button
               slot="footer"
               appearance="outlined"
-              class="efs-folder-keep"
-              ?autofocus=${isRemove}
+              class=${resplit ? 'efs-folder-not-now' : 'efs-folder-keep'}
+              ?autofocus=${isRemove && !resplit}
               ?disabled=${sending}
               @click=${() => this.#close()}
-              >${t(isRemove ? 'files.remove.keep' : 'review.cancel')}</wa-button
+              >${t(
+                resplit
+                  ? 'save.notNow'
+                  : sent?.outcome.kind === 'damaged'
+                    ? 'saves.discard'
+                    : isRemove
+                      ? 'files.remove.keep'
+                      : 'review.cancel',
+              )}</wa-button
             >
             ${
               hold?.kind === 'wallet' && !sending
@@ -1981,30 +2008,33 @@ export class EfsFolderSave extends EfsElement {
                         if (s.phase === 'review' && this.#send(s)) pressedOnce(e);
                       }}
                       >${t(
-                        sent
-                          ? 'saves.sendAgain'
-                          : isRemove
-                            ? ask.kind === 'remove' && ask.hide
-                              ? 'files.remove.blockYes'
-                              : 'files.remove.yes'
-                            : ask.kind === 'unhide'
-                              ? 'files.unhide.yes'
-                              : ask.kind === 'hide'
-                                ? 'files.hide.yes'
-                                : ask.kind === 'label'
-                                  ? s.request.kind === 'label' && s.request.remove
-                                    ? 'files.label.remove'
-                                    : 'files.label.yes'
-                                  : ask.kind === 'join'
-                                    ? (s.request.kind === 'same' || s.request.kind === 'broader') &&
-                                      s.request.remove
-                                      ? 'files.join.removeMine'
-                                      : ask.how === 'same'
-                                        ? 'files.join.sameYes'
-                                        : 'files.join.underYes'
-                                    : s.plan.review.kind === 'efs.tagReview'
-                                      ? TAG_SEND[tagStance(s.plan.review)]
-                                      : 'review.send',
+                        resplit
+                          ? 'saves.resplitContinue'
+                          : sent
+                            ? 'saves.sendAgain'
+                            : isRemove
+                              ? ask.kind === 'remove' && ask.hide
+                                ? 'files.remove.blockYes'
+                                : 'files.remove.yes'
+                              : ask.kind === 'unhide'
+                                ? 'files.unhide.yes'
+                                : ask.kind === 'hide'
+                                  ? 'files.hide.yes'
+                                  : ask.kind === 'label'
+                                    ? s.request.kind === 'label' && s.request.remove
+                                      ? 'files.label.remove'
+                                      : 'files.label.yes'
+                                    : ask.kind === 'join'
+                                      ? (s.request.kind === 'same' ||
+                                          s.request.kind === 'broader') &&
+                                        s.request.remove
+                                        ? 'files.join.removeMine'
+                                        : ask.how === 'same'
+                                          ? 'files.join.sameYes'
+                                          : 'files.join.underYes'
+                                      : s.plan.review.kind === 'efs.tagReview'
+                                        ? TAG_SEND[tagStance(s.plan.review)]
+                                        : 'review.send',
                       )}</wa-button
                     >`
             }`;

@@ -24,8 +24,9 @@ import {
   type SaveAction,
   saveAction,
   saveMessage,
-  saveOutcome,
   saveValues,
+  shownOutcome,
+  thrownOutcome,
 } from './save-outcome.ts';
 import type { SavesSession } from './saves-state.ts';
 import { shortAccount } from './wallet-state.ts';
@@ -46,8 +47,9 @@ export function describeSave(
   p: SequenceProgress,
   network: NetworkState,
   t: Translator['t'],
+  later?: ReadonlySet<string>,
 ): string {
-  const outcome = saveOutcome(p);
+  const outcome = shownOutcome(p, later);
   return t(
     saveMessage(outcome),
     saveValues(outcome, shortAccount, (id) => chainName(network, id, t)),
@@ -91,6 +93,13 @@ export class EfsSavesBanner extends EfsElement {
   /** What the wallet or its node answered while this save still checks the ledger. */
   #answered = state<ReturnType<typeof answerCopy> | undefined>(undefined);
   #notices = state<ReadonlyMap<string, RowNotice>>(new Map());
+  /**
+   * Saves whose Continue found their record damaged (sdk-v2 a03ba84), in this tab: said as such,
+   * never offered again, and Stop reads Discard (PM, 2026-11-27).
+   */
+  #damaged = state<ReadonlySet<string>>(new Set());
+  /** The save whose Stop or Discard the SDK refused while a part was in flight: checked first. */
+  #checkingChain = state<string | undefined>(undefined);
 
   protected override createRenderRoot() {
     return this;
@@ -134,8 +143,16 @@ export class EfsSavesBanner extends EfsElement {
       this.saves.track(next);
       return next;
     } catch (error) {
-      // It may have been sent before the throw: say so, and let the journal and ledger decide.
       console.error(error);
+      // A damaged record: nothing was sent, and the same record can't go: Discard only.
+      const thrown = thrownOutcome(error);
+      if (thrown.kind === 'again' && thrown.outcome.kind === 'damaged') {
+        const id = p.sequenceId.toLowerCase();
+        this.#damaged.set(new Set([...this.#damaged.get(), id]));
+        this.#notice(p.sequenceId, undefined);
+        return undefined;
+      }
+      // It may have been sent before the throw: say so, and let the journal and ledger decide.
       this.#notice(p.sequenceId, {
         kind: 'message',
         id: isFault(error, 'JOURNAL_UNAVAILABLE') ? 'save.noJournal' : 'save.unconfirmed',
@@ -146,6 +163,22 @@ export class EfsSavesBanner extends EfsElement {
       this.#busy.set(undefined);
       this.#approving.set(undefined);
       this.#answered.set(undefined);
+    }
+  }
+
+  /**
+   * Stop (or Discard, for a damaged record). The SDK refuses while a part is in flight (reason
+   * IN_FLIGHT: a funds-refused part may still land, sdk-v2 a61b2e8): then "Checking the chain…",
+   * the save settled from the ledger, and Stop or Discard offered again on its row.
+   */
+  async #abandon(p: SequenceProgress): Promise<void> {
+    const after = await this.#act(p, (writer, id) => writer.abandon(id));
+    if (!after || after.state === 'ABANDONED' || after.reason?.code !== 'IN_FLIGHT') return;
+    this.#checkingChain.set(p.sequenceId.toLowerCase());
+    try {
+      await this.#act(p, (writer, id) => writer.reconcileSequence(id));
+    } finally {
+      this.#checkingChain.set(undefined);
     }
   }
 
@@ -191,8 +224,14 @@ export class EfsSavesBanner extends EfsElement {
     if (location.hash !== draft.route) location.hash = draft.route;
   }
 
-  #primary(p: SequenceProgress, action: SaveAction | undefined, t: Translator['t']) {
-    const label = action ? PRIMARY[action] : undefined;
+  #primary(
+    p: SequenceProgress,
+    action: SaveAction | undefined,
+    t: Translator['t'],
+    asking = false,
+  ) {
+    // The RESPLIT ask ends "Continue?": its button says just that.
+    const label = asking ? 'saves.resplitContinue' : action ? PRIMARY[action] : undefined;
     if (!label) return nothing;
     return html`<wa-button
       size="s"
@@ -211,7 +250,10 @@ export class EfsSavesBanner extends EfsElement {
   }
 
   #row(p: SequenceProgress, t: Translator['t']) {
-    const outcome = saveOutcome(p);
+    const later = this.saves.later.get();
+    const outcome = shownOutcome(p, later);
+    // A save that now needs more approvals than its review said asks first (RESPLIT).
+    const asking = outcome.kind === 'resplit' && !outcome.later;
     // Held back by an earlier save of the same publication: the same save again waits; another
     // save of the same bytes may go on once that one is final.
     const listed = this.saves.state.get();
@@ -223,8 +265,11 @@ export class EfsSavesBanner extends EfsElement {
             touchesOf(p.effect),
           )
         : undefined;
-    const action: SaveAction | undefined =
-      standing === 'settled'
+    // A damaged record (found by this tab's Continue): no Continue, and Stop reads Discard.
+    const damaged = this.#damaged.get().has(p.sequenceId.toLowerCase());
+    const action: SaveAction | undefined = damaged
+      ? undefined
+      : standing === 'settled'
         ? p.state === 'PARTIAL'
           ? 'continue'
           : 'send-again'
@@ -246,7 +291,11 @@ export class EfsSavesBanner extends EfsElement {
       outcome.kind !== 'funds-late';
     const variant = done || (settling && calm) ? 'success' : 'warning';
     const local = 'network' in this.network && onLocalChain(this.network.network);
-    const message = standing ? t(heldMessage(standing, local)) : describeSave(p, this.network, t);
+    const message = damaged
+      ? t('save.damaged')
+      : standing
+        ? t(heldMessage(standing, local))
+        : describeSave(p, this.network, t, later);
     const approving = this.#busy.get() === p.sequenceId ? this.#approving.get() : undefined;
     const answered = this.#busy.get() === p.sequenceId ? this.#answered.get() : undefined;
     // Nothing is in flight in these states, so stopping is allowed (the SDK refuses otherwise).
@@ -265,7 +314,19 @@ export class EfsSavesBanner extends EfsElement {
       <div class="wa-split wa-gap-s efs-save-row">
         <p class="efs-save-message">${message}</p>
         <div class="wa-cluster wa-gap-xs">
-          ${this.#primary(p, action, t)}
+          ${this.#primary(p, action, t, asking)}
+          ${
+            asking
+              ? html`<wa-button
+                  size="s"
+                  appearance="outlined"
+                  class="efs-save-not-now"
+                  ?disabled=${this.#busy.get() !== undefined}
+                  @click=${() => this.saves.putOff(p.sequenceId)}
+                  >${t('save.notNow')}</wa-button
+                >`
+              : nothing
+          }
           ${
             canStop && notice?.kind !== 'confirm-abandon'
               ? html`<wa-button
@@ -274,7 +335,7 @@ export class EfsSavesBanner extends EfsElement {
                   class="efs-save-stop"
                   ?disabled=${this.#busy.get() !== undefined}
                   @click=${() => this.#notice(p.sequenceId, { kind: 'confirm-abandon' })}
-                  >${t('saves.abandon')}</wa-button
+                  >${t(damaged ? 'saves.discard' : 'saves.abandon')}</wa-button
                 >`
               : nothing
           }
@@ -297,6 +358,11 @@ export class EfsSavesBanner extends EfsElement {
           : nothing
       }
       ${
+        this.#checkingChain.get() === p.sequenceId.toLowerCase()
+          ? html`<p role="status" class="efs-save-checking-chain">${t('save.checkingChain')}</p>`
+          : nothing
+      }
+      ${
         answered
           ? html`<p role="status">${t(answered.id, answered.values)}</p>`
           : approving
@@ -313,8 +379,8 @@ export class EfsSavesBanner extends EfsElement {
                   variant="danger"
                   class="efs-save-abandon"
                   ?loading=${this.#busy.get() === p.sequenceId}
-                  @click=${() => void this.#act(p, (writer, id) => writer.abandon(id))}
-                  >${t('saves.abandonYes')}</wa-button
+                  @click=${() => void this.#abandon(p)}
+                  >${t(damaged ? 'saves.discard' : 'saves.abandonYes')}</wa-button
                 >
                 <wa-button size="s" appearance="outlined" @click=${() => this.#notice(p.sequenceId, undefined)}
                   >${t('saves.abandonNo')}</wa-button

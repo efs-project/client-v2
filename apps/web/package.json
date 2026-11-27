@@ -5,7 +5,7 @@
   "license": "MIT",
   "dependencies": {
     "@awesome.me/webawesome": "3.15.0",
-    "@efs/sdk": "file:../../vendor/efs-sdk-0.0.0-bdcbe6e.tgz",
+    "@efs/sdk": "file:../../vendor/efs-sdk-0.0.0-a61b2e8.tgz",
     "@lit-labs/signals": "0.3.0",
     "lit": "3.3.3",
     "messageformat": "4.0.0",
