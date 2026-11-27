@@ -9,8 +9,8 @@
 //
 // Paging: a local test chain's config may set `devVersionsPage` (tests only; never shown), the
 // entries one read scans, so a short list pages like a long one: the paging case reads one entry
-// per call. The hidden decision by a Lens author's lone no waits for the SDK's planHeadNo (next
-// pack); versions-model.test.ts pins it meanwhile.
+// per call. A Lens author's lone no ("not this", never a version) comes from the SDK's tests-only
+// planHeadNo (sdk-v2 bdcbe6e).
 
 import { AxeBuilder } from '@axe-core/playwright';
 import { link } from '@efs/sdk/links';
@@ -287,6 +287,77 @@ test('Versions one entry per read: the 3-read budget, Load more keeping focus, t
     expect(await focused(versions(page).locator('li.efs-version').first())).toBe(true);
     await chain.idle(500);
     chain.step("Refresh: read from the newest entry, #1's row first; focus on the first row");
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("Versions: a Lens author's lone no hides the file; another Lens author's version has Show; the lone-no author has no row", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-versions-hidden',
+    'From Node: #3 says "not this" on readme.txt before ever stating on it (the SDK\'s tests-only planHeadNo: a lone no, an entry in the versions list, never a version); #2 saves a version of their own. A guest opens readme.txt by a link whose Lens is [#3, #2]: the file is hidden (the walk stops at #3). Versions says "Hidden for you by" #3; the Lens tier holds #2\'s version only, with Show; #3 has no row. Show on #2: their version first.',
+  );
+  try {
+    await chain.actAs?.(3, async ({ efs, writer, save }) => {
+      const { planHeadNo } = await import('@efs/sdk/testing');
+      const plan = await planHeadNo(efs, writer, {
+        file: { kind: 'file', subject: chain.ids.file as never },
+      });
+      const review = (plan as { review?: { statement?: string } }).review;
+      if (review?.statement !== 'lone-no')
+        throw new Error(`expected a lone no: ${review?.statement}`);
+      await save(plan);
+    });
+    await chain.editAs?.(2, 'Version by #2.\n');
+    const p2 = await principalOf(chain, 2);
+    const p3 = await principalOf(chain, 3);
+    await chain.attach(page);
+    await serveConfig(page);
+    await serveDeployment(page, chain.deployment);
+    const shared = link({
+      kind: 'object',
+      subject: chain.ids.file as never,
+      lens: { principals: [p3, p2] } as never,
+    });
+    await page.goto(`./#/r/testnet/${shared}`);
+    await booted(page);
+    // Hidden in this Lens: no contents.
+    await expect(preview(page).locator('efs-outcome')).toBeVisible();
+    await expect(preview(page).locator('.efs-preview-text')).toHaveCount(0);
+    chain.step('The link with the Lens [#3, #2]: the file is hidden (#3 said not this)');
+
+    await toggle(page);
+    await expect(versions(page).locator('.efs-versions-decision')).toHaveAttribute(
+      'data-decision',
+      'hidden',
+    );
+    await expect(versions(page).locator('.efs-versions-decision')).toHaveText(
+      /^\s*Hidden for you by .+\.\s*$/,
+    );
+    await settled(page);
+    const lensRows = tier(page, 'lens').locator('li.efs-version');
+    await expect(lensRows).toHaveCount(1);
+    await expect(lensRows.first()).toHaveAttribute('data-author', p2.toLowerCase());
+    // The lone-no author is never a row, in any tier.
+    await expect(versionRow(page, p3)).toHaveCount(0);
+    // Nothing is shown here, so no row says "Showing here".
+    await expect(versions(page).locator('li.efs-version[data-shown]')).toHaveCount(0);
+    await expect(lensRows.first().getByRole('button')).toHaveAccessibleName(/^Show .+'s version$/);
+    chain.step(
+      "Versions: hidden for you by #3; #2's version in the Lens tier with Show; #3 has no row",
+    );
+
+    await press(lensRows.first().locator('wa-button.efs-version-show'));
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('Version by #2.\n');
+    await expect(preview(page).locator('.efs-viewing-author')).toContainText(
+      /Showing .+'s version first\./,
+    );
+    await expect(lensRows.first()).toHaveAttribute('data-shown', '');
+    await settled(page);
+    await chain.idle(500);
+    chain.step("Show on #2's row: #2's version first");
   } finally {
     await chain.finish();
   }
