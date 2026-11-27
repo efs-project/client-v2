@@ -12,6 +12,7 @@ import type { Efs, Lens, Reason } from '@efs/sdk';
 import { link as linkOf } from '@efs/sdk/links';
 import type { ThingTagRow, ThingTagsPage, TopicCursor } from '@efs/sdk/tags';
 import type { AppHost } from '../../shell/apps.ts';
+import { CatchUpRetry } from '../../shell/catch-up.ts';
 import { readFloorReset } from '../../shell/read-floor.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -81,6 +82,8 @@ export class EfsFileTags extends EfsElement {
   #paths = state<ReadonlyMap<string, readonly string[] | null>>(new Map());
   #controller: AbortController | undefined;
   #shown: string | undefined;
+  /** A BEHIND read re-reads itself once, on the SDK's catch-up signal (shell/catch-up.ts). */
+  #catchUp = new CatchUpRetry();
 
   protected override createRenderRoot() {
     return this;
@@ -89,6 +92,7 @@ export class EfsFileTags extends EfsElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#controller?.abort();
+    this.#catchUp.reset();
   }
 
   override updated(): void {
@@ -104,6 +108,7 @@ export class EfsFileTags extends EfsElement {
     if (key === this.#shown) return;
     this.#shown = key;
     this.#controller?.abort();
+    this.#catchUp.reset();
     queueMicrotask(() => {
       this.#state.set({ phase: 'closed' });
       this.#paths.set(new Map());
@@ -122,11 +127,15 @@ export class EfsFileTags extends EfsElement {
     });
   }
 
-  /** Reads the first page (or the next) and each row's tag words, one after another. */
-  async #load(more = false): Promise<void> {
+  /**
+   * Reads the first page (or the next) and each row's tag words, one after another. `quiet`: the
+   * section's own re-read after a catch-up, which keeps what it shows until the answer is in.
+   */
+  async #load(more = false, quiet = false): Promise<void> {
     const { efs, subject } = this;
     if (!efs || !subject) return;
     const before = this.#state.get();
+    if (!more) this.#catchUp.reading();
     if (!more) {
       this.#controller?.abort();
       this.#controller = new AbortController();
@@ -135,7 +144,7 @@ export class EfsFileTags extends EfsElement {
     if (!signal) return;
     const cursor = more && before.phase === 'page' ? before.next : undefined;
     if (cursor && before.phase === 'page') this.#state.set({ ...before, more: 'loading' });
-    else this.#state.set({ phase: 'loading' });
+    else if (!quiet) this.#state.set({ phase: 'loading' });
     this.dataset.reading = '';
     try {
       const { lensTagsOf, topicPath } = await loadTags();
@@ -148,6 +157,9 @@ export class EfsFileTags extends EfsElement {
       if (signal.aborted) return;
       const next = fromThingTags(page, cursor && before.phase === 'page' ? before : undefined);
       this.#state.set(next);
+      if (next.phase === 'unknown' && next.reason?.code === 'BEHIND') {
+        this.#catchUp.behind(efs, () => void this.#load(false, true));
+      }
       if (next.phase !== 'page') return;
       for (const row of next.rows) {
         const id = row.topic.toLowerCase();

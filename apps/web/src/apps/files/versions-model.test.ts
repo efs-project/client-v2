@@ -17,6 +17,7 @@ import {
   readMore,
   readVersions,
   VERSIONS_CALLS_PER_CLICK,
+  versionsBehind,
   versionsCount,
 } from './versions-model.ts';
 
@@ -344,5 +345,25 @@ describe("pageLimit: a test chain's page size, within the SDK's own bound", () =
     expect(pageLimit(10, 5)).toBeUndefined();
     expect(pageLimit(undefined, MAX_VERSIONS_PAGE)).toBeUndefined();
     expect(pageLimit(0, MAX_VERSIONS_PAGE)).toBeUndefined();
+  });
+});
+
+describe('versionsBehind: a read the section may retry once on the catch-up', () => {
+  it('is BEHIND for the whole read, the decision or the public tier; nothing else', async () => {
+    const behind = { code: 'BEHIND', retry: 'transient' };
+    expect(versionsBehind({ phase: 'unknown', reason: behind as never })).toBe(true);
+    expect(versionsBehind({ phase: 'unknown', reason: { code: 'RPC_UNAVAILABLE' } as never })).toBe(
+      false,
+    );
+    expect(versionsBehind({ phase: 'unknown' })).toBe(false);
+    const read = (await readVersions(reader([page({})]).read, efs, FILE)) as ReadState;
+    expect(versionsBehind(read)).toBe(false);
+    expect(
+      versionsBehind({ ...read, decision: { kind: 'unknown', reason: behind } as never }),
+    ).toBe(true);
+    expect(
+      versionsBehind({ ...read, public: { status: 'unknown', reason: behind as never } }),
+    ).toBe(true);
+    expect(versionsBehind({ phase: 'closed' })).toBe(false);
   });
 });

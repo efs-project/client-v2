@@ -12,6 +12,7 @@ import {
   publicGatewayHosts,
 } from '../../platform/settings/public-gateways.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { CatchUpRetry } from '../../shell/catch-up.ts';
 import { draftKey } from '../../shell/drafts.ts';
 import { openSettings } from '../../shell/network-indicator.ts';
 import { readFloorReset } from '../../shell/read-floor.ts';
@@ -184,12 +185,8 @@ export class EfsFilesPreview extends EfsElement {
    * pane host moves this element between layouts, so each move reconnects it.
    */
   #narrow = state(false);
-  /** Unsubscribes from the SDK's catch-up signal while a BEHIND read waits for it. */
-  #catchUp: (() => void) | undefined;
-  /** The load in progress is this pane's own re-read after a catch-up (never the person's). */
-  #bySelf = false;
-  /** This pane already re-read itself once since the person last asked: the next is theirs. */
-  #selfRetried = false;
+  /** A BEHIND read re-reads itself once, on the SDK's catch-up signal (shell/catch-up.ts). */
+  #catchUp = new CatchUpRetry();
   /** Saves handed off from this pane, and those already refreshed for (once each). */
   #handedOff = new Set<string>();
   /** Open results from the object-kind resolver already shown once (never reused after). */
@@ -216,29 +213,10 @@ export class EfsFilesPreview extends EfsElement {
     this.#narrow.set(this.closest('wa-tab-panel') !== null);
   }
 
-  /**
-   * A read every endpoint was BEHIND for: re-read once, by itself, when a read in this client next
-   * serves at or above the floor (the SDK's onCaughtUp, sdk-v2 a61b2e8: no polling, nothing read
-   * for it). If that re-read is BEHIND again, Try again is the person's; the pane doesn't wait
-   * again by itself until they act.
-   */
-  #awaitCatchUp(efs: Efs): void {
-    this.#catchUp?.();
-    this.#catchUp = efs.onCaughtUp(() => {
-      this.#catchUp = undefined;
-      this.#selfRetried = true;
-      this.#bySelf = true;
-      this.#reload();
-    });
-  }
-
   /** Starts following the session and the target. Everything stops when `scope` is disposed. */
   start(scope: OwnerScope): void {
     this.#scope = scope;
-    scope.signal.addEventListener('abort', () => {
-      this.#catchUp?.();
-      this.#catchUp = undefined;
-    });
+    scope.signal.addEventListener('abort', () => this.#catchUp.reset());
     // Focus can be handed to the pane itself (after a new file is sent, before it opens).
     if (!this.hasAttribute('tabindex')) this.tabIndex = -1;
     effect(scope, () => {
@@ -259,7 +237,7 @@ export class EfsFilesPreview extends EfsElement {
       this.#first.set(undefined);
       this.#ownView.set('');
       this.#notInView.set(undefined);
-      this.#selfRetried = false;
+      this.#catchUp.reset();
       queueMicrotask(() => this.#load(efs, link, false));
     });
     // A save handed off from here reached the ledger (Saved · confirming, then Saved): show the
@@ -333,10 +311,7 @@ export class EfsFilesPreview extends EfsElement {
     this.#run = undefined;
     // Any new read replaces a wait for a catch-up. Only this pane's own re-read counts as the one
     // it may make by itself; anything else (Try again, a save's refresh, Show my version) starts over.
-    this.#catchUp?.();
-    this.#catchUp = undefined;
-    if (!this.#bySelf) this.#selfRetried = false;
-    this.#bySelf = false;
+    this.#catchUp.reading();
     if (!efs || link.status !== 'target' || !this.#scope || this.#scope.signal.aborted) {
       this.#state.set(undefined);
       return;
@@ -381,7 +356,7 @@ export class EfsFilesPreview extends EfsElement {
             this.#noteReorder(efs, link.canonical, s.open.file.author);
           }
           if (!this.#first.get() && s.phase !== 'opening') this.#ownView.set(ownViewKey(s));
-          if (isBehind(s) && !this.#selfRetried && !run.signal.aborted) this.#awaitCatchUp(efs);
+          if (isBehind(s) && !run.signal.aborted) this.#catchUp.behind(efs, () => this.#reload());
         };
         // The media gate: a file opened from a tag's public tier fetches nothing until asked.
         const gated =

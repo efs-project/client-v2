@@ -16,6 +16,7 @@ import type { Efs, Lens } from '@efs/sdk';
 import type { FileVersion } from '@efs/sdk/files';
 import { versionsPageOf } from '../../platform/settings/model.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { CatchUpRetry } from '../../shell/catch-up.ts';
 import { readFloorReset } from '../../shell/read-floor.ts';
 import { state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
@@ -31,6 +32,7 @@ import {
   readMore,
   readVersions,
   type VersionsState,
+  versionsBehind,
   versionsCount,
 } from './versions-model.ts';
 import { authorLabel } from './who.ts';
@@ -89,6 +91,8 @@ export class EfsFileVersions extends EfsElement {
   #stampSeen: string | undefined;
   #shownSeen: string | undefined;
   #focus: Focus | undefined;
+  /** A BEHIND read re-reads itself once, on the SDK's catch-up signal (shell/catch-up.ts). */
+  #catchUp = new CatchUpRetry();
 
   protected override createRenderRoot() {
     return this;
@@ -97,6 +101,7 @@ export class EfsFileVersions extends EfsElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.#controller?.abort();
+    this.#catchUp.reset();
   }
 
   override updated(): void {
@@ -111,6 +116,7 @@ export class EfsFileVersions extends EfsElement {
       this.#subjectSeen = key;
       this.#stampSeen = this.stamp;
       this.#controller?.abort();
+      this.#catchUp.reset();
       queueMicrotask(() => {
         this.#state.set({ phase: 'closed' });
         this.#busy.set(undefined);
@@ -152,10 +158,15 @@ export class EfsFileVersions extends EfsElement {
     };
   }
 
-  /** The first read (opening), or a whole re-read in place (Refresh, Try again). */
-  async #load(busy?: 'refresh'): Promise<void> {
+  /**
+   * The first read (opening), or a whole re-read in place: Refresh or Try again (`refresh`, focus
+   * then moves to the first row), or the section's own re-read after a catch-up (`self`, focus
+   * untouched: the person didn't act).
+   */
+  async #load(busy?: 'refresh' | 'self'): Promise<void> {
     const { efs, subject } = this;
     if (!efs || !subject) return;
+    this.#catchUp.reading();
     this.#controller?.abort();
     const controller = new AbortController();
     this.#controller = controller;
@@ -167,12 +178,13 @@ export class EfsFileVersions extends EfsElement {
       const { read, opts } = await this.#reader(signal);
       const next = await readVersions(read, efs, subject, opts);
       if (signal.aborted) return;
-      if (busy) this.#focus = { to: 'first-row' };
+      if (busy === 'refresh') this.#focus = { to: 'first-row' };
       this.#state.set(next);
+      if (versionsBehind(next)) this.#catchUp.behind(efs, () => void this.#load('self'));
     } catch (error) {
       if (signal.aborted) return;
       console.error(error);
-      if (busy) this.#focus = { to: 'first-row' };
+      if (busy === 'refresh') this.#focus = { to: 'first-row' };
       this.#state.set({ phase: 'unknown' });
     } finally {
       if (!signal.aborted) {

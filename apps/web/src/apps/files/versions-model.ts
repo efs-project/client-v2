@@ -223,6 +223,21 @@ export async function readMore(
   };
 }
 
+/**
+ * Whether any part of what was read is UNKNOWN BEHIND (the read floor): the whole read, the
+ * decision, or the public tier. Then the section reads itself again once, on the SDK's catch-up
+ * signal (shell/catch-up.ts).
+ */
+export function versionsBehind(s: VersionsState): boolean {
+  const behind = (r: { readonly code?: string } | undefined) => r?.code === 'BEHIND';
+  if (s.phase === 'unknown') return behind(s.reason);
+  if (s.phase !== 'read') return false;
+  return (
+    (s.decision.kind === 'unknown' && behind(s.decision.reason)) ||
+    (s.public.status === 'unknown' && behind(s.public.reason))
+  );
+}
+
 /** The view's first line: what the file shows in its Lens. `me` is the reader's principal. */
 export function decisionLine(
   decision: VersionsDecision,

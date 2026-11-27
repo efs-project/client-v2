@@ -183,3 +183,36 @@ test('an endpoint that falls behind during the refresh after a save leaves it BE
     await chain.finish();
   }
 });
+
+test("the Preview's Versions and Tags sections, BEHIND after a save, read themselves again once the endpoint catches up", async ({
+  page,
+}) => {
+  // The save's own check comes every 12 s; this case waits for one after the catch-up.
+  test.setTimeout(60_000);
+  const chain = await testChain('live-read-floor-sections', 'live only');
+  const versions = preview(page).locator('efs-files-file-versions');
+  const tags = preview(page).locator('efs-files-file-tags');
+  try {
+    await start(page, chain, undefined, true);
+    await saveThenLag(page, chain, 'Read by the sections.\n');
+    // Opened while the endpoint is behind the save: each section says so (BEHIND's own words).
+    await press(versions.locator('summary'));
+    await expect(versions.locator('efs-outcome')).toContainText(BEHIND, { timeout: 15_000 });
+    await press(tags.locator('summary'));
+    await expect(tags.locator('efs-outcome')).toContainText(BEHIND, { timeout: 15_000 });
+    // The endpoint catches up. Nobody presses anything: the page's next read (the save's check)
+    // is served at or above the floor, the SDK's onCaughtUp fires, and each section reads itself
+    // again, once (PM, 2026-11-27), beside the Preview, which does the same.
+    chain.control?.catchUp();
+    await expect(versions.locator('.efs-versions-decision')).toBeVisible({ timeout: 20_000 });
+    await expect(versions.locator('efs-outcome', { hasText: BEHIND })).toHaveCount(0);
+    await expect(tags.locator('efs-outcome', { hasText: BEHIND })).toHaveCount(0, {
+      timeout: 20_000,
+    });
+    await expect(preview(page).locator('.efs-preview-text')).toBeVisible({ timeout: 20_000 });
+    await chain.idle();
+  } finally {
+    chain.control?.catchUp();
+    await chain.finish();
+  }
+});
