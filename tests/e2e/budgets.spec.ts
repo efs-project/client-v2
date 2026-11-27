@@ -8,12 +8,32 @@ import { testChain } from './chain.ts';
 import { booted, replayRpc, serveConfig, serveDeployment, transcript } from './support.ts';
 
 /**
- * Milliseconds from navigation start, with the CPU slowed 4×: 2.5× CI's median, rounded up to the
- * next 100 ms (samples in docs/design/shell.md, "Time budgets"). Re-measure, don't bump.
+ * Milliseconds from navigation start, with the CPU slowed 4×: about 2.5× CI's median, rounded up
+ * to the next 100 ms (PM, 2026-11-27; samples in docs/design/shell.md, "Time budgets"). Strict 2×
+ * would fail healthy runs (a tag view once booted in 755 ms): a flaky gate gets ignored. When one
+ * fails, its message names the measured value, the budget and CI's median. If one trips twice on
+ * healthy commits, re-measure and tell the PM: never just rerun, never just bump.
  */
-const BUDGET_MS = { booted: 900, previewVerified: 4300 };
+const BUDGET_MS = { booted: 800, previewVerified: 3800 };
 /** The same budgets for the tag, word and address views: their first list in place of the file. */
 const VIEW_BUDGET_MS = { booted: BUDGET_MS.booted, listed: BUDGET_MS.previewVerified };
+/** CI's medians (ms) over 8 green main runs, 2026-11-26 to 2026-11-27, for the failure messages. */
+const CI_MEDIAN_MS: Readonly<Record<string, number>> = {
+  booted: 304,
+  previewVerified: 1496,
+  'tag booted': 323,
+  'tag listed': 1580,
+  'word booted': 214,
+  'word listed': 969,
+  'address booted': 215,
+  'address listed': 1361,
+};
+
+/** "booted: 850 ms against a budget of 800 ms (CI median 304 ms)". */
+const said = (what: string, measured: number | undefined, budget: number) =>
+  `${what}: ${Math.round(measured ?? Number.NaN)} ms against a budget of ${budget} ms (CI median ${
+    CI_MEDIAN_MS[what] ?? '?'
+  } ms)`;
 
 test('startup and Preview stay within their budgets @chromium-only', async ({ page }, info) => {
   const cdp = await page.context().newCDPSession(page);
@@ -37,16 +57,19 @@ test('startup and Preview stay within their budgets @chromium-only', async ({ pa
     contentType: 'application/json',
   });
   console.log(`budgets: ${JSON.stringify(measured)}`);
-  expect(measured.booted).toBeLessThan(BUDGET_MS.booted || Number.POSITIVE_INFINITY);
-  expect(measured.previewVerified).toBeLessThan(
-    BUDGET_MS.previewVerified || Number.POSITIVE_INFINITY,
+  expect(measured.booted, said('booted', measured.booted, BUDGET_MS.booted)).toBeLessThan(
+    BUDGET_MS.booted,
   );
+  expect(
+    measured.previewVerified,
+    said('previewVerified', measured.previewVerified, BUDGET_MS.previewVerified),
+  ).toBeLessThan(BUDGET_MS.previewVerified);
 });
 
 /**
  * The tag, word and address views, each loaded fresh as a guest with the CPU slowed 4×: the shell
- * within the same 900 ms, and each view's first list (its rows, or an honest empty or unknown:
- * efs:topic-listed, efs:word-listed, efs:listing-listed) within the Preview's 4.3 s. Recorded
+ * within the same 800 ms, and each view's first list (its rows, or an honest empty or unknown:
+ * efs:topic-listed, efs:word-listed, efs:listing-listed) within the Preview's 3.8 s. Recorded
  * chain answers (its own transcript), so only the client's work is timed.
  */
 test('a tag, a word page and an address view stay within their budgets @chromium-only', async ({
@@ -116,8 +139,13 @@ test('a tag, a word page and an address view stay within their budgets @chromium
     });
     console.log(`budgets (views): ${JSON.stringify(measured)}`);
     for (const { view } of views) {
-      expect(measured[view]?.booted, `${view}: booted`).toBeLessThan(VIEW_BUDGET_MS.booted);
-      expect(measured[view]?.listed, `${view}: listed`).toBeLessThan(VIEW_BUDGET_MS.listed);
+      const m = measured[view];
+      expect(m?.booted, said(`${view} booted`, m?.booted, VIEW_BUDGET_MS.booted)).toBeLessThan(
+        VIEW_BUDGET_MS.booted,
+      );
+      expect(m?.listed, said(`${view} listed`, m?.listed, VIEW_BUDGET_MS.listed)).toBeLessThan(
+        VIEW_BUDGET_MS.listed,
+      );
     }
   } finally {
     await chain.finish();

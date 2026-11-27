@@ -213,7 +213,7 @@ require-trusted-types-for 'script'; trusted-types lit-html
 
 ## Time budgets
 
-`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **900 ms**, or the first verified file text (`efs:preview-verified`) within **4.3 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report, and the e2e-static job logs them as a `budgets: {…}` line.
+`tests/e2e/budgets.spec.ts` (Chromium, CPU slowed 4×, replayed chain answers so only the client's own work is timed) fails when the shell isn't on screen (`efs:booted`) within **800 ms**, or the first verified file text (`efs:preview-verified`) within **3.8 s**, of navigation start. Each run attaches its numbers (`budgets.json`) to the test report, and the e2e-static job logs them as a `budgets: {…}` line.
 
 The budgets are 2.5× CI's median, rounded up to the next 100 ms (PM, 2026-11-25; they were a provisional 1.5 s and 4 s until CI's numbers were in). They exist to catch big regressions, not small ones: at 2× the slowest sample sat only about 1.4× under the budget, close enough to flake, and a flaky gate gets ignored. CI samples, in ms:
 
@@ -227,7 +227,7 @@ The budgets are 2.5× CI's median, rounded up to the next 100 ms (PM, 2026-11-25
 
 CI runners vary about twofold between runs: the last two rows are main with a docs change and main with slice G, which measure the same locally (480–730 ms before G, 480–510 ms after), yet CI put them at 1,143 ms and 2,458 ms. An Apple-silicon laptop measures about 130 ms and 500 ms, so set budgets from CI, never from a laptop. If a run trips a budget with no code change behind it, re-measure and record the new samples here rather than raising the number to make it pass.
 
-**The tag, word and address views** have the same two budgets (`client-budget-views`, its own recorded transcript): each loaded fresh as a guest, the shell within **900 ms** and the view's first list within **4.3 s**. A view's end point is its first rows, or an honest empty or unknown state, marked once per page load (`platform/marks.ts`): `efs:topic-listed` (a tag), `efs:word-listed` (a word's places) and `efs:listing-listed` (an address's entries, or any listing). Their numbers are attached as `budgets-views.json` and logged as `budgets (views): {…}`. Laptop samples, 4× slowed (CI's will be added as they come in; set nothing from these):
+**The tag, word and address views** have the same two budgets (`client-budget-views`, its own recorded transcript): each loaded fresh as a guest, the shell within **800 ms** and the view's first list within **3.8 s**. A view's end point is its first rows, or an honest empty or unknown state, marked once per page load (`platform/marks.ts`): `efs:topic-listed` (a tag), `efs:word-listed` (a word's places) and `efs:listing-listed` (an address's entries, or any listing). Their numbers are attached as `budgets-views.json` and logged as `budgets (views): {…}`. Laptop samples, 4× slowed (CI's will be added as they come in; set nothing from these):
 
 | View | booted | listed |
 |---|---|---|
@@ -240,6 +240,18 @@ CI samples (ms), as they come in:
 | CI run | tag booted / listed | word | address |
 |---|---|---|---|
 | 45738636212 | 272 / 1,336 | 163 / 871 | 241 / 1,420 |
+
+**Tightened 2026-11-27 (PM: 2.5×, not strict 2×)** from 900 ms / 4.3 s to **800 ms / 3.8 s**, from 8 green main runs (45869306155 to 45918927230):
+
+| Measure (ms) | Median | Max | Budget |
+|---|---|---|---|
+| booted (file) | 304 | 342 | 800 |
+| preview-verified | 1,496 | 2,266 | 3,800 |
+| tag booted / listed | 323 / 1,580 | 755 / 2,241 | 800 / 3,800 |
+| word booted / listed | 214 / 969 | 226 / 1,225 | 800 / 3,800 |
+| address booted / listed | 215 / 1,361 | 556 / 2,428 | 800 / 3,800 |
+
+Strict 2× (about 610 ms / 3,000 ms) would have failed a healthy run: a tag view once booted in 755 ms (45913100425). A flaky performance gate gets ignored, which is worse than a looser one. **When a budget fails, its message names the measured value, the budget and CI's median** (`budgets.spec.ts` `CI_MEDIAN_MS`, from the table above), so a real regression is plain. **If one trips twice on healthy commits, re-measure and tell the PM: never just rerun, never just bump.** The 755 ms tag boot sits 45 ms under 800 ms: it is the one to watch.
 
 At 320 px the three views are checked in all three browsers (`tags.spec.ts`, `client-views-320`): the page never scrolls sideways, and nothing in the Entries pane reaches past the screen's right edge, which also catches a long path or address that a pane would otherwise clip.
 
