@@ -19,6 +19,7 @@ import {
   withInbox,
 } from './folder-support.ts';
 import { press } from './press.ts';
+import { fillTagPath } from './tag-path.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -332,6 +333,126 @@ test('A selection by keyboard: Space selects rows, the bar is reachable, its Rem
     expect(sendRequests(chain)).toHaveLength(0);
     await chain.idle(500);
     chain.step('Keyboard: select two, Remove reviews both, Escape keeps them');
+  } finally {
+    await chain.finish();
+  }
+});
+
+/**
+ * A phone's width: 320 px wide, the panes as tabs. `tab` is fronted by keyboard, as a person there
+ * would reach it before opening a dialog from it.
+ */
+async function narrow(page: Page, tab: 'Entries' | 'Preview'): Promise<void> {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const it = page.getByRole('tab', { name: tab });
+  await activate(page, it);
+  await expect(it).toHaveAttribute('aria-selected', 'true');
+}
+
+/**
+ * A dialog's review, at 320 px, overflows its body: the review's words are a focusable region a
+ * keyboard reaches (Shift+Tab from the first footer button) and scrolls, and axe's
+ * scrollable-region-focusable runs against a real overflow (PM, 2026-11-27).
+ */
+async function scrollsByKeyboard(page: Page, d: ReturnType<Page['locator']>): Promise<void> {
+  const region = d.locator('.efs-review-body');
+  await expect(region).toHaveAttribute('role', 'region');
+  await expect(region).toHaveAttribute('tabindex', '0');
+  const body = async () =>
+    d.evaluate((el) => {
+      const part = el.shadowRoot?.querySelector('[part~="body"]');
+      return part
+        ? { scroll: part.scrollHeight, client: part.clientHeight, top: part.scrollTop }
+        : undefined;
+    });
+  // A real overflow, or this case proves nothing.
+  await expect
+    .poll(async () => {
+      const b = await body();
+      return b ? b.scroll > b.client : false;
+    })
+    .toBe(true);
+  expect(await axe(page), 'review at 320 px').toEqual([]);
+  await region.focus();
+  await expect(region).toBeFocused();
+  await page.keyboard.press('PageDown');
+  await expect.poll(async () => (await body())?.top ?? 0).toBeGreaterThan(0);
+}
+
+test('a long folder review at 320 px scrolls by keyboard: its words are a named region with a tab stop; axe clean', async ({
+  page,
+}) => {
+  const names = Array.from(
+    { length: 8 },
+    (_, i) =>
+      `quarterly-report-for-the-review-dialog-overflow-${String(i + 1).padStart(2, '0')}.txt`,
+  );
+  const chain = await testChain(
+    'client-a11y-long-review',
+    'Eight long-named files by anvil #6 at the root, selected and removed: the review lists them all.',
+  );
+  try {
+    for (const name of names) await fileAtRoot(chain, 6, name, 'x\n');
+    await start(page, chain);
+    await narrow(page, 'Entries');
+    for (const name of names) {
+      const box = row(page, name).locator('input.efs-entry-select');
+      await box.focus();
+      await page.keyboard.press('Space');
+      await expect(box).toBeChecked();
+    }
+    const bar = entries(page).locator('.efs-selection');
+    await expect(bar.locator('[role="status"]')).toContainText('8 selected');
+    await activate(page, bar.locator('wa-button.efs-selection-remove'));
+    await expect(dialog(page)).toContainText(/These\W+8\W+entries of yours/);
+    // A removal still opens on Keep it: the region takes no focus of its own.
+    await expect(dialog(page).locator('wa-button.efs-folder-keep')).toBeFocused();
+    await scrollsByKeyboard(page, dialog(page));
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).not.toHaveAttribute('open');
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(500);
+    chain.step('Remove eight long names; at 320 px the review scrolls by keyboard; Escape keeps');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test('a long tag review at 320 px scrolls by keyboard: its words are a named region with a tab stop; axe clean', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-a11y-long-tag-review',
+    'note.txt by anvil #6 at the root, tagged with a deep path of long words: the review lists every tag it creates.',
+  );
+  const d = page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
+  try {
+    await fileAtRoot(chain, 6, 'note.txt', 'note\n');
+    await start(page, chain);
+    await narrow(page, 'Entries');
+    await activate(page, row(page, 'note.txt').locator('.efs-entry-open'));
+    // At a phone's width a file opened from its row fronts the Preview.
+    await expect(page.getByRole('tab', { name: 'Preview' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(preview(page).locator('.efs-preview-text')).toContainText('note');
+    await activate(page, preview(page).locator('wa-button.efs-preview-tag'));
+    await expect(d).toHaveAttribute('open', '');
+    await fillTagPath(
+      d,
+      'quarterly-planning-documents/engineering-department-reviews/twenty-twenty-six-second-half/accessibility-audits',
+    );
+    await activate(page, d.locator('wa-button.efs-tag-review'));
+    await expect(d.locator('.efs-tag-creates')).toContainText(/Creates\W+4\W+new tags/);
+    await scrollsByKeyboard(page, d);
+    await page.keyboard.press('Escape');
+    await expect(d).not.toHaveAttribute('open');
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(500);
+    chain.step(
+      'Tag with four long words; at 320 px the review scrolls by keyboard; Escape sends nothing',
+    );
   } finally {
     await chain.finish();
   }

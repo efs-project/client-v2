@@ -1908,7 +1908,16 @@ export class EfsFolderSave extends EfsElement {
                         signer: shortAccount(hold.signer),
                       })
                     : undefined;
-          body = html`<div class="wa-stack wa-gap-s">
+          // A long review (many entries, long names, a narrow screen, large text) scrolls the
+          // dialog's body: its words are a named region with a tab stop, so a keyboard can reach
+          // and scroll them (WCAG 2.1.1; PM, 2026-11-27). Initial focus is unchanged: Web
+          // Awesome's dialog focuses [autofocus] (Keep it, for a removal) or itself.
+          body = html`<div
+              class="wa-stack wa-gap-s efs-review-body"
+              role="region"
+              aria-label=${t('review.details')}
+              tabindex="0"
+            >
               ${this.#reviewLines(ask, s.plan)}
               ${this.#attachNotice(s.request, s.writer)}
               <p class="efs-review-prompts">
