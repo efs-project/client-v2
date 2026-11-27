@@ -2,7 +2,8 @@
 //
 // The URL says which folder is shown (its object link, routed through openObject); this keeps the
 // trail of folders the person came through, for the breadcrumb. A folder opened by its link with
-// no trail (a reload, a shared link) starts a new trail with just itself.
+// no trail (a reload, a shared link) starts a new trail with just itself; the walk up from it
+// (folder-trail-state.ts) may then give it the trail from the root, when the names lead back down.
 //
 // The trail starts at the realm's shared root, or at an address (a home: `base`) when the person
 // came in through one: its entries are listed like a folder's, and folders opened below it keep it
@@ -12,11 +13,17 @@ import type { Lens } from '@efs/sdk';
 import type { FolderRef, HomeRef, ParentRef } from '@efs/sdk/files';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
 import type { ViewPath } from './folder-requests.ts';
+import type { TrailName } from './folder-trail.ts';
 
 /** One folder opened from a row: the FolderRef the row pointed at, and the name it was shown as. */
 export interface NavStep {
   readonly folder: FolderRef;
   readonly name: string;
+  /**
+   * How the walk up from a folder opened by its link named it (folder-trail.ts), when this step
+   * came from that walk: whose name it is, and whether it's settled. Rows clicked through have none.
+   */
+  readonly named?: TrailName;
 }
 
 export interface FolderNav {

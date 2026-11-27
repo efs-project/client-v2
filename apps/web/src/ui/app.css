@@ -496,3 +496,21 @@ span.efs-entry-open {
   white-space: nowrap;
   unicode-bidi: isolate;
 }
+
+/* The location bar's walked names (folder-trail.ts): whose name it is, on the folder on screen,
+   and "?" for a name an older entry could still outrank. Quiet text, never colour alone. */
+.efs-crumb-by {
+  font-size: var(--wa-font-size-s);
+  color: var(--wa-color-text-quiet);
+}
+.efs-crumb-unsettled {
+  margin-inline-start: 0.1em;
+  color: var(--wa-color-text-quiet);
+}
+
+/* A crumb standing for what's above a walked path ("…", "Loop"): words, not a place to go, so it
+   doesn't look like one. "…" with Try again (a read that couldn't be made) keeps the link look. */
+wa-breadcrumb-item.efs-crumb-above:not(.efs-crumb-retry)::part(label) {
+  color: var(--wa-color-text-quiet);
+  cursor: default;
+}

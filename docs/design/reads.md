@@ -8,7 +8,7 @@
 - **Preview pane.** An object or revision link (`#/r/<realm>/~efs/o/…`, `…/~efs/v/…`) opens that file in Preview. Verified text is shown; other verified contents can be saved; anything not verified is never shown as contents.
 - **`<efs-outcome>`** renders any SDK status (read, bytes, pin, write) with its raw code. Unrecognized codes are never shown as success, empty or absent.
 
-Listings, the tree and the breadcrumb wait for the folder/tag ruling.
+Listings, the tree and the breadcrumb are in `file-operations.md` (the breadcrumb's walk up from a folder opened by its link: `folderNames`, one level per read).
 
 ## Data flow
 

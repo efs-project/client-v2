@@ -310,8 +310,10 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
     expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     chain.step('Open outer/: old.txt and inner/ are listed as removed by you');
 
-    // The same folder opened by its link: no trail, so no path to restore a folder by. Each move
-    // waits for the folder's reads to settle, so a replay sees the calls in the recorded order.
+    // The same folder opened by its link: no trail, but the walk up finds it under the root (its
+    // name is yours, and it leads back down), so its path is known and a folder restores here too.
+    // Each move waits for the folder's reads to settle, so a replay sees the calls in the recorded
+    // order. (A link-opened folder whose path stays unknown: the loop case below.)
     const atRoot = async () => {
       await press(page.locator('wa-breadcrumb wa-breadcrumb-item').first());
       await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
@@ -325,20 +327,16 @@ test('Show removed lists only your removed entries here; Restore puts one back, 
       },
       `#/r/testnet/${objectLink(chain.ids.outer as string)}`,
     );
-    await expect(removedRow('inner')).toContainText(
-      'Open this folder from the root to restore a folder here.',
-    );
-    await expect(removedRow('inner').locator('wa-button.efs-removed-restore')).toHaveAttribute(
+    await expect(page.locator('efs-files-view wa-breadcrumb-item')).toHaveCount(2);
+    await expect(page.locator('efs-files-view wa-breadcrumb-item').last()).toContainText('outer');
+    await expect(removedRow('inner').locator('wa-button.efs-removed-restore')).not.toHaveAttribute(
       'disabled',
-      '',
     );
     await expect(
       removedRow('old.txt').locator('wa-button.efs-removed-restore'),
     ).not.toHaveAttribute('disabled');
     expect(sendRequests(chain)).toHaveLength(0);
-    chain.step(
-      "outer/ opened by its link: a folder can't be restored without its path; a file can",
-    );
+    chain.step('outer/ opened by its link: the walk up names it Root > outer, so both restore');
 
     // From the root again: the path is known, and the folder restores.
     await atRoot();
@@ -1014,6 +1012,242 @@ test('a folder cycle in the tree is opened one level per expand, five levels rou
     // Still on the root (expanding never navigates), and the page answers.
     await expect(row(page, 'loop')).toBeVisible();
     await chain.idle(500);
+  } finally {
+    await chain.finish();
+  }
+});
+
+/** The location bar's crumbs. */
+const crumbs = (page: Page) => page.locator('efs-files-view wa-breadcrumb-item');
+
+/** Opens a folder by its object link in this tab (no reload: the wallet stays connected). */
+async function openByLink(page: Page, directory: string): Promise<void> {
+  await page.evaluate(
+    (hash) => {
+      location.hash = hash;
+    },
+    `#/r/testnet/${objectLink(directory)}`,
+  );
+}
+
+test("a folder opened by its link, two levels down: the breadcrumb names the path from the root, the tree opens along it, another author's name says whose", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-trail-root',
+    "anvil #6 (the wallet) makes trail/ and trail/deep/; anvil #0 makes trail/theirs/. Each is opened by its object link: the walk up (folderNames) reaches the root, and the names lead back down in the tree's Lens, so the trail is the one from the root.",
+  );
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const made = async (parent: import('@efs/sdk/files').FolderRef, name: string) =>
+        (
+          (await done(
+            await files.planCreateFolder(efs, writer, { folder: parent, name, lens }),
+          )) as { created: import('@efs/sdk/files').FolderRef }
+        ).created;
+      const trail = await made(root, 'trail');
+      const deep = await made(trail, 'deep');
+      return { trail: trail.directory as string, deep: deep.directory as string };
+    });
+    await chain.actAs?.(0, async ({ files, lens, writer, efs, save: done }) => {
+      const theirs = (
+        (await done(
+          await files.planCreateFolder(efs, writer, {
+            folder: { kind: 'folder', directory: chain.ids.trail as never },
+            name: 'theirs',
+            lens,
+          }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      return { theirs: theirs.directory as string };
+    });
+    chain.step('#6 makes trail/ and trail/deep/; #0 makes trail/theirs/');
+    await openRoot(page, chain);
+    await expect(page.locator('wa-dialog.efs-wallet-dialog')).not.toHaveAttribute('open');
+
+    await openByLink(page, chain.ids.deep as string);
+    await expect(crumbs(page)).toHaveCount(3);
+    await expect(crumbs(page).nth(1)).toContainText('trail');
+    await expect(crumbs(page).nth(2)).toContainText('deep');
+    // Both names are yours: no "named by", nothing "above".
+    await expect(page.locator('efs-files-view .efs-crumb-by')).toHaveCount(0);
+    await expect(page.locator('efs-files-view .efs-crumb-above')).toHaveCount(0);
+    // The tree opens along the path from the root and selects deep/; there is no "above" node.
+    await expect(
+      page.locator('efs-files-tree wa-tree-item.efs-tree-folder[data-key="/trail/deep"]'),
+    ).toHaveAttribute('selected', '');
+    await expect(page.locator('efs-files-tree .efs-tree-above')).toHaveCount(0);
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await chain.idle(300);
+    chain.step('trail/deep/ by its link: Root > trail > deep, the tree selects /trail/deep');
+
+    // trail/ on the bar goes up by the path, as one clicked through would.
+    await press(crumbs(page).nth(1));
+    await expect(row(page, 'deep')).toBeVisible();
+    await expect(crumbs(page)).toHaveCount(2);
+    await chain.idle(300);
+
+    await openByLink(page, chain.ids.theirs as string);
+    await expect(crumbs(page)).toHaveCount(3);
+    await expect(crumbs(page).nth(2)).toContainText('theirs');
+    // Its name is its creator's (#0), not yours: the folder on screen says whose.
+    await expect(crumbs(page).nth(2).locator('.efs-crumb-by')).toContainText(/named by \W*0xf39F/i);
+    await expect(
+      page.locator('efs-files-tree wa-tree-item.efs-tree-folder[data-key="/trail/theirs"]'),
+    ).toHaveAttribute('selected', '');
+    const axe = await new AxeBuilder({ page })
+      .include('efs-files-view')
+      .include('efs-files-tree')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await chain.idle(300);
+    chain.step('trail/theirs/ by its link: #0\'s name, said as "named by" on the folder on screen');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("a folder opened by its link whose names loop: the path above is shown as a loop, never as one from the root, and a folder can't be restored there", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-trail-loop',
+    "anvil #6 (the wallet) makes lx/ and lx/ly/, puts a newer entry lx2 for lx/ inside ly/ (the SDK's tests-only planFolderEntry), and removes ly/gone/. Opened by its link, ly/ is named in lx/, and lx/'s newest name is in ly/: a loop.",
+  );
+  const removedRow = (name: string) =>
+    page
+      .locator('efs-files-removed')
+      .locator('.efs-entry', { has: page.locator('.efs-entry-name', { hasText: name }) });
+  try {
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const made = async (parent: import('@efs/sdk/files').FolderRef, name: string) =>
+        (
+          (await done(
+            await files.planCreateFolder(efs, writer, { folder: parent, name, lens }),
+          )) as { created: import('@efs/sdk/files').FolderRef }
+        ).created;
+      const lx = await made(root, 'lx');
+      const ly = await made(lx, 'ly');
+      await made(ly, 'gone');
+      await done(
+        await files.planRemoveEntries(efs, writer, {
+          entries: [{ folder: ly, name: 'gone' }],
+          lens,
+        }),
+      );
+      const { planFolderEntry } = await import('@efs/sdk/testing');
+      await done(await planFolderEntry(efs, writer, { folder: ly, name: 'lx2', target: lx }));
+      return { lx: lx.directory as string, ly: ly.directory as string };
+    });
+    chain.step('#6 makes lx/, lx/ly/ and removes ly/gone/; then puts lx2 (→ lx/) in ly/');
+    await openRoot(page, chain);
+    await expect(page.locator('wa-dialog.efs-wallet-dialog')).not.toHaveAttribute('open');
+
+    await openByLink(page, chain.ids.ly as string);
+    // Root > Loop > lx2 > ly: the loop is said, in words, and the path is never one from the root.
+    await expect(crumbs(page)).toHaveCount(4);
+    await expect(crumbs(page).nth(1)).toHaveClass(/efs-crumb-above/);
+    await expect(crumbs(page).nth(1)).toContainText('Loop');
+    await expect(crumbs(page).nth(1)).toContainText('placed inside each other');
+    await expect(crumbs(page).nth(2)).toContainText('lx2');
+    await expect(crumbs(page).nth(3)).toContainText('ly');
+    // The tree: beside the root, the same "above" node, holding lx2 > ly, with ly/ selected.
+    const above = page.locator('efs-files-tree wa-tree-item.efs-tree-above');
+    await expect(above).toContainText('Loop');
+    await expect(above.locator('wa-tree-item.efs-tree-walked')).toContainText('lx2');
+    await expect(above.locator('wa-tree-item.efs-tree-folder[selected]')).toHaveAttribute(
+      'data-name',
+      'ly',
+    );
+    chain.step('ly/ by its link: Root > Loop > lx2 > ly, and the tree says the same');
+
+    // The path from the root isn't known here, so a folder can't be restored (the SDK needs it).
+    await press(entries(page).locator('wa-switch.efs-show-removed'));
+    await expect(removedRow('gone')).toContainText(
+      'Open this folder from the root to restore a folder here.',
+    );
+    await expect(removedRow('gone').locator('wa-button.efs-removed-restore')).toHaveAttribute(
+      'disabled',
+      '',
+    );
+    expect(sendRequests(chain)).toHaveLength(0);
+    await chain.idle(300);
+    chain.step("Show removed: gone/ can't be restored from a folder whose path isn't known");
+
+    // lx2 on the bar opens lx/ by its link, and walks up from there (its newest name is in ly/).
+    await press(crumbs(page).nth(2));
+    await expect(row(page, 'ly')).toBeVisible();
+    await expect(crumbs(page).nth(1)).toContainText('Loop');
+    await chain.idle(300);
+    chain.step('lx2 on the bar: lx/ by its link, and the loop again from there');
+  } finally {
+    await chain.finish();
+  }
+});
+
+test("a folder opened by its link whose names reach the root but lead elsewhere on the way down: shown with what's above, never as a path from the root", async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-trail-elsewhere',
+    "anvil #0 makes ea/ and ea/eb/; anvil #6 (the wallet) makes ez/ and puts its own eb in ea/ pointing at ez/ (planFolderEntry). Walking up from #0's eb/ names it by its creator in ea/, and ea/ in the root; but down from the root in the tree's Lens (#6 first), ea/eb is #6's, which is ez/.",
+  );
+  try {
+    await chain.actAs?.(0, async ({ files, root, lens, writer, efs, save: done }) => {
+      const made = async (parent: import('@efs/sdk/files').FolderRef, name: string) =>
+        (
+          (await done(
+            await files.planCreateFolder(efs, writer, { folder: parent, name, lens }),
+          )) as { created: import('@efs/sdk/files').FolderRef }
+        ).created;
+      const ea = await made(root, 'ea');
+      const eb = await made(ea, 'eb');
+      return { ea: ea.directory as string, eb: eb.directory as string };
+    });
+    await chain.actAs?.(6, async ({ files, root, lens, writer, efs, save: done }) => {
+      const ez = (
+        (await done(
+          await files.planCreateFolder(efs, writer, { folder: root, name: 'ez', lens }),
+        )) as { created: import('@efs/sdk/files').FolderRef }
+      ).created;
+      const { planFolderEntry } = await import('@efs/sdk/testing');
+      await done(
+        await planFolderEntry(efs, writer, {
+          folder: { kind: 'folder', directory: chain.ids.ea as never },
+          name: 'eb',
+          target: ez,
+        }),
+      );
+      return { ez: ez.directory as string };
+    });
+    chain.step('#0 makes ea/eb/; #6 makes ez/ and puts its own eb (→ ez/) in ea/');
+    await openRoot(page, chain);
+    await expect(page.locator('wa-dialog.efs-wallet-dialog')).not.toHaveAttribute('open');
+
+    await openByLink(page, chain.ids.eb as string);
+    // Root > … > ea > eb: the "…" says why in words; eb is its creator's name.
+    await expect(crumbs(page)).toHaveCount(4);
+    await expect(crumbs(page).nth(1)).toHaveClass(/efs-crumb-above/);
+    await expect(crumbs(page).nth(1)).toContainText('lead to a different folder');
+    await expect(crumbs(page).nth(2)).toContainText('ea');
+    await expect(crumbs(page).nth(3)).toContainText('eb');
+    await expect(crumbs(page).nth(3).locator('.efs-crumb-by')).toContainText(/named by \W*0xf39F/i);
+    // The tree never opens /ea/eb as this folder: it shows it under the "above" node.
+    const above = page.locator('efs-files-tree wa-tree-item.efs-tree-above');
+    await expect(above.locator('wa-tree-item.efs-tree-folder[selected]')).toHaveAttribute(
+      'data-name',
+      'eb',
+    );
+    await expect(
+      page.locator('efs-files-tree wa-tree-item.efs-tree-folder[data-key="/ea/eb"][selected]'),
+    ).toHaveCount(0);
+    await expect(entries(page)).toContainText('This folder is empty.');
+    await chain.idle(300);
+    chain.step(
+      "#0's eb/ by its link: Root > … > ea > eb (named by #0), under the tree's above node",
+    );
   } finally {
     await chain.finish();
   }
