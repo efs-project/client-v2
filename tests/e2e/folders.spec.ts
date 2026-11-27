@@ -188,12 +188,15 @@ test('a file link opened fresh lists nothing until asked; a folder link survives
     await expect(row(page, 'todo.txt')).toBeVisible();
     await expect(page.getByText('Confirmed not present')).toHaveCount(0);
     await expect(preview(page)).toContainText('This link is a folder');
-    // With no trail after a reload, the breadcrumb names it by its short id; Root goes home.
+    // With no trail after a reload, the walk up names it (folderNames): notes/ is in the root, and
+    // the name leads back down, so Root > notes. No wallet, so no reader: the name says whose.
     await expect(crumbs(page)).toHaveCount(2);
+    await expect(crumbs(page).last()).toContainText('notes');
+    await expect(crumbs(page).last().locator('.efs-crumb-by')).toContainText(/named by\W*0xf39F/i);
     await press(crumbs(page).first());
     await expect.poll(() => new URL(page.url()).hash).toBe('#/r/testnet/');
     await expect(row(page, 'notes')).toBeVisible();
-    chain.step('Browse, open notes/, reload: still notes/; Root goes back to the root');
+    chain.step('Browse, open notes/, reload: still notes/, named; Root goes back to the root');
   } finally {
     await chain.finish();
   }

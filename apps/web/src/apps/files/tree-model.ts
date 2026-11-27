@@ -76,13 +76,25 @@ export function treeKey(names: readonly string[]): string {
 }
 
 /**
- * The keys to open along the trail (the root, each folder on it, the folder on screen), or
- * undefined when the trail starts at a folder opened by its link (its place under the root isn't
- * known).
+ * The node of a folder opened by its link (a trail with no names above it), under the tree's
+ * "above" node: keyed by its id, so its folders never share a key with the root's.
+ */
+export function linkedKey(directory: string): string {
+  return `~${directory.toLowerCase()}`;
+}
+
+/**
+ * The keys to open along the trail (the root, each folder on it, the folder on screen). A trail
+ * that starts at a folder opened by its link starts at that folder's own node (linkedKey), since
+ * its place under the root isn't known. Undefined for a name missing in the middle.
  */
 export function trailKeys(path: readonly NavStep[]): readonly string[] | undefined {
-  if (path.some((step) => step.name === '')) return undefined;
-  const keys = [treeKey([])];
-  for (let i = 1; i <= path.length; i++) keys.push(treeKey(path.slice(0, i).map((s) => s.name)));
+  const first = path[0];
+  const linked = first?.name === '';
+  if (path.slice(linked ? 1 : 0).some((step) => step.name === '')) return undefined;
+  const start = linked && first ? linkedKey(first.folder.directory) : treeKey([]);
+  const keys = [start];
+  const names = path.slice(linked ? 1 : 0).map((s) => s.name);
+  for (let i = 1; i <= names.length; i++) keys.push(start + treeKey(names.slice(0, i)));
   return keys;
 }

@@ -10,6 +10,7 @@ import { expect, objectLink, preview, SEEDED, save } from './edit-support.ts';
 import { fileAtRoot, openRoot, row } from './folder-support.ts';
 import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment } from './support.ts';
+import { fillTagPath, tagPathField } from './tag-path.ts';
 
 const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
@@ -500,10 +501,9 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await press(preview(page).locator('wa-button.efs-preview-tag'));
     const d = tagDialog(page);
     await expect(d).toHaveAttribute('open', '');
-    const path = d.locator('wa-input.efs-tag-path input');
 
     // Typing a word lists the places that use it, with their counts.
-    await path.fill('tesla');
+    await fillTagPath(d, 'tesla');
     // The plain /tesla first (registered with /cars/tesla's words, nothing filed there), then
     // /cars/tesla.
     const suggestion = d.locator('.efs-tag-suggestion');
@@ -513,10 +513,10 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await expect(suggestion.nth(1)).toContainText('/cars/tesla');
     await expect(suggestion.nth(1)).toContainText(/about\W+1\W+tagged thing, from everyone/);
     // A path nobody has used is said to be new before anything is signed.
-    await path.fill('notes/todo');
+    await fillTagPath(d, 'notes/todo');
     await expect(d.locator('.efs-tag-new')).toContainText(/Nobody has used\W+\/notes\/todo\W+yet/);
     // A typed word is folded as it will be saved, and the picker says so: Review stays on.
-    await path.fill('Notes');
+    await fillTagPath(d, 'Notes');
     await expect(d.locator('.efs-tag-folded')).toContainText(/Saved as\W+\/notes/);
     await expect(d.locator('wa-button.efs-tag-review')).not.toHaveAttribute('disabled');
     // Its suggestions read (for "notes", 300 ms after typing) finishes before the next word: the
@@ -524,15 +524,15 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     // (a replay miss on Firefox in CI 45944700804).
     await settled(page);
     // A word the grammar refuses (it isn't folded: not all ASCII) is named, and Review stays off.
-    await path.fill('Straße');
+    await fillTagPath(d, 'Straße');
     await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
     await expect(d.locator('wa-button.efs-tag-review')).toHaveAttribute('disabled', '');
     // A word a ruling on the tag text rule could change waits for that ruling.
     // A word with a bidi override is refused, and the override is one pill, never applied.
-    await path.fill('a\u202Eb');
+    await fillTagPath(d, 'a\u202Eb');
     await expect(d.locator('.efs-tag-refused .efs-hidden-char')).toHaveCount(1);
     await expect(d.locator('.efs-tag-refused .efs-hidden-char')).toHaveText('U+202E');
-    await path.fill('École');
+    await fillTagPath(d, 'École');
     await expect(d.locator('.efs-tag-unstable')).toContainText(
       /This word can't be used until the tag text rule is chosen:\W+École/,
     );
@@ -548,7 +548,7 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     );
 
     // "Not this" is a different act: its review says what it hides, and where it doesn't reach.
-    await path.fill('notes/todo');
+    await fillTagPath(d, 'notes/todo');
     // The picker's lookup of the typed word is done before Review (it is debounced): every run
     // reads the same, whatever its speed.
     await settled(page);
@@ -562,7 +562,7 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     chain.step('Not this: its review states its reach; Cancel sends nothing');
 
     await press(preview(page).locator('wa-button.efs-preview-tag'));
-    await path.fill('notes/todo');
+    await fillTagPath(d, 'notes/todo');
     await settled(page);
     await press(d.locator('wa-button.efs-tag-review'));
     await expect(d.locator('.efs-tag-says')).toContainText(/Tag\W+0x.+\/notes\/todo/);
@@ -825,15 +825,15 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
 
     await press(topic(page).locator('wa-button.efs-topic-same'));
     await expect(d).toHaveAttribute('open', '');
-    await expect(d.locator('wa-input.efs-tag-path')).toHaveAttribute(
+    await expect(tagPathField(d)).toHaveAttribute(
       'label',
       /The tag\W+\/cars\/tesla\W+is the same as/,
     );
     await expect(d.locator('.efs-tag-stance')).toHaveCount(0);
-    await d.locator('wa-input.efs-tag-path input').fill('cars/tesla');
+    await fillTagPath(d, 'cars/tesla');
     await expect(d.locator('.efs-folder-name-error')).toContainText("can't be joined to itself");
     await expect(d.locator('wa-button.efs-join-review')).toHaveAttribute('disabled', '');
-    await d.locator('wa-input.efs-tag-path input').fill('auto/tesla');
+    await fillTagPath(d, 'auto/tesla');
     await settled(page);
     await press(d.locator('wa-button.efs-join-review'));
     await expect(d.locator('.efs-label-says')).toContainText(
@@ -853,7 +853,7 @@ test('Synonyms: "Same as…" lists the other tag as yours (a link, never merged)
     chain.step('Same as /auto/tesla: the review says others decide; it lists as yours');
 
     await press(topic(page).locator('wa-button.efs-topic-under'));
-    await d.locator('wa-input.efs-tag-path input').fill('vehicles');
+    await fillTagPath(d, 'vehicles');
     await settled(page);
     await press(d.locator('wa-button.efs-join-review'));
     await expect(d.locator('.efs-label-says')).toContainText(

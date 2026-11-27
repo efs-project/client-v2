@@ -34,10 +34,13 @@ import {
   rootFolder,
   startListing,
 } from './folder-model.ts';
+import type { TrailTop, TrailWalk } from './folder-trail.ts';
+import { type TrailState, walkFor } from './folder-trail-state.ts';
 import { touchesFolder } from './listing-sync.ts';
 import type { FolderNav, NavStep } from './navigation.ts';
 import { readerOf } from './object-kind.ts';
-import { trailKeys, treeKey, treeView } from './tree-model.ts';
+import { linkedKey, trailKeys, treeKey, treeView } from './tree-model.ts';
+import { shortId } from './who.ts';
 
 const loadReads = async (): Promise<FolderReads> => {
   const { listFolder } = await import('@efs/sdk/files');
@@ -56,9 +59,12 @@ export class EfsFilesTree extends EfsElement {
   static override properties = {
     host: { attribute: false },
     nav: { attribute: false },
+    trail: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
+  /** The path above a folder opened by its link (folder-trail-state.ts): the tree's "above" node. */
+  declare trail: TrailState | undefined;
 
   #nodes = state<ReadonlyMap<string, ListingState>>(new Map());
   #expanded = state<ReadonlySet<string>>(new Set());
@@ -222,11 +228,17 @@ export class EfsFilesTree extends EfsElement {
     const key = item?.dataset.key;
     if (!item || key === undefined) return;
     const action = item.dataset.action;
-    if (action) {
+    const open = item.dataset.open;
+    if (action || open) {
       // An action, not a place: do it, and keep the folder on screen selected.
       (item as HTMLElement & { selected: boolean }).selected = false;
       if (action === 'more') this.#more(key);
       else if (action === 'retry') this.#read(key, true);
+      else if (action === 'retry-trail') this.trail?.retry();
+      else if (action === 'home' && open)
+        this.host.openLink(link({ kind: 'home', address: open as never, names: [] }));
+      // A folder on the walked path above: open it by its link (and walk up from there).
+      else if (open) this.host.openLink(link({ kind: 'object', subject: open as never }));
       return;
     }
     const at = this.#placed.get(key);
@@ -305,14 +317,77 @@ export class EfsFilesTree extends EfsElement {
       ${reading}
       ${view.folders.map((f) => {
         const path = [...at.path, { folder: f.folder, name: f.name }];
-        return this.#item(
-          treeKey(path.map((s) => s.name)),
-          { folder: f.folder, path },
-          f.name,
-          current,
-        );
+        // Below its parent's own key (the root's is "", so a root key is the names from the root).
+        return this.#item(key + treeKey([f.name]), { folder: f.folder, path }, f.name, current);
       })}
       ${tail}
+    </wa-tree-item>`;
+  }
+
+  /** The "above" node's own label: what's above the walked path, in words. */
+  #aboveLabel(top: TrailTop | undefined): unknown {
+    const t = this.host.translator.t.bind(this.host.translator);
+    const said = (word: string, hidden: string) =>
+      html`<span class="efs-tree-label" aria-hidden=${word === '…' ? 'true' : nothing}>${word}</span
+        ><span class="wa-visually-hidden"> ${hidden}</span>`;
+    switch (top?.kind) {
+      case undefined:
+        return html`<wa-spinner></wa-spinner> ${t('files.list.loading')}`;
+      case 'home':
+        return html`${appIcon('house')}
+          <span class="efs-tree-label" translate="no" dir="ltr">${shortId(top.address)}</span>`;
+      case 'loop':
+        return said(t('files.location.loop'), t('files.location.loopHidden'));
+      case 'elsewhere':
+        return said('…', t('files.location.elsewhere'));
+      case 'failed':
+        return html`${appIcon('rotate-right')} ${said('…', t('files.location.failed'))}`;
+      default:
+        return said('…', t('files.location.above'));
+    }
+  }
+
+  /**
+   * A folder opened by its link: beside the root, the path read above it (walked folders, each
+   * opening by its link), ending at its own node, which lists its folders like any other.
+   */
+  #above(walk: TrailWalk, current: string | undefined): unknown {
+    const first = this.nav.path.get()[0];
+    if (!first) return nothing;
+    const folders =
+      walk.folders.length > 0 ? walk.folders : [{ folder: first.folder, name: undefined }];
+    const own = folders.at(-1);
+    const node = (i: number): unknown => {
+      const f = folders[i];
+      if (!f) return nothing;
+      const label = f.name?.text ?? shortId(f.folder.directory);
+      if (i === folders.length - 1) {
+        return this.#item(
+          linkedKey(first.folder.directory),
+          { folder: own?.folder ?? first.folder, path: [first] },
+          label,
+          current,
+        );
+      }
+      return html`<wa-tree-item
+        class="efs-tree-folder efs-tree-walked"
+        expanded
+        data-key="~walked"
+        data-open=${f.folder.directory}
+      >
+        ${appIcon('folder')} <span class="efs-tree-label" translate="no" dir="auto">${label}</span>
+        ${node(i + 1)}
+      </wa-tree-item>`;
+    };
+    const top = walk.top;
+    return html`<wa-tree-item
+      class="efs-tree-above"
+      expanded
+      data-key="~above"
+      data-action=${top?.kind === 'failed' ? 'retry-trail' : top?.kind === 'home' ? 'home' : 'none'}
+      data-open=${top?.kind === 'home' ? top.address : nothing}
+    >
+      ${this.#aboveLabel(top)} ${node(0)}
     </wa-tree-item>`;
   }
 
@@ -320,13 +395,16 @@ export class EfsFilesTree extends EfsElement {
     const t = this.host.translator.t.bind(this.host.translator);
     const efs = verifiedEfs(this.host.reader.get());
     if (!efs) return nothing;
+    const current = this.#currentKey();
+    const walked = walkFor(this.nav, this.trail);
     return html`<wa-tree
       selection="single"
       class="efs-files-tree"
       aria-label=${t('files.navigation.label')}
       @wa-selection-change=${this.#onSelect}
     >
-      ${this.#item(ROOT, { folder: rootFolder(efs), path: [] }, t('files.location.root'), this.#currentKey())}
+      ${this.#item(ROOT, { folder: rootFolder(efs), path: [] }, t('files.location.root'), current)}
+      ${walked ? this.#above(walked, current) : nothing}
     </wa-tree>`;
   }
 }

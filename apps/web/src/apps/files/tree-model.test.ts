@@ -1,7 +1,7 @@
 import type { FolderRef } from '@efs/sdk/files';
 import { describe, expect, it } from 'vitest';
 import type { ListingState } from './folder-model.ts';
-import { trailKeys, treeKey, treeView } from './tree-model.ts';
+import { linkedKey, trailKeys, treeKey, treeView } from './tree-model.ts';
 
 const folder = (n: string): FolderRef => ({
   kind: 'folder',
@@ -78,12 +78,33 @@ describe('treeKey and trailKeys', () => {
     expect(treeKey([])).toBe('');
     expect(treeKey(['a', 'b'])).not.toBe(treeKey(['a/b']));
   });
-  it("the trail's ancestors and itself, from the root; none for a folder opened by its link", () => {
+  it("the trail's ancestors and itself, from the root", () => {
     const steps = [
       { folder: folder('a'), name: 'docs' },
       { folder: folder('b'), name: 'notes' },
     ];
     expect(trailKeys(steps)).toEqual([treeKey([]), treeKey(['docs']), treeKey(['docs', 'notes'])]);
-    expect(trailKeys([{ folder: folder('a'), name: '' }])).toBeUndefined();
+  });
+  it('a trail from a folder opened by its link starts at its own node, never at a root key', () => {
+    const a = folder('a');
+    const own = linkedKey(a.directory);
+    expect(trailKeys([{ folder: a, name: '' }])).toEqual([own]);
+    expect(
+      trailKeys([
+        { folder: a, name: '' },
+        { folder: folder('b'), name: 'notes' },
+      ]),
+    ).toEqual([own, own + treeKey(['notes'])]);
+    // Never the same key as a folder under the root, and the id's case doesn't matter.
+    expect(own.startsWith('/')).toBe(false);
+    expect(own).not.toBe('');
+    expect(linkedKey(a.directory.toUpperCase())).toBe(own);
+    // A name missing past the start: no keys.
+    expect(
+      trailKeys([
+        { folder: a, name: 'x' },
+        { folder: folder('b'), name: '' },
+      ]),
+    ).toBeUndefined();
   });
 });

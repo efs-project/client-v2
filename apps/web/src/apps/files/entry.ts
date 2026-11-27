@@ -10,6 +10,7 @@ import { computed, type ReadonlySignal, type Signal, state } from '../../state/s
 import { type Composer, createComposer } from './compose.ts';
 import { registerFilesElements } from './define.ts';
 import type { ListingState } from './folder-model.ts';
+import { type TrailState, trailState } from './folder-trail-state.ts';
 import type { EfsFilesListing } from './listing.ts';
 import { createFolderNav, type FolderNav } from './navigation.ts';
 import { type ObjectKindState, objectKindState } from './object-kind.ts';
@@ -32,6 +33,8 @@ const DEFAULT_LAYOUT: PaneLayout = {
  */
 interface Shared {
   readonly nav: FolderNav;
+  /** The path above a folder opened by its link (folder-trail-state.ts). */
+  readonly trail: TrailState;
   readonly link: ReadonlySignal<LinkState>;
   readonly object: ObjectKindState;
   readonly composer: Composer;
@@ -61,6 +64,7 @@ function overview(host: AppHost, shared: Shared, scope: OwnerScope): HTMLElement
   element.nav = shared.nav;
   element.shown = shared.shown;
   element.place = shared.place;
+  element.trail = shared.trail;
   element.start(scope);
   return element;
 }
@@ -70,20 +74,23 @@ function view(
   kind: FilesViewKind,
   nav: FolderNav,
   place: ReadonlySignal<PlaceLink | undefined>,
+  trail: TrailState,
 ): HTMLElement {
   const element = document.createElement('efs-files-view') as EfsFilesView;
   element.kind = kind;
   element.host = host;
   element.nav = nav;
   element.place = place;
+  element.trail = trail;
   return element;
 }
 
 /** The navigation pane: the folder tree, following the trail. */
-function tree(host: AppHost, nav: FolderNav, scope: OwnerScope): HTMLElement {
+function tree(host: AppHost, nav: FolderNav, trail: TrailState, scope: OwnerScope): HTMLElement {
   const element = document.createElement('efs-files-tree') as EfsFilesTree;
   element.host = host;
   element.nav = nav;
+  element.trail = trail;
   element.start(scope);
   return element;
 }
@@ -180,6 +187,8 @@ export const entry: AppEntry = {
     // Where the person is in the folder tree (this tab's memory), the route's link, and whether
     // an object link names a folder or a file (one openObject read): shared by the panes.
     const nav = createFolderNav();
+    // The path above a folder opened by its link, for the location bar and the tree.
+    const trail = trailState(host, nav, scope);
     const link = computed(() => linkState(host.location.get()));
     const opened = state<PlaceOpened | undefined>(undefined);
     const place = computed<PlaceLink | undefined>(() => {
@@ -211,6 +220,7 @@ export const entry: AppEntry = {
     });
     const shared: Shared = {
       nav,
+      trail,
       link,
       object: objectKindState(host, link, nav, scope),
       composer,
@@ -259,8 +269,8 @@ export const entry: AppEntry = {
     return {
       views,
       defaultLayout: DEFAULT_LAYOUT,
-      location: view(host, 'location', nav, place),
-      navigation: tree(host, nav, scope),
+      location: view(host, 'location', nav, place, trail),
+      navigation: tree(host, nav, trail, scope),
       // A link opens on what it names, also on a phone: a folder on its Entries, a file on its
       // Preview; undefined until openObject has said which.
       linkView: computed(() => {

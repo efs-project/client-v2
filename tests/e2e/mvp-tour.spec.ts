@@ -9,6 +9,7 @@ import { expect, preview, save } from './edit-support.ts';
 import { dialog, entries, row, seededRandom, send } from './folder-support.ts';
 import { press } from './press.ts';
 import { booted, serveConfig, serveDeployment, TEST_CONFIG } from './support.ts';
+import { fillTagPath } from './tag-path.ts';
 
 test.skip(
   ({ browserName }) => CHAIN_MODE !== 'replay' && browserName !== 'chromium',
@@ -143,7 +144,7 @@ test('the MVP tour: folders and files, a tag from the Preview, an address, kind 
     await expect(fileTag('/my_notes')).toHaveCount(0);
     await press(preview(page).locator('wa-button.efs-preview-tag'));
     const tagDialog = page.locator('efs-files-folder-save.efs-preview-tag-dialog wa-dialog');
-    await tagDialog.locator('wa-input.efs-tag-path input').fill('My Notes');
+    await fillTagPath(tagDialog, 'My Notes');
     await expect(tagDialog.locator('.efs-tag-folded')).toContainText(/Saved as\W+\/my_notes/);
     // The picker's lookup of the word is done before Review (it is debounced).
     await settled();

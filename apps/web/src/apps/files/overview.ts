@@ -22,6 +22,7 @@ import { type ReadonlySignal, state } from '../../state/signals.ts';
 import { EfsElement, html, nothing } from '../../ui/element.ts';
 import { shortId } from './editor.ts';
 import { type ListingState, placeLens, rootFolder } from './folder-model.ts';
+import { type TrailState, walkFor } from './folder-trail-state.ts';
 import { type Block, parseMarkdown } from './markdown.ts';
 import { type LinkResolver, renderMarkdown } from './markdown-view.ts';
 import { type FolderNav, parentKey, sameParent } from './navigation.ts';
@@ -58,9 +59,12 @@ export class EfsFilesOverview extends EfsElement {
     nav: { attribute: false },
     shown: { attribute: false },
     place: { attribute: false },
+    trail: { attribute: false },
   };
   declare host: AppHost;
   declare nav: FolderNav;
+  /** The path above a folder opened by its link (folder-trail-state.ts): its name, for the title. */
+  declare trail: TrailState | undefined;
   /** What the Entries pane shows now (published by the listing). */
   declare shown: ReadonlySignal<ListingState | undefined>;
   /** A tag or an address shown in Entries instead of a folder: no folder's README then. */
@@ -177,12 +181,18 @@ export class EfsFilesOverview extends EfsElement {
     };
   };
 
-  /** The folder's name as shown: its row's, the root's, or its short id when opened by link. */
+  /**
+   * The folder's name as shown: its row's, the root's; opened by its link, the name the walk up
+   * found (folder-trail.ts), else its short id.
+   */
   #folderName(s: Extract<ListingState, { phase: 'page' }>): string {
     const t = this.host.translator.t.bind(this.host.translator);
     if (this.#isRoot(s)) return t('files.location.root');
     if (s.folder.kind === 'home') return shortId(s.folder.address);
-    return this.nav.path.get().at(-1)?.name || shortId(s.folder.directory);
+    const path = this.nav.path.get();
+    const walked =
+      path.length === 1 ? walkFor(this.nav, this.trail)?.folders.at(-1)?.name : undefined;
+    return path.at(-1)?.name || walked?.text || shortId(s.folder.directory);
   }
 
   /** Whether the folder on screen is the realm's shared root (however it was opened). */
