@@ -519,6 +519,10 @@ test('Tag from the Preview: suggestions from the word, a new tag said new, the r
     await path.fill('Notes');
     await expect(d.locator('.efs-tag-folded')).toContainText(/Saved as\W+\/notes/);
     await expect(d.locator('wa-button.efs-tag-review')).not.toHaveAttribute('disabled');
+    // Its suggestions read (for "notes", 300 ms after typing) finishes before the next word: the
+    // recording always holds it. Without this wait, a slow run sent it and a fast one didn't
+    // (a replay miss on Firefox in CI 45944700804).
+    await settled(page);
     // A word the grammar refuses (it isn't folded: not all ASCII) is named, and Review stays off.
     await path.fill('Straße');
     await expect(d.locator('.efs-tag-refused')).toContainText(/rule\W+3/);
