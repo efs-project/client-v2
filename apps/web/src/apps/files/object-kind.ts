@@ -31,6 +31,7 @@ import type { AppHost } from '../../shell/apps.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { effect } from '../../state/effect.ts';
 import { computed, type ReadonlySignal, state } from '../../state/signals.ts';
+import { LENS_TOO_WIDE } from '../../ui/outcome.ts';
 import { rootFolder } from './folder-model.ts';
 import type { FolderNav, NavStep } from './navigation.ts';
 import type { LinkState } from './target.ts';
@@ -82,6 +83,29 @@ export function readLens(
   if (l.lens) return l.lens;
   const listed = l.target.kind === 'file' ? nav?.lensFor(l.target.subject) : undefined;
   return reader ? efs.lens.mineFirst(reader as never, listed ?? efs.lens.default) : listed;
+}
+
+/**
+ * A file's own place: you, then its creator, then that Lens (`efs.lens.place`). The SDK refuses a
+ * Lens of more than 64 accounts (EfsFault LIMIT, sdk-v2 bdcbe6e), which a base of 63 or 64 can
+ * reach: that is LENS_TOO_WIDE, said as an outcome, never a crash. Any other fault is thrown on.
+ */
+export function ownPlace(
+  efs: Efs,
+  o: { readonly reader?: string; readonly owner: string; readonly base: Lens },
+): Lens | typeof LENS_TOO_WIDE {
+  try {
+    return efs.lens.place({
+      ...(o.reader ? { reader: o.reader as never } : {}),
+      owner: o.owner as never,
+      base: o.base,
+    });
+  } catch (error) {
+    // Duck-typed: this module is startup code and never imports an SDK value.
+    const fault = error as { readonly name?: unknown; readonly code?: unknown } | null;
+    if (fault?.name === 'EfsFault' && fault.code === 'LIMIT') return LENS_TOO_WIDE;
+    throw error;
+  }
 }
 
 /** What a path that didn't lead to an entry shows. */
@@ -210,11 +234,15 @@ export function objectKindState(
         // from a tag or a link is then never "not present" only because its creator isn't in the
         // reader's Lens. A link carrying its own Lens is read in that Lens alone.
         if (object.status === 'FILE' && object.open.status === 'ABSENT_PROVEN' && !l.lens) {
-          const own = efs.lens.place({
-            ...(reader ? { reader: reader as never } : {}),
+          const own = ownPlace(efs, {
+            ...(reader ? { reader } : {}),
             owner: object.creator,
             base: lens ?? efs.lens.default,
           });
+          if (own === LENS_TOO_WIDE) {
+            set({ status: 'invalid', reason: { code: LENS_TOO_WIDE, retry: 'never' } as Reason });
+            return;
+          }
           const before = (lens ?? efs.lens.default).principals.map((p) => p.toLowerCase());
           const widened = own.principals.some((p) => !before.includes(p.toLowerCase()));
           if (widened) {

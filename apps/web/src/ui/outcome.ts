@@ -88,9 +88,25 @@ const BEHIND: Omit<OutcomeView, 'code'> = {
   retry: 'transient',
 };
 
+/**
+ * INVALID with reason LENS_TOO_WIDE (the client's own reason, `object-kind.ts` ownPlace): a file's
+ * own place ("you, then its creator, then that Lens") would name more than 64 accounts, which the
+ * SDK refuses (sdk-v2 bdcbe6e). Never a crash, never "not present"; retrying can't change it.
+ */
+export const LENS_TOO_WIDE = 'LENS_TOO_WIDE';
+const LENS_TOO_WIDE_VIEW: Omit<OutcomeView, 'code'> = {
+  tone: 'warning',
+  message: 'outcome.lensTooWide',
+};
+
 export function describeOutcome(kind: OutcomeKind, code: string, reason?: string): OutcomeView {
   const known = Object.hasOwn(TABLES[kind], code) ? TABLES[kind][code] : undefined;
-  const view = code === 'UNKNOWN' && reason === 'BEHIND' ? BEHIND : (known ?? UNRECOGNIZED);
+  const view =
+    code === 'UNKNOWN' && reason === 'BEHIND'
+      ? BEHIND
+      : code === 'INVALID' && reason === LENS_TOO_WIDE
+        ? LENS_TOO_WIDE_VIEW
+        : (known ?? UNRECOGNIZED);
   return { ...view, code, ...(reason ? { reason } : {}) };
 }
 
@@ -126,7 +142,11 @@ export function outcomeActions(
 
 /** Every message id the tables can produce, so the catalog check can prove none is missing. */
 export function outcomeMessageIds(): MessageId[] {
-  const ids = new Set<MessageId>([UNRECOGNIZED.message, BEHIND.message]);
+  const ids = new Set<MessageId>([
+    UNRECOGNIZED.message,
+    BEHIND.message,
+    LENS_TOO_WIDE_VIEW.message,
+  ]);
   for (const table of Object.values(TABLES))
     for (const view of Object.values(table)) ids.add(view.message);
   return [...ids];
