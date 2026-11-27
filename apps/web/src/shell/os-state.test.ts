@@ -36,7 +36,7 @@ const CONFIG: ConfigRead = {
         id: 'testnet',
         label: 'Testnet',
         chainId: 11155111,
-        core: '0xe942147e5e9112c64ced569e8f5fa18b20073429',
+        core: '0xbfe0d63fe8bee7e225ed521756f9aa15f68e03c5',
         deployment: 'deployments/testnet.json',
         release: 'deployments/testnet-release.json',
         rpcs: [{ url: 'https://rpc.example.net/', enabled: true }],

@@ -9,7 +9,7 @@ const DEFINITION: NetworkDefinition = {
   id: 'local',
   label: 'Local',
   chainId: 31337,
-  core: '0xe942147e5e9112c64ced569e8f5fa18b20073429',
+  core: '0xbfe0d63fe8bee7e225ed521756f9aa15f68e03c5',
   deployment: 'deployments/local.json',
   release: 'deployments/local-release.json',
   rpcs: [],
