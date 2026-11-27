@@ -143,9 +143,15 @@ export type SaveOutcome =
 /** The earlier attempt a held-back save waits for (sdk-v2 31ee83a). */
 export type Twin = NonNullable<NonNullable<SequenceProgress['reason']>['twin']>;
 
-/** The ledger refused because the editor's own HEAD moved (compare-and-swap). */
+/**
+ * The chain refused because a head the save rests on moved: the editor's own HEAD
+ * (compare-and-swap, E_CAS), or, on a Realm with the read-set guard (sdk-v2 9a44046), any head
+ * the guard bound (E_READSET_STALE: the person's own, a Lens author's ranked before the base's, a
+ * folder entry's). Either way nothing of that part landed, and planning again shows what's there.
+ */
+const HEAD_RACES: ReadonlySet<string> = new Set(['E_CAS', 'E_READSET_STALE']);
 const isCasRace = (reason: SequenceProgress['reason']): boolean =>
-  reason?.revert?.error === 'E_CAS';
+  HEAD_RACES.has(reason?.revert?.error ?? '');
 
 /** Every reason code the SDK names, without the open-ended `string` it also admits. */
 type Named<T> = T extends string ? (string extends T ? never : T) : never;

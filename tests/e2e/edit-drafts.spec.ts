@@ -95,7 +95,9 @@ test('"Review changes" asks before replacing a newer unsaved edit of the same fi
     await chain.editAs?.(6, 'Mine, from another tab.\n');
     chain.step('Elsewhere: #6 saves this file (its own HEAD moves)');
     await press(review.locator('wa-button.efs-review-send'));
-    chain.step('Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_CAS)');
+    chain.step(
+      'Send: part 1 lands; part 2 (the bind) is refused before the wallet (E_READSET_STALE: the read-set guard, before the CAS)',
+    );
     const changed = save(page, 'changed');
     await expect(changed).toContainText('This file changed while your edit was saving');
 
