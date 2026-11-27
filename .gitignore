@@ -6,3 +6,6 @@ playwright-report/
 .efs-dev/
 *.log
 .DS_Store
+
+# Theme screenshots for review (tests/e2e/theme-shots.spec.ts, EFS_SHOTS=1)
+/shots/
