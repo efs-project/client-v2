@@ -1151,6 +1151,19 @@ test("a folder opened by its link whose names loop: the path above is shown as a
     await expect(crumbs(page).nth(1)).toHaveClass(/efs-crumb-above/);
     await expect(crumbs(page).nth(1)).toContainText('Loop');
     await expect(crumbs(page).nth(1)).toContainText('placed inside each other');
+    // Words, not a control (PM, 2026-11-27): nothing in it is a button, so nothing announces a
+    // button that does nothing; the folder on screen is the current page.
+    await expect(crumbs(page).nth(1).getByRole('button')).toHaveCount(0);
+    await expect(crumbs(page).last()).toHaveAttribute('aria-current', 'page');
+    // In the accessibility tree: the words are there, and no button carries them.
+    const tree = await page.getByRole('navigation', { name: 'Location' }).ariaSnapshot();
+    expect(tree).toContain('placed inside each other');
+    expect(tree).not.toMatch(/button[^\n]*(Loop|placed inside)/);
+    const loopAxe = await new AxeBuilder({ page })
+      .include('efs-files-view')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .analyze();
+    expect(loopAxe.violations.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
     await expect(crumbs(page).nth(2)).toContainText('lx2');
     await expect(crumbs(page).nth(3)).toContainText('ly');
     // The tree: beside the root, the same "above" node, holding lx2 > ly, with ly/ selected.
@@ -1231,6 +1244,7 @@ test("a folder opened by its link whose names reach the root but lead elsewhere 
     await expect(crumbs(page)).toHaveCount(4);
     await expect(crumbs(page).nth(1)).toHaveClass(/efs-crumb-above/);
     await expect(crumbs(page).nth(1)).toContainText('lead to a different folder');
+    await expect(crumbs(page).nth(1).getByRole('button')).toHaveCount(0);
     await expect(crumbs(page).nth(2)).toContainText('ea');
     await expect(crumbs(page).nth(3)).toContainText('eb');
     await expect(crumbs(page).nth(3).locator('.efs-crumb-by')).toContainText(/named by \W*0xf39F/i);

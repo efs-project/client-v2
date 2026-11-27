@@ -14,6 +14,7 @@ import type { PrincipalId } from '@efs/sdk';
 import type { FolderNameRow, FolderNamesResult, FolderRef } from '@efs/sdk/files';
 import type { OwnerScope } from '../../platform/scope.ts';
 import type { AppHost } from '../../shell/apps.ts';
+import { CatchUpRetry } from '../../shell/catch-up.ts';
 import { verifiedEfs } from '../../shell/reader-state.ts';
 import { effect } from '../../state/effect.ts';
 import { type ReadonlySignal, state } from '../../state/signals.ts';
@@ -86,6 +87,9 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
   let key: string | undefined;
   let run: AbortController | undefined;
   let landed = 0;
+  // A walk that stopped BEHIND walks again once, quietly, when a read in this client catches up
+  // with the floor (as the Preview, Versions and Tags do); Try again stays the way out otherwise.
+  const catchUp = new CatchUpRetry();
 
   // A save that lands may have renamed or moved a folder on a walked path.
   effect(scope, () => {
@@ -107,6 +111,7 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
       if (key !== undefined) {
         key = undefined;
         run?.abort();
+        catchUp.reset();
         queueMicrotask(() => shown.set(undefined));
       }
       return;
@@ -115,9 +120,17 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
     if (next === key) return;
     key = next;
     run?.abort();
+    catchUp.reading();
     const mine = new AbortController();
     run = mine;
     const id = start.directory.toLowerCase();
+    /** Shows where the walk ended; one that stopped BEHIND waits for the catch-up. */
+    const finish = (walk: TrailWalk) => {
+      shown.set({ start: id, walk });
+      if (walk.top?.kind === 'failed' && walk.top.reason.code === 'BEHIND') {
+        catchUp.behind(efs, () => again.set(again.get() + 1));
+      }
+    };
     const reader = account ? (efs.lens.principalOf(account as never) as PrincipalId) : undefined;
     const lensFor = (folder: FolderRef) => placeLens(efs, folder, account);
     const root = rootFolder(efs);
@@ -140,7 +153,7 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
       if (!walk || mine.signal.aborted) return;
       const steps = rootSteps(walk);
       if (!steps) {
-        shown.set({ start: id, walk });
+        finish(walk);
         return;
       }
       // Reached the root: only a path the names follow back down is shown as one from the root.
@@ -160,15 +173,12 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
         shown.set({ start: id, walk });
         return;
       }
-      shown.set({
-        start: id,
-        walk: {
-          folders: walk.folders,
-          top:
-            follows === 'elsewhere'
-              ? { kind: 'elsewhere' }
-              : { kind: 'failed', reason: follows.failed },
-        },
+      finish({
+        folders: walk.folders,
+        top:
+          follows === 'elsewhere'
+            ? { kind: 'elsewhere' }
+            : { kind: 'failed', reason: follows.failed },
       });
     })().catch((error: unknown) => {
       if (mine.signal.aborted) return;
@@ -183,7 +193,14 @@ export function trailState(host: AppHost, nav: FolderNav, scope: OwnerScope): Tr
     });
   });
 
-  scope.signal.addEventListener('abort', () => run?.abort(), { once: true });
+  scope.signal.addEventListener(
+    'abort',
+    () => {
+      run?.abort();
+      catchUp.reset();
+    },
+    { once: true },
+  );
 
   return {
     shown,

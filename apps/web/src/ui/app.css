@@ -508,9 +508,13 @@ span.efs-entry-open {
   color: var(--wa-color-text-quiet);
 }
 
-/* A crumb standing for what's above a walked path ("…", "Loop"): words, not a place to go, so it
-   doesn't look like one. "…" with Try again (a read that couldn't be made) keeps the link look. */
-wa-breadcrumb-item.efs-crumb-above:not(.efs-crumb-retry)::part(label) {
+/* A crumb standing for what's above a walked path ("…", "Loop"): words, not a place to go. Its
+   words sit in the item's start slot; the item's own label is a button, empty here, so it's taken
+   out (no tab stop, nothing announced as a button). "…" with Try again (a read that couldn't be
+   made) is a real button and keeps the link look. */
+wa-breadcrumb-item.efs-crumb-text::part(label) {
+  display: none;
+}
+.efs-crumb-words {
   color: var(--wa-color-text-quiet);
-  cursor: default;
 }

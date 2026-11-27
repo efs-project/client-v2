@@ -230,16 +230,22 @@ export class EfsFilesView extends EfsElement {
           >${c.name}</span
         >${marks}`;
     };
+    // The last crumb is the place on screen (wa-breadcrumb marks it aria-current="page").
     const item = (c: Crumb, at: number) =>
       at === last
-        ? html`<wa-breadcrumb-item aria-current="location">${label(c, at)}</wa-breadcrumb-item>`
+        ? html`<wa-breadcrumb-item>${label(c, at)}</wa-breadcrumb-item>`
         : c.go
           ? html`<wa-breadcrumb-item
               class=${c.above ? 'efs-crumb-above efs-crumb-retry' : nothing}
               @click=${() => c.go?.()}
               >${label(c, at)}</wa-breadcrumb-item
             >`
-          : html`<wa-breadcrumb-item class="efs-crumb-above">${label(c, at)}</wa-breadcrumb-item>`;
+          : // Words, not a place to go ("…", "Loop"): a wa-breadcrumb-item renders its label as a
+            // button, so the words go in its start slot and the empty button is hidden (app.css):
+            // nothing announces a button that does nothing.
+            html`<wa-breadcrumb-item class="efs-crumb-above efs-crumb-text"
+              ><span slot="start" class="efs-crumb-words">${label(c, at)}</span></wa-breadcrumb-item
+            >`;
     if (crumbs.length <= BREADCRUMB_MAX) {
       return html`<wa-breadcrumb label=${t('files.location.label')}>
         ${crumbs.map(item)}
