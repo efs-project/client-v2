@@ -82,6 +82,8 @@ export interface NewFileTarget {
 interface NotSent {
   readonly outcome: SaveOutcome;
   readonly sequenceId?: Hex;
+  /** The save as runSequence/resume returned it, when the review may hand it over (RESPLIT). */
+  readonly progress?: SequenceProgress;
 }
 
 type Phase =
@@ -683,12 +685,18 @@ export class EfsFileEditor extends EfsElement {
         phase: 'review',
         plan,
         writer,
-        sent: { outcome, sequenceId: progress.sequenceId },
+        sent: { outcome, sequenceId: progress.sequenceId, progress },
       });
       return;
     }
-    // The wallet answered: from here the banner owns this save (Saved · confirming → Saved,
-    // Partially saved → Continue, a race → changed), with the edit kept for "Review changes".
+    this.#handOff(progress, plan);
+  }
+
+  /**
+   * From here the banner owns this save (Saved · confirming → Saved, Partially saved → Continue,
+   * a race → changed, a RESPLIT ask), with the edit kept for "Review changes".
+   */
+  #handOff(progress: SequenceProgress, plan: Planned): void {
     const c = this.create;
     const key = this.#key();
     this.host.saving.track(
@@ -710,12 +718,34 @@ export class EfsFileEditor extends EfsElement {
     });
   }
 
-  /** Cancel in the review: a save that was started but never sent is dropped quietly. */
+  /**
+   * Cancel in the review: a save that was started but never sent is dropped quietly. A RESPLIT
+   * ask is answered "Not now" instead: nothing is cancelled, the save stays.
+   */
   #cancelReview(): void {
     const s = this.#phase.get();
     if (s.phase === 'sending') return;
+    if (s.phase === 'review' && s.sent?.outcome.kind === 'resplit') {
+      this.#notNow(s);
+      return;
+    }
     if (s.phase === 'review' && s.sent?.sequenceId) void this.#drop(s.writer, s.sent.sequenceId);
     this.#phase.set({ phase: 'editing' });
+  }
+
+  /**
+   * "Not now" on a RESPLIT ask (sdk-v2 a03ba84): the save stays as it is (not started, or partly
+   * saved), listed in the banner with Continue, and asks no more in this tab. The editor hands it
+   * over as it does any save the wallet has seen.
+   */
+  #notNow(s: Extract<Phase, { phase: 'review' }>): void {
+    const progress = s.sent?.progress;
+    if (!progress) {
+      this.#phase.set({ phase: 'editing' });
+      return;
+    }
+    this.host.saving.putOff(progress.sequenceId);
+    this.#handOff(progress, s.plan);
   }
 
   /** "Prepare again" after a refusal this plan can't get past (stale): a fresh, visible plan. */
@@ -802,7 +832,10 @@ export class EfsFileEditor extends EfsElement {
       sent.outcome.kind === 'busy' ||
       sent.outcome.kind === 'wallet-mismatch' ||
       sent.outcome.kind === 'nothing-new' ||
+      sent.outcome.kind === 'resplit' ||
       (sent.outcome.kind === 'not-sent' && sent.outcome.canRetry);
+    // RESPLIT: the save now needs more approvals; Continue resumes it, "Not now" leaves it.
+    const resplit = sent?.outcome.kind === 'resplit';
     const prepareAgain = sent?.outcome.kind === 'stale';
     return html`<wa-dialog
       class="efs-edit-review"
@@ -899,8 +932,19 @@ export class EfsFileEditor extends EfsElement {
             : nothing
         }
       </div>
-      <wa-button slot="footer" appearance="outlined" ?disabled=${sending} @click=${() => this.#cancelReview()}
-        >${t('review.cancel')}</wa-button
+      <wa-button
+        slot="footer"
+        appearance="outlined"
+        class=${resplit ? 'efs-review-not-now' : 'efs-review-cancel'}
+        ?disabled=${sending}
+        @click=${() => this.#cancelReview()}
+        >${t(
+          resplit
+            ? 'save.notNow'
+            : sent?.outcome.kind === 'damaged'
+              ? 'saves.discard'
+              : 'review.cancel',
+        )}</wa-button
       >
       ${
         prepareAgain && s.phase === 'review'
@@ -920,7 +964,7 @@ export class EfsFileEditor extends EfsElement {
                   pressedOnce(e);
                 }
               }}
-              >${t(sent ? 'saves.sendAgain' : 'review.send')}</wa-button
+              >${t(resplit ? 'saves.resplitContinue' : sent ? 'saves.sendAgain' : 'review.send')}</wa-button
             >`
       }
     </wa-dialog>`;

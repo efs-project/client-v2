@@ -5,12 +5,15 @@ import en from '../ui/messages/en.json' with { type: 'json' };
 import {
   answerCopy,
   feeScheduleCopy,
+  GENERIC_STOP_CODES,
   isFault,
+  OWN_STOP_CODES,
   SAVE_MESSAGE,
   saveAction,
   saveMessage,
   saveOutcome,
   saveValues,
+  shownOutcome,
   thrownOutcome,
 } from './save-outcome.ts';
 
@@ -492,6 +495,109 @@ describe('saveOutcome', () => {
     expect(isFault(new Error('x'), 'JOURNAL_UNAVAILABLE')).toBe(false);
   });
 
+  it('RESPLIT asks before more approvals: "needs N (it was M). Continue?", Continue resumes (sdk-v2 a03ba84)', () => {
+    // The real shape: a part cut for the cap after part 1 committed; the review said 2, now 3.
+    const resplit = p({
+      state: 'PARTIAL',
+      committed: 1,
+      total: 3,
+      reason: { code: 'RESPLIT', retry: 'after-review', prompts: { before: 2, now: 3 } } as never,
+    });
+    const o = saveOutcome(resplit);
+    expect(o).toEqual({ kind: 'resplit', committed: 1, total: 3, before: 2, now: 3 });
+    expect(saveMessage(o)).toBe('save.resplit');
+    expect(saveValues(o, String, String)).toEqual({ committed: 1, total: 3, now: 3, before: 2 });
+    expect(saveAction(o)).toBe('continue');
+    expect(en['save.resplit']).toBe(
+      'This save now needs {$now :integer} approvals (it was {$before :integer}). Continue?',
+    );
+    // Not started, with no prompts recorded: the general words, never invented numbers.
+    const bare = saveOutcome(p({ reason: { code: 'RESPLIT', retry: 'after-review' } as never }));
+    expect(bare).toEqual({ kind: 'resplit', committed: 0, total: 1 });
+    expect(saveMessage(bare)).toBe('save.resplitMore');
+  });
+
+  it('"Not now" leaves a RESPLIT save waiting with Continue, asking no more in this tab', () => {
+    const id = `0x${'0e'.repeat(32)}`;
+    const reason = {
+      code: 'RESPLIT',
+      retry: 'after-review',
+      prompts: { before: 1, now: 2 },
+    } as never;
+    const partial = p({
+      sequenceId: id as never,
+      state: 'PARTIAL',
+      committed: 1,
+      total: 3,
+      reason,
+    });
+    // Not put off: the ask.
+    expect(shownOutcome(partial, new Set())).toMatchObject({ kind: 'resplit' });
+    expect(saveMessage(shownOutcome(partial, new Set()))).toBe('save.resplit');
+    // Put off (the session records ids lowercase): "Partially saved (k of N)", Continue.
+    const later = new Set([id.toLowerCase()]);
+    const waiting = shownOutcome(partial, later);
+    expect(waiting).toMatchObject({ kind: 'resplit', later: true });
+    expect(saveMessage(waiting)).toBe('save.partial');
+    expect(saveAction(waiting)).toBe('continue');
+    // Not started and put off: "Not sent yet. Continue when you're ready."
+    const notStarted = shownOutcome(p({ sequenceId: id as never, reason }), later);
+    expect(saveMessage(notStarted)).toBe('save.resplitLater');
+    // Only a RESPLIT is ever put off.
+    expect(
+      shownOutcome(p({ sequenceId: id as never, state: 'PARTIAL', committed: 1, total: 2 }), later),
+    ).toMatchObject({ kind: 'partial' });
+  });
+
+  it('every reason code the SDK names is placed: an outcome of its own, or the generic one by retry', () => {
+    // The tables are keyed by the SDK's own unions, so a new code or retry class fails to compile;
+    // here, each generic code really is said generically, by its retry class.
+    for (const code of Object.keys(GENERIC_STOP_CODES)) {
+      expect(OWN_STOP_CODES as readonly string[]).not.toContain(code);
+      const reason = { code, retry: 'transient' } as never;
+      expect(saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 2, reason }))).toEqual({
+        kind: 'partial',
+        committed: 1,
+        total: 2,
+        canContinue: true,
+      });
+      expect(saveOutcome(p({ reason }))).toEqual({ kind: 'not-sent', code, canRetry: true });
+    }
+    // "after-review" goes on only through its own ask, never an unexplained Continue.
+    const review = { code: 'SOMETHING_NEW', retry: 'after-review' } as never;
+    expect(saveOutcome(p({ state: 'PARTIAL', committed: 1, total: 2, reason: review }))).toEqual({
+      kind: 'partial',
+      committed: 1,
+      total: 2,
+      canContinue: false,
+    });
+  });
+
+  it("a damaged record (RECORD_DAMAGED) is said as damaged and never offered again; INVARIANT isn't", () => {
+    const id = `0x${'0f'.repeat(32)}` as const;
+    // checkPlan's refusal, as runSequence rethrows it (sdk-v2 a61b2e8): nothing sent.
+    const damaged = new EfsFault('RECORD_DAMAGED', 'this plan is not the publication it names', {
+      details: { planId: `0x${'aa'.repeat(32)}` },
+      sequence: { sequenceId: id, mayHaveSent: false, sequenceMayHaveSent: false },
+    });
+    expect(thrownOutcome(damaged)).toEqual({
+      kind: 'again',
+      outcome: { kind: 'damaged' },
+      sequenceId: id,
+    });
+    expect(saveMessage({ kind: 'damaged' })).toBe('save.damaged');
+    expect(saveAction({ kind: 'damaged' })).toBeUndefined();
+    expect(en['save.damaged']).toBe("This save's record is damaged. Nothing was sent.");
+    // INVARIANT, details or not, is no longer read as damaged: "not sent" when proven so.
+    const invariant = new EfsFault('INVARIANT', 'unexpected error: boom', {
+      details: { sequenceId: id },
+      sequence: { sequenceId: id, mayHaveSent: false, sequenceMayHaveSent: false },
+    });
+    expect(thrownOutcome(invariant)).toMatchObject({
+      outcome: { kind: 'not-sent', code: 'INVARIANT' },
+    });
+  });
+
   it('every outcome has catalog copy', () => {
     for (const id of [
       ...Object.values(SAVE_MESSAGE),
@@ -504,6 +610,10 @@ describe('saveOutcome', () => {
       'save.heldSameBytes',
       'save.heldSameBytesLocal',
       'save.heldSettled',
+      'save.resplitMore',
+      'save.resplitLater',
+      'save.notNow',
+      'saves.resplitContinue',
     ])
       expect(en).toHaveProperty(id);
   });
