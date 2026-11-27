@@ -440,6 +440,7 @@
   "files.preview.truncated": "⟦Óñļý ţĥé ƀéĝíññíñĝ íš šĥóŵñ. Šáṽé á çóþý ţó ĝéţ áļļ óƒ íţ.··················⟧",
   "files.preview.attempts": "⟦Šóúŕçéš ţŕíéð····⟧",
   "files.preview.sizeValue": "{$size :number}⟦ ƀýţéš··⟧",
+  "files.preview.details": "⟦Ðéţáíļš···⟧",
   "files.preview.meta.size": "⟦Šížé··⟧",
   "files.preview.meta.sha256": "⟦ŠĤÁ-256···⟧",
   "files.preview.meta.layout": "⟦Šţóŕéð áš···⟧",

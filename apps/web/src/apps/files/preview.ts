@@ -167,6 +167,12 @@ export class EfsFilesPreview extends EfsElement {
   #mediaUrl = state<string | undefined>(undefined);
   /** The browser couldn't decode the media it was given (unsupported codec or a broken file). */
   #mediaFailed = state(false);
+  /**
+   * In the narrow layout (a tab of its own, pane-host.ts): the contents come straight after the
+   * verified badge, and the facts move below them, in a closed "Details" (PM, 2026-11-27). The
+   * pane host moves this element between layouts, so each move reconnects it.
+   */
+  #narrow = state(false);
   /** Saves handed off from this pane, and those already refreshed for (once each). */
   #handedOff = new Set<string>();
   /** Open results from the object-kind resolver already shown once (never reused after). */
@@ -186,6 +192,11 @@ export class EfsFilesPreview extends EfsElement {
 
   protected override createRenderRoot() {
     return this;
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.#narrow.set(this.closest('wa-tab-panel') !== null);
   }
 
   /** Starts following the session and the target. Everything stops when `scope` is disposed. */
@@ -928,6 +939,9 @@ export class EfsFilesPreview extends EfsElement {
       case 'read': {
         const { bytes, content, open } = s;
         const verified = bytes.grade === 'VERIFIED' && bytes.bytes ? bytes.bytes : undefined;
+        // Narrow: the badge (the trust signal) stays first, the contents follow it, and the facts
+        // wait in a closed "Details" after them. Wide: the facts stay beside the badge.
+        const narrow = this.#narrow.get();
         return html`<efs-outcome
             compact
             .kind=${'bytes'}
@@ -938,7 +952,7 @@ export class EfsFilesPreview extends EfsElement {
             retryable
             @efs-retry=${retry}
           ></efs-outcome>
-          ${this.#facts(open, t)}
+          ${narrow ? nothing : this.#facts(open, t)}
           ${this.#viewNotices(t)}
           ${verified ? nothing : this.#gatewayOffer(open.file, t)}
           ${
@@ -1054,6 +1068,14 @@ export class EfsFilesPreview extends EfsElement {
                     </ul>
                   </div>`
                   : nothing
+          }
+          ${
+            narrow
+              ? html`<details class="efs-preview-details">
+                  <summary>${t('files.preview.details')}</summary>
+                  ${this.#facts(open, t)}
+                </details>`
+              : nothing
           }`;
       }
     }

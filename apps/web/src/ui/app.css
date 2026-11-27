@@ -146,6 +146,14 @@ efs-pane-host {
   max-inline-size: 100%;
 }
 
+/* The pane tabs (Overview, Entries, Preview) fit side by side at 320px, so none is half-hidden
+   under a scroll button (Overview read "erview", PM 2026-11-27): Web Awesome pads a tab 1.5em a
+   side, 324px for the three against a 272px strip; at 0.75em they take about 252px. Larger text
+   still scrolls the strip, with the active tab kept in view. */
+.efs-pane-tabs wa-tab::part(base) {
+  padding-inline: 0.75em;
+}
+
 /* Web Awesome 3.15 sizes the tab strip's scroll buttons to 1.5em but keeps the inner button's
    default padding, so the end button spilled ~19px past the page edge at 320px. */
 .efs-pane-tabs::part(scroll-button__base) {

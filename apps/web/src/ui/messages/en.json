@@ -440,6 +440,7 @@
   "files.preview.truncated": "Only the beginning is shown. Save a copy to get all of it.",
   "files.preview.attempts": "Sources tried",
   "files.preview.sizeValue": "{$size :number} bytes",
+  "files.preview.details": "Details",
   "files.preview.meta.size": "Size",
   "files.preview.meta.sha256": "SHA-256",
   "files.preview.meta.layout": "Stored as",

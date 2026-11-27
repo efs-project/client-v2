@@ -440,6 +440,7 @@
   "files.preview.truncated": "\u202EOnly the beginning is shown. Save a copy to get all of it.\u202C",
   "files.preview.attempts": "\u202ESources tried\u202C",
   "files.preview.sizeValue": "{$size :number}\u202E bytes\u202C",
+  "files.preview.details": "\u202EDetails\u202C",
   "files.preview.meta.size": "\u202ESize\u202C",
   "files.preview.meta.sha256": "\u202ESHA-256\u202C",
   "files.preview.meta.layout": "\u202EStored as\u202C",

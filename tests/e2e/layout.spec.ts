@@ -81,6 +81,87 @@ test('375 px: a file link opens on its Preview tab; the person can still switch 
   expect(replay.misses).toEqual([]);
 });
 
+/**
+ * Every pane tab's box, against the tab group's (PM, 2026-11-27: at 320 px "Overview" was cut to
+ * "erview" under a scroll button). Fitting, the strip has no scroll buttons, and each tab lies
+ * wholly inside the group.
+ */
+const paneTabs = (page: import('@playwright/test').Page) =>
+  page.evaluate(() => {
+    const group = document.querySelector('efs-pane-host wa-tab-group') as HTMLElement | null;
+    if (!group) return null;
+    const box = group.getBoundingClientRect();
+    const scrollButtons = [...(group.shadowRoot?.querySelectorAll('.scroll-button') ?? [])].filter(
+      (b) => (b as HTMLElement).getBoundingClientRect().width > 0,
+    ).length;
+    const tabs = [...group.querySelectorAll('wa-tab')].map((tab) => {
+      const r = tab.getBoundingClientRect();
+      return {
+        label: tab.textContent?.trim() ?? '',
+        active: tab.hasAttribute('active'),
+        inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+        width: r.width,
+        height: r.height,
+      };
+    });
+    return { scrollButtons, tabs };
+  });
+
+for (const width of [320, 1280] as const) {
+  test(`${width} px: ${
+    width === 320
+      ? 'every pane tab fits in view; a file shows its badge, then its contents, then its facts in a closed Details'
+      : 'the facts stay beside the verified badge, never folded away'
+  }`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 720 });
+    await serveConfig(page);
+    await serveDeployment(page);
+    const replay = await replayRpc(page, ['pin-verified', 'open-inline']);
+    const { ids } = transcript('open-inline');
+    await page.goto(
+      `./#/r/testnet/${link({ kind: 'object', subject: ids.file as `0x${string}` })}`,
+    );
+    await booted(page);
+    const preview = page.locator('efs-files-preview');
+    await expect(preview.locator('.efs-preview-text')).toHaveText('Meeting at 10:00.\n');
+    const badge = preview.locator('efs-outcome').first();
+    const facts = preview.locator('dl.efs-preview-facts');
+    const details = preview.locator('details.efs-preview-details');
+    if (width === 320) {
+      const tabs = await paneTabs(page);
+      expect(tabs?.scrollButtons, 'the three tabs fit: no scroll buttons').toBe(0);
+      expect(tabs?.tabs.map((t) => t.label)).toEqual(['Overview', 'Entries', 'Preview']);
+      for (const tab of tabs?.tabs ?? []) {
+        expect(tab.inside, `${tab.label}${tab.active ? ' (active)' : ''}: wholly inside`).toBe(
+          true,
+        );
+        // The narrower padding keeps each tab's hit area at least 24×24 px (WCAG 2.5.8, rule 7).
+        expect(Math.min(tab.width, tab.height), `${tab.label}: hit area`).toBeGreaterThanOrEqual(
+          24,
+        );
+      }
+      // The badge, then the contents, then the facts, in a closed Details.
+      await expect(details).toHaveCount(1);
+      await expect(details).not.toHaveAttribute('open');
+      await expect(details.locator('summary')).toHaveText('Details');
+      await expect(facts).toBeHidden();
+      const top = async (l: import('@playwright/test').Locator) =>
+        (await l.boundingBox())?.y ?? Number.NaN;
+      const text = preview.locator('.efs-preview-text');
+      expect(await top(badge)).toBeLessThan(await top(text));
+      expect(await top(text)).toBeLessThan(await top(details));
+      await press(details.locator('summary'));
+      await expect(facts).toBeVisible();
+      await expect(facts).toContainText('SHA-256');
+    } else {
+      // Wide: unchanged, the facts beside the badge and nothing folded away.
+      await expect(details).toHaveCount(0);
+      await expect(facts).toBeVisible();
+    }
+    expect(replay.misses).toEqual([]);
+  });
+}
+
 test('narrow panes switch by tab and keep each view mounted', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('./#/files');
