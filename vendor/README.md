@@ -15,4 +15,4 @@ refuses any other bytes.
 packs are byte-reproducible, so compare the sha256 with the SDK dev's own. Then add the new
 `efs-sdk-<version>-<sha7>.tgz`, point both `file:` dependencies at it (`apps/web/package.json`
 and the root `package.json`, which the e2e tests use for `@efs/sdk/testing`), remove the old
-file, run `pnpm install`, and update this table.
+file, run `pnpm install`, and update this table. `pnpm check` holds the table to the files (`tools/checks/vendor-hashes.test.ts`): every tarball here needs a row whose sha256 is its own, every row a tarball, and the lockfile's integrity for each must be that file's sha512.
