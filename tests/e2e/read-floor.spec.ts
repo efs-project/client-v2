@@ -153,9 +153,14 @@ test('an endpoint that falls behind during the refresh after a save leaves it BE
     // What CI run 45830906590 met by chance: the refresh's head read arrives after the lag.
     await chain.control?.lagBefore(chain.broadcasts.at(-1) as string);
     lagged();
-    expect(rpc.held, "the refresh's head read was held (if 0, the SDK's read order changed)").toBe(
-      1,
-    );
+    // Waited for, not read at once: the refresh's head read may reach the route a moment after the
+    // lag is on (CI 45950225395: it started 0.5 ms after this line ran). Either way it is answered
+    // only once the lag is on (holdRefreshHead), which is what this case needs.
+    await expect
+      .poll(() => rpc.held, {
+        message: "the refresh's head read was held (if 0, the SDK's read order changed)",
+      })
+      .toBe(1);
     const outcome = preview(page).locator('efs-outcome');
     await expect(outcome).toContainText(BEHIND, { timeout: 15_000 });
     await expect(outcome.locator('.efs-outcome-code')).toHaveText('UNKNOWN');
