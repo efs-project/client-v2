@@ -93,6 +93,7 @@
   "files.list.indexPartial": "\u202EThe network's index hasn't caught up with this folder yet, so there may be more.\u202C",
   "files.list.coverageUnknown": "\u202EThese are the entries found. The network couldn't confirm there are no others.\u202C",
   "files.list.keepLooking": "\u202EKeep looking\u202C",
+  "files.list.unsavedEdit": "\u202EUnsaved changes\u202C",
   "files.list.hidden": "{$count :number}\u202E hidden by a block in your lens\u202C",
   "files.list.removed": "\u202EYou removed \u202C{$name}\u202E from here.\u202C",
   "files.pending": "\u202ESaving\u202C",

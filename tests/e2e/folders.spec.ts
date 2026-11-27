@@ -111,6 +111,55 @@ test('the bare root becomes the realm root and lists its shared folder; folders 
   }
 });
 
+test('a file with an unsaved edit says "Unsaved changes" in its folder, from the editor\'s own store, until the edit is discarded', async ({
+  page,
+}) => {
+  const chain = await testChain(
+    'client-draft-marker',
+    'notes/todo.txt under the realm root. A guest opens notes/, then todo.txt, and edits it (kept in this tab): its row says Unsaved changes, beside the editor and after going up to the root and back into notes/. Reopened, the edit is back; discarded, the row says nothing.',
+  );
+  try {
+    await withNotes(chain);
+    await open(page, chain, './#/r/testnet/');
+    await press(row(page, 'notes').locator('button.efs-entry-open'));
+    await expect(row(page, 'todo.txt')).toContainText('File');
+    const marker = row(page, 'todo.txt').locator('.efs-entry-draft');
+    await expect(marker).toHaveCount(0);
+    chain.step('notes/: todo.txt, with no mark');
+
+    await press(row(page, 'todo.txt').getByRole('link'));
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('buy milk\n');
+    await press(preview(page).locator('wa-button.efs-edit-start'));
+    await page.locator('textarea.efs-edit-text').fill('buy oat milk\n');
+    // Kept as it is typed (the editor's draft store): the row beside it says so, in words, which
+    // are its accessible name too (never only an icon).
+    await expect(marker).toHaveText('Unsaved changes');
+    await expect(row(page, 'todo.txt')).toContainText('Unsaved changes');
+    chain.step('Edit todo.txt: its row says Unsaved changes');
+
+    // Leave the file (up to the root by the breadcrumb), then back into notes/: the editor
+    // closed, the edit stayed kept, and so did the mark.
+    await press(crumbs(page).first());
+    await expect(row(page, 'notes')).toBeVisible();
+    await expect(page.locator('textarea.efs-edit-text')).toHaveCount(0);
+    await press(row(page, 'notes').locator('button.efs-entry-open'));
+    await expect(marker).toHaveText('Unsaved changes');
+    chain.step('Up to the root, back into notes/: the edit is kept, and its row still says so');
+
+    // Reopened: the edit is back. Discarded (after asking): the mark goes with it.
+    await press(row(page, 'todo.txt').getByRole('link'));
+    await expect(page.locator('textarea.efs-edit-text')).toHaveValue('buy oat milk\n');
+    await press(preview(page).locator('wa-button.efs-edit-cancel'));
+    await press(page.locator('wa-dialog.efs-edit-discard wa-button.efs-edit-discard-yes'));
+    await expect(preview(page).locator('.efs-preview-text')).toHaveText('buy milk\n');
+    await expect(marker).toHaveCount(0);
+    await chain.idle(500);
+    chain.step('Reopen todo.txt: the edit is back; Discard: the row says nothing');
+  } finally {
+    await chain.finish();
+  }
+});
+
 test('a file link opened fresh lists nothing until asked; a folder link survives a reload and is never "not present"', async ({
   page,
 }) => {
